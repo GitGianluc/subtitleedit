@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -2114,7 +2114,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         return true;
     }
 
-    private static List<string> GetResultFileCandidates(string ext, string waveFileName, string videoFileName, string whisperFolder, ConcurrentQueue<string> outputText, string sttTempFolder = "")
+    private static List<string> GetResultFileCandidates(string ext, string waveFileName, string videoFileName, string whisperFolder, ConcurrentQueue<string> outputText, string? sttTempFolder = null)
     {
         var candidates = new List<string>
         {
@@ -2160,7 +2160,48 @@ public partial class SpeechToTextViewModel : ObservableObject
             candidates.Insert(0, pathFromOutput);
         }
 
+        // Purfview XXL announces where it wrote its result ("Subtitles are written to '<dir>'
+        // directory."). When the user's own parameters carry an "--output_dir" (e.g. "-o source"),
+        // SE does not pass its per-run folder, so the result can land somewhere none of the fixed
+        // candidates cover - e.g. next to the user's video (issue #13505). The announced folder is
+        // authoritative, so probe it first; the file is named after the engine's input.
+        var dirFromOutput = TryFindOutputDirInOutput(outputText);
+        if (!string.IsNullOrEmpty(dirFromOutput))
+        {
+            candidates.Insert(0, Path.Combine(dirFromOutput, Path.GetFileNameWithoutExtension(waveFileName) + ext));
+            if (!string.IsNullOrEmpty(videoFileName))
+            {
+                candidates.Insert(0, Path.Combine(dirFromOutput, Path.GetFileNameWithoutExtension(videoFileName) + ext));
+            }
+        }
+
         return candidates;
+    }
+
+    private static string? TryFindOutputDirInOutput(ConcurrentQueue<string> outputText)
+    {
+        const string findText = "Subtitles are written to '";
+        foreach (var line in outputText)
+        {
+            var idx = line.IndexOf(findText, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+            {
+                continue;
+            }
+
+            var start = idx + findText.Length;
+            var end = line.LastIndexOf('\'');
+            if (end > start)
+            {
+                var dir = line.Substring(start, end - start).Trim();
+                if (Directory.Exists(dir))
+                {
+                    return dir;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? TryFindFilePathInOutput(string format, ConcurrentQueue<string> outputText)
@@ -3556,7 +3597,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     private static void AddEngineFolderToLibrarySearchPath(ProcessStartInfo startInfo, string engineFolder)
     {
         var variable = OperatingSystem.IsMacOS() ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH";
-        var existing = startInfo.EnvironmentVariables[variable];
+        var existing = ProcessEnvironmentHelper.GetOrNull(startInfo, variable);
 
         startInfo.EnvironmentVariables[variable] = string.IsNullOrEmpty(existing)
             ? engineFolder
@@ -3670,8 +3711,16 @@ public partial class SpeechToTextViewModel : ObservableObject
             var vadPart = string.Empty;
             // Mega-ASR (crispasr 0.6.10) silently writes a zero-byte SRT unless VAD chunking
             // is enabled — the transcription log says it succeeded but no segments are emitted.
+            // Cohere gets the same treatment because crispasr auto-enables VAD for that backend
+            // on long audio anyway; passing the bundled Silero model keeps it from downloading
+            // its own copy into ~/.cache/crispasr mid-transcription.
+            //
+            // --chunk-seconds/-ck in the user's parameters means "no VAD, use fixed chunks" -
+            // that is crispasr's own documented way to switch its auto-VAD back off, and it is
+            // the only way to switch VAD off at all (--vad is a plain flag with no --no-vad).
+            // So it has to suppress our own --vad too, or the user has no opt-out (#13849).
             if (crispAsrEngine is CrispAsrCohere or CrispAsrMega
-                && !Regex.IsMatch(crispArgs ?? string.Empty, @"(^|\s)(--vad|-vm|--vad-model)\b"))
+                && !Regex.IsMatch(crispArgs ?? string.Empty, @"(^|\s)(--vad|-vm|--vad-model|--chunk-seconds|-ck)\b"))
             {
                 var crispFolder = crispAsrEngine.GetAndCreateWhisperFolder();
                 var vadFiles = Directory.Exists(crispFolder)
@@ -3816,7 +3865,7 @@ public partial class SpeechToTextViewModel : ObservableObject
             }
         }
 
-        if (OperatingSystem.IsWindows() && process.StartInfo.EnvironmentVariables["Path"] != null)
+        if (OperatingSystem.IsWindows() && ProcessEnvironmentHelper.GetOrNull(process.StartInfo, "Path") != null)
         {
             if (!string.IsNullOrEmpty(Se.Settings.General.FfmpegPath))
             {

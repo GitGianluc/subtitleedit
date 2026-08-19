@@ -199,6 +199,7 @@ public class LanguageSettingsShortcuts
     public string ChooseSubtitleFormat { get; set; }
     public string TrimWhitespaceSelectedLines { get; set; }
     public string WaveformInsertNewSelection { get; set; }
+    public string WaveformNewSelectionPasteFromClipboard { get; set; }
     public string WaveformHorizontalZoomInCommand { get; set; }
     public string WaveformHorizontalZoomOutCommand { get; set; }
     public string WaveformVerticalZoomInCommand { get; set; }
@@ -220,6 +221,7 @@ public class LanguageSettingsShortcuts
     public string SortByActor { get; set; }
     public string SortByStyle { get; set; }
     public string VideoToggleBrightness { get; set; }
+    public string VideoToggleContrast { get; set; }
     public string DuplicatesFound { get; set; }
     public string CopyTextToClipboard { get; set; }
     public string CopyTextFromOriginalToClipboard { get; set; }
@@ -336,7 +338,7 @@ public class LanguageSettingsShortcuts
         GoToNextBookmark = "Go to next bookmark";
         GoToNextEmptyLine = "Go to next empty line";
         ToggleWaveformToolbar = "Toggle waveform toolbar";
-        ToggleSubtitleGridFormatting = "Toggle grid formatting (show formatting/show tags/no formatting)";
+        ToggleSubtitleGridFormatting = "Toggle grid formatting (show formatting/show tags/no formatting/hide tags)";
         WaveformSetStartAndSetEndOfPreviousMinusGap = "Set start and set end of previous minus gap";
         WaveformSetEndAndStartOfNextAfterGap = "Set end and start of next plus gap";
         WaveformSetEndAndStartOfNextAfterGapAndGoToNext = "Set end and start of next plus gap and go to next";
@@ -458,6 +460,7 @@ public class LanguageSettingsShortcuts
         ChooseSubtitleFormat = "Choose subtitle format";
         TrimWhitespaceSelectedLines = "Trim whitespace (selected lines)";
         WaveformInsertNewSelection = "Waveform insert new selection";
+        WaveformNewSelectionPasteFromClipboard = "Waveform paste clipboard text to new selection";
         WaveformHorizontalZoomInCommand = "Waveform horizontal zoom in";
         WaveformHorizontalZoomOutCommand = "Waveform horizontal zoom out";
         WaveformVerticalZoomInCommand = "Waveform vertical zoom in";
@@ -479,6 +482,7 @@ public class LanguageSettingsShortcuts
         SortByActor = "Sort by actor";
         SortByStyle = "Sort by style";
         VideoToggleBrightness = "Video: toggle brightness (mpv only)";
+        VideoToggleContrast = "Video: toggle contrast (mpv only)";
         DuplicatesFound = "The following duplicate shortcuts were found:";
         CopyTextToClipboard = "Copy text to clipboard (selected lines)";
         CopyTextFromOriginalToClipboard = "Copy text from original to clipboard (selected lines)";

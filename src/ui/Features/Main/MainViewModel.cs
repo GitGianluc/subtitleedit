@@ -1,4 +1,4 @@
-using Nikse.SubtitleEdit.UiLogic.Export;
+﻿using Nikse.SubtitleEdit.UiLogic.Export;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -616,7 +616,8 @@ public partial class MainViewModel :
     // The waveform position that was right-clicked when the waveform context menu opened -
     // used to anchor "Insert subtitle file at video position..." at the clicked spot.
     private double? _waveformContextMenuSeconds;
-    private const double PlayheadMaxCorrectionFraction = 0.2; // cap catch-up to ~1.2x speed (vs the forward step)
+    private const double PlayheadMaxCorrectionFraction = 0.2; // cap catch-up to ~1.2x speed (vs real elapsed time, so starved ticks still repay their full share)
+    private const double PlayheadLagSnapSeconds = 0.15; // behind mpv's live clock by this much = audibly late -> snap forward instead of crawling
     private const double PlayheadMaxForwardStepSeconds = 0.05; // cap one tick's advance so a starved tick can't lurch
     private const double PlayheadFreezeHoldSeconds = 0.12; // if mpv's clock hasn't moved this long, it's frozen: hold
     private long _playheadLastRawChangeTs; // when mpv's reported position last changed
@@ -7063,16 +7064,37 @@ public partial class MainViewModel :
         // Same filter as GetUpdateSubtitle() below, so index N of the reviewed subtitle is line N
         // here - that mapping is what lets the review window play the line of a suggestion.
         var reviewedLines = Subtitles.Where(s => !s.IsReferenceOnly).ToList();
-        var viewModel = await ShowDialogAsync<AiReviewWindow, AiReviewViewModel>(vm =>
+        // Apply/Ok: each Apply pushes the checked fixes into the grid and the review window stays
+        // open with the rest of the suggestions, so a review that took minutes is not spent on one
+        // batch (issue #13807); Ok does the same and closes. AI review only rewrites text, so the
+        // line count never changes.
+        void ApplyToGrid(Subtitle applied)
         {
-            vm.Initialize(GetUpdateSubtitle(), SelectedSubtitleFormat, MakeReviewLinePlayer(reviewedLines), StopReviewLinePlayback);
-        });
+            // Count the lines this pass actually changed - the status used to report the subtitle's
+            // whole line count, which read as "fixed 1713 lines" for a two-line fix.
+            var changed = 0;
+            for (var i = 0; i < applied.Paragraphs.Count && i < reviewedLines.Count; i++)
+            {
+                if (reviewedLines[i].Text != applied.Paragraphs[i].Text)
+                {
+                    changed++;
+                }
+            }
 
-        if (viewModel.OkPressed)
-        {
-            ApplyFixedSubtitle(viewModel.FixedSubtitle, idx, SelectedSubtitleFormat);
-            ShowStatus(string.Format(Se.Language.Main.FixedXLines, viewModel.FixedSubtitle.Paragraphs.Count));
+            ApplyFixedSubtitle(applied, idx, SelectedSubtitleFormat);
+            ShowStatus(string.Format(Se.Language.Main.FixedXLines, changed));
+
+            // Re-fill the same list instance the play hook closed over: with reference-only rows in
+            // the grid, ApplyFixedSubtitle rebuilds it and the rows captured before are detached.
+            var current = Subtitles.Where(s => !s.IsReferenceOnly).ToList();
+            reviewedLines.Clear();
+            reviewedLines.AddRange(current);
         }
+
+        await ShowDialogAsync<AiReviewWindow, AiReviewViewModel>(vm =>
+        {
+            vm.Initialize(GetUpdateSubtitle(), SelectedSubtitleFormat, MakeReviewLinePlayer(reviewedLines), StopReviewLinePlayback, ApplyToGrid);
+        });
     }
 
     [RelayCommand]
@@ -11052,28 +11074,29 @@ public partial class MainViewModel :
             sub.Paragraphs.Add(line.ToParagraph(SelectedSubtitleFormat));
         }
 
-        var result = await ShowDialogAsync<AiReviewWindow, AiReviewViewModel>(vm =>
-            vm.Initialize(sub, SelectedSubtitleFormat, MakeReviewLinePlayer(ordered), StopReviewLinePlayback));
-        if (!result.OkPressed)
+        // Apply/Ok in passes, like the whole-file path (issue #13807): AI review only rewrites text,
+        // so the fixed subtitle stays 1:1 with the block sent in and every pass can be written
+        // straight back.
+        void ApplyToSelectedLines(Subtitle applied)
         {
-            _shortcutManager.ClearKeys();
-            return;
-        }
-
-        // AI review only rewrites text, so the fixed subtitle is 1:1 with the block sent in.
-        var fixedCount = 0;
-        for (var i = 0; i < result.FixedSubtitle.Paragraphs.Count && i < ordered.Count; i++)
-        {
-            var text = result.FixedSubtitle.Paragraphs[i].Text;
-            if (ordered[i].Text != text)
+            var fixedCount = 0;
+            for (var i = 0; i < applied.Paragraphs.Count && i < ordered.Count; i++)
             {
-                ordered[i].Text = text;
-                fixedCount++;
+                var text = applied.Paragraphs[i].Text;
+                if (ordered[i].Text != text)
+                {
+                    ordered[i].Text = text;
+                    fixedCount++;
+                }
             }
+
+            _updateAudioVisualizer = true;
+            ShowStatus(string.Format(Se.Language.Main.FixedXLines, fixedCount));
         }
 
-        _updateAudioVisualizer = true;
-        ShowStatus(string.Format(Se.Language.Main.FixedXLines, fixedCount));
+        await ShowDialogAsync<AiReviewWindow, AiReviewViewModel>(vm =>
+            vm.Initialize(sub, SelectedSubtitleFormat, MakeReviewLinePlayer(ordered), StopReviewLinePlayback, ApplyToSelectedLines));
+        _shortcutManager.ClearKeys();
     }
 
     [RelayCommand]
@@ -12195,9 +12218,10 @@ public partial class MainViewModel :
     }
 
     // Cycle the grid's Text/Original text formatting mode (issue #12321): "show formatting"
-    // (tags hidden, styling rendered) -> "show tags" -> "no formatting". Handy for heavy ASS
-    // karaoke tags where the full tag text makes the grid hard to read. The grid cell
-    // converter reads the setting live, so re-notifying Text/OriginalText re-renders the rows.
+    // (tags hidden, styling rendered) -> "show tags" -> "no formatting" -> "hide tags"
+    // (tags stripped, plain text - issue #13824). Handy for heavy ASS karaoke tags where the
+    // full tag text makes the grid hard to read. The grid cell converter reads the setting
+    // live, so re-notifying Text/OriginalText re-renders the rows.
     [RelayCommand]
     private void ToggleSubtitleGridFormatting()
     {
@@ -12212,6 +12236,11 @@ public partial class MainViewModel :
         {
             newMode = (int)SubtitleGridFormattingTypes.NoFormatting;
             newModeName = Se.Language.Options.Settings.SubtitleGridFormattingNone;
+        }
+        else if (Se.Settings.Appearance.SubtitleGridFormattingType == (int)SubtitleGridFormattingTypes.NoFormatting)
+        {
+            newMode = (int)SubtitleGridFormattingTypes.HideTags;
+            newModeName = Se.Language.Options.Settings.SubtitleGridFormattingHideTags;
         }
         else
         {
@@ -14071,16 +14100,21 @@ public partial class MainViewModel :
                 // "Apply" applies the replacements live without closing, so several rounds can be run (#12029).
                 vm.OnApply = (fixedSubtitle, count) =>
                 {
+                    // Replacements are 1:1 with the lines they came from, so stay on the line the
+                    // user was on - jumping to the top on every Apply lost their place, and Apply
+                    // is meant to be used several times in a row (issue #13822).
+                    var selectedIndex = SelectedSubtitleIndex ?? 0;
                     SetSubtitles(fixedSubtitle);
-                    SelectAndScrollToRow(0);
+                    SelectAndScrollToRow(Math.Min(selectedIndex, Subtitles.Count - 1));
                     ShowStatus(string.Format(Se.Language.Main.ReplacedXOccurrences, count));
                 };
             });
 
         if (result.OkPressed)
         {
+            var selectedIndex = SelectedSubtitleIndex ?? 0;
             SetSubtitles(result.FixedSubtitle);
-            SelectAndScrollToRow(0);
+            SelectAndScrollToRow(Math.Min(selectedIndex, Subtitles.Count - 1));
             ShowStatus(string.Format(Se.Language.Main.ReplacedXOccurrences, result.TotalReplaced));
         }
     }
@@ -14932,13 +14966,20 @@ public partial class MainViewModel :
     /// </summary>
     private int RemoveBlankLinesFromGrid()
     {
-        var blankLines = Subtitles.Where(s => s.Text.IsOnlyControlCharactersOrWhiteSpace()).ToList();
-        var count = blankLines.Count;
+        var blank = Subtitles.Select(s => s.Text.IsOnlyControlCharactersOrWhiteSpace()).ToList();
+        var count = blank.Count(b => b);
         if (count == 0)
         {
             return 0;
         }
 
+        // Decide where the selection lands before removing anything: an AlwaysSelected grid picks
+        // a replacement row by itself as rows disappear, and the view follows it to the end of the
+        // list (issue #13822).
+        var survivorIndex = GridSelectionAnchor.PickSurvivorIndex(blank, SelectedSubtitleIndex ?? 0);
+        var survivor = survivorIndex >= 0 ? Subtitles[survivorIndex] : null;
+
+        var blankLines = Subtitles.Where(s => s.Text.IsOnlyControlCharactersOrWhiteSpace()).ToList();
         foreach (var line in blankLines)
         {
             Subtitles.Remove(line);
@@ -14946,6 +14987,11 @@ public partial class MainViewModel :
 
         Renumber();
         _updateAudioVisualizer = true;
+
+        if (survivor != null)
+        {
+            SelectAndScrollToRow(Subtitles.IndexOf(survivor));
+        }
 
         return count;
     }
@@ -15135,6 +15181,8 @@ public partial class MainViewModel :
             (nameof(VideoOneSecondForwardCommand),  VideoOneSecondForwardCommand),
             (nameof(VideoOneFrameBackCommand),      VideoOneFrameBackCommand),
             (nameof(VideoOneFrameForwardCommand),   VideoOneFrameForwardCommand),
+            (nameof(VideoOneFrameBackWithPlayCommand), VideoOneFrameBackWithPlayCommand),
+            (nameof(VideoOneFrameForwardWithPlayCommand), VideoOneFrameForwardWithPlayCommand),
             (nameof(WaveformVideoSeekBackCommand),  WaveformVideoSeekBackCommand),
             (nameof(WaveformVideoSeekForwardCommand), WaveformVideoSeekForwardCommand),
             (nameof(VideoMoveCustom1BackCommand),   VideoMoveCustom1BackCommand),
@@ -15150,6 +15198,7 @@ public partial class MainViewModel :
             (nameof(TogglePlayPauseCommand),        TogglePlayPauseCommand),
             (nameof(TogglePlayPause2Command),       TogglePlayPause2Command),
             (nameof(VideoToggleBrightnessCommand),  VideoToggleBrightnessCommand),
+            (nameof(VideoToggleContrastCommand),    VideoToggleContrastCommand),
             (nameof(ToggleSubtitlesOnVideoPlayerCommand), ToggleSubtitlesOnVideoPlayerCommand),
         };
 
@@ -16911,6 +16960,19 @@ public partial class MainViewModel :
     }
 
     [RelayCommand]
+    private void VideoToggleContrast()
+    {
+        var vp = GetVideoPlayerControl();
+        if (vp?.VideoPlayer is not LibMpvDynamicPlayer mpv)
+        {
+            return;
+        }
+
+        var value = mpv.ToggleContrast();
+        ShowStatus(string.Format(Se.Language.Main.VideoContrastSetTo, value));
+    }
+
+    [RelayCommand]
     private void VideoOneFrameBack()
     {
         if (TryStepVideoFrameSnapped(forward: false))
@@ -16958,6 +17020,47 @@ public partial class MainViewModel :
         }
 
         MoveVideoPositionMs(40);
+    }
+
+    [RelayCommand]
+    private void VideoOneFrameBackWithPlay()
+    {
+        VideoOneFrameWithPlay(forward: false);
+    }
+
+    [RelayCommand]
+    private void VideoOneFrameForwardWithPlay()
+    {
+        VideoOneFrameWithPlay(forward: true);
+    }
+
+    /// <summary>
+    /// SE4's "one frame back/forward with play": step one frame and play just that frame, so
+    /// the step gives audio/visual feedback. Runs through the play-selection stop, whose
+    /// park-one-frame-before-the-end rule lands the playhead exactly on the stepped-to frame.
+    /// </summary>
+    private void VideoOneFrameWithPlay(bool forward)
+    {
+        var vp = GetVideoPlayerControl();
+        if (vp == null || string.IsNullOrEmpty(_videoFileName))
+        {
+            return;
+        }
+
+        var fps = Se.Settings.General.CurrentFrameRate;
+        var frameSeconds = fps >= 10 ? 1.0 / fps : 0.04;
+        var target = Math.Max(0, vp.Position + (forward ? frameSeconds : -frameSeconds));
+
+        vp.VideoPlayer.Pause();
+        vp.Position = target;
+        PinPlayheadTo(target);
+        var frameWindow = new SubtitleLineViewModel
+        {
+            StartTime = TimeSpan.FromSeconds(target),
+            EndTime = TimeSpan.FromSeconds(target + frameSeconds),
+        };
+        _playSelectionItem = new PlaySelectionItem([frameWindow], frameWindow.EndTime, false);
+        PlayVideo(vp);
     }
 
     /// <summary>
@@ -22262,75 +22365,137 @@ public partial class MainViewModel :
 
     private void ExtractShotChanges(string videoFileName, int audioTrackNumber)
     {
-        if (Se.Settings.Waveform.ShotChangesAutoGenerate)
-        {
-            WaveformGeneratingText = Se.Language.Main.ExtractingShotChanges;
-
-            var threshold = Se.Settings.Waveform.ShotChangesSensitivity.ToString(CultureInfo.InvariantCulture);
-            var argumentsFormat = Se.Settings.Video.ShowChangesFFmpegArguments;
-            var arguments = string.Format(argumentsFormat, videoFileName, threshold);
-
-            var ffmpegProcess = FfmpegGenerator.GetProcess(arguments, OutputHandler);
-#pragma warning disable CA1416 // Validate platform compatibility
-            ffmpegProcess.Start();
-#pragma warning restore CA1416 // Validate platform compatibility
-            ffmpegProcess.BeginOutputReadLine();
-            ffmpegProcess.BeginErrorReadLine();
-
-            _ = Task.Run(async () =>
-            {
-                while (!ffmpegProcess.HasExited)
-                {
-                    if (_videoOpenTokenSource.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            ffmpegProcess.Kill(true);
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
-
-                        break;
-                    }
-
-                    // Deliberately NOT the cancellation token: cancel almost always lands
-                    // while this delay is pending, and a token here would throw us out of
-                    // the loop before the Kill above ever runs, orphaning ffmpeg.
-                    await Task.Delay(100, CancellationToken.None).ConfigureAwait(false);
-                }
-
-                if (!_videoOpenTokenSource.IsCancellationRequested && AudioVisualizer != null && AudioVisualizer.ShotChanges != null)
-                {
-                    ShotChangesHelper.SaveShotChanges(videoFileName, AudioVisualizer.ShotChanges, audioTrackNumber);
-                    Dispatcher.UIThread.Post(UpdateShotChangesListMenuItem);
-                }
-            });
-        }
-    }
-
-    private Lock _addShotChangeLock = new Lock();
-
-    private void OutputHandler(object sendingProcess, DataReceivedEventArgs outLine)
-    {
-        if (string.IsNullOrWhiteSpace(outLine.Data))
+        if (!Se.Settings.Waveform.ShotChangesAutoGenerate)
         {
             return;
         }
 
-        var match = ShotChangesViewModel.TimeRegex.Match(outLine.Data);
-        if (match.Success)
+        WaveformGeneratingText = Se.Language.Main.ExtractingShotChanges;
+
+        var threshold = Se.Settings.Waveform.ShotChangesSensitivity.ToString(CultureInfo.InvariantCulture);
+        var argumentsFormat = Se.Settings.Video.ShowChangesFFmpegArguments;
+        var arguments = string.Format(argumentsFormat, videoFileName, threshold);
+
+        // Filled on ffmpeg's stderr callback thread; the UI only ever gets snapshots of it
+        // (see PublishShotChanges). The waveform render loop binary-searches ShotChanges at
+        // ~60 fps, so handing it a list a background thread keeps Add'ing to could tear a
+        // render mid-grow. Per run: a late callback from a superseded extraction lands in
+        // its own dead list, not in the next video's.
+        var collected = new List<double>();
+        DataReceivedEventHandler onFfmpegOutput = (_, outLine) =>
         {
-            var timeCode = match.Value.Replace("pts_time:", string.Empty).Replace(",", ".").Replace("٫", ".").Replace("⠨", ".");
-            if (double.TryParse(timeCode, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) && seconds > 0.2)
+            if (string.IsNullOrWhiteSpace(outLine.Data))
             {
-                lock (_addShotChangeLock)
+                return;
+            }
+
+            var match = ShotChangesViewModel.TimeRegex.Match(outLine.Data);
+            if (match.Success)
+            {
+                var timeCode = match.Value.Replace("pts_time:", string.Empty).Replace(",", ".").Replace("٫", ".").Replace("⠨", ".");
+                if (double.TryParse(timeCode, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) && seconds > 0.2)
                 {
-                    AudioVisualizer?.ShotChanges.Add(seconds);
+                    lock (collected)
+                    {
+                        collected.Add(seconds);
+                    }
                 }
             }
+        };
+
+        var ffmpegProcess = FfmpegGenerator.GetProcess(arguments, onFfmpegOutput);
+#pragma warning disable CA1416 // Validate platform compatibility
+        ffmpegProcess.Start();
+        try
+        {
+            // Scene detection decodes every frame of the whole video with all cores. At
+            // normal priority that competes with the UI thread, the waveform render and
+            // mpv for minutes on a long file - this auto-extraction runs silently right
+            // after a video opens, exactly when the user starts editing. Below normal
+            // still gets the idle cores but yields the moment the user does anything.
+            ffmpegProcess.PriorityClass = ProcessPriorityClass.BelowNormal;
         }
+        catch
+        {
+            // Best effort - the process may already have exited.
+        }
+#pragma warning restore CA1416 // Validate platform compatibility
+        ffmpegProcess.BeginOutputReadLine();
+        ffmpegProcess.BeginErrorReadLine();
+
+        _ = Task.Run(async () =>
+        {
+            var publishedCount = 0;
+            while (!ffmpegProcess.HasExited)
+            {
+                if (_videoOpenTokenSource.IsCancellationRequested)
+                {
+                    try
+                    {
+                        ffmpegProcess.Kill(true);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    break;
+                }
+
+                publishedCount = PublishShotChanges(collected, publishedCount);
+
+                // Deliberately NOT the cancellation token: cancel almost always lands
+                // while this delay is pending, and a token here would throw us out of
+                // the loop before the Kill above ever runs, orphaning ffmpeg.
+                await Task.Delay(100, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            if (!_videoOpenTokenSource.IsCancellationRequested)
+            {
+                PublishShotChanges(collected, publishedCount);
+
+                List<double> finalList;
+                lock (collected)
+                {
+                    finalList = new List<double>(collected);
+                }
+
+                ShotChangesHelper.SaveShotChanges(videoFileName, finalList, audioTrackNumber);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Hand the shot changes collected so far to the waveform as a fresh copy, so the marks
+    /// appear while the extraction is still running without the UI ever reading the list the
+    /// callback thread writes to. No-op (returns <paramref name="publishedCount"/>) when
+    /// nothing new arrived since the last publish.
+    /// </summary>
+    private int PublishShotChanges(List<double> collected, int publishedCount)
+    {
+        List<double> snapshot;
+        lock (collected)
+        {
+            if (collected.Count == publishedCount)
+            {
+                return publishedCount;
+            }
+
+            snapshot = new List<double>(collected);
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (AudioVisualizer != null)
+            {
+                AudioVisualizer.ShotChanges = snapshot;
+                _updateAudioVisualizer = true;
+            }
+
+            UpdateShotChangesListMenuItem();
+        });
+
+        return snapshot.Count;
     }
 
     private static void DeleteTempFile(string tempWaveFileName)
@@ -25454,7 +25619,15 @@ public partial class MainViewModel :
             {
                 elapsedSeconds = 0; // clock glitch
             }
-            else if (elapsedSeconds > PlayheadMaxForwardStepSeconds)
+
+            // Real time since the last tick, before the per-tick step cap below. The catch-up cap is
+            // sized against this: a starved tick (late timer under UI load) advances the cursor by at
+            // most the capped step, so it *creates* lag debt proportional to how late it was - and if
+            // repayment were sized against the capped step too, the slower the ticks, the less debt
+            // could be repaid per second, exactly when the most debt is being created. That standing
+            // lag is heard as the audio running ahead of the cursor (discussion #10824).
+            var actualElapsedSeconds = elapsedSeconds;
+            if (elapsedSeconds > PlayheadMaxForwardStepSeconds)
             {
                 // The cursor timer was starved (e.g. the mpv decode burst right after pressing play) or
                 // the app was suspended. Advancing by the whole missed span would make the cursor visibly
@@ -25517,13 +25690,26 @@ public partial class MainViewModel :
             {
                 _playheadEstimateSeconds = rawPosition;
             }
-            else if (rawChanged && drift > 0)
+            else if (drift > PlayheadLagSnapSeconds && rawFrozenSeconds < PlayheadFreezeHoldSeconds)
+            {
+                // The cursor has fallen audibly behind mpv's live clock - lag debt from starved ticks
+                // (late timer under UI load) accumulates faster than the gentle crawl below can repay
+                // it, and waiting for the 0.5 s resync threshold leaves the audio running ahead of the
+                // cursor for seconds at a time (discussion #10824). mpv's clock is advancing, so it IS
+                // the truth: a one-off forward hop is far less objectionable than a sustained audible
+                // desync. Gated on a live raw clock so a paused-seek re-prime freeze can't trigger it.
+                _playheadEstimateSeconds = rawPosition;
+            }
+            else if (drift > 0)
             {
                 // Only ever nudge forward to close a lag (e.g. after a starved tick); never pull the
                 // cursor backward, which is what showed up as the sub-1x "slow" after the rush. Cap the
-                // per-tick correction so the catch-up tops out around ~1.2x.
+                // per-tick correction against real elapsed time so the catch-up tops out around ~1.2x
+                // wall clock even when the timer is running slow - sizing it against the capped step
+                // (or only correcting on ticks where raw moved) throttled repayment to ~1.05x exactly
+                // when starved ticks were creating the most debt.
                 var correction = drift * PlayheadDriftCorrection;
-                var maxCorrection = elapsedSeconds * speed * PlayheadMaxCorrectionFraction;
+                var maxCorrection = actualElapsedSeconds * speed * PlayheadMaxCorrectionFraction;
                 if (correction > maxCorrection)
                 {
                     correction = maxCorrection;
