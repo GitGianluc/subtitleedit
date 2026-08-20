@@ -137,6 +137,8 @@ public partial class AutoTranslateViewModel : ObservableObject
         _windowService = windowService;
         _folderHelper = folderHelper;
 
+        TranslateUiUpdates = new CoalescedUiUpdateQueue(SelectAndScrollToRow, ApplyTranslateProgress);
+
         ApiKeyText = string.Empty;
         ApiUrlText = string.Empty;
         ModelText = string.Empty;
@@ -1162,7 +1164,8 @@ public partial class AutoTranslateViewModel : ObservableObject
                 ? Math.Clamp(Se.Settings.AutoTranslate.LlamaCppAdvanced.ContextSize, 2048, 262144)
                 : LlamaCppServerManager.DefaultContextSize;
             var extraArguments = isAdvanced ? Se.Settings.AutoTranslate.LlamaCppAdvanced.ServerArguments : null;
-            await LlamaCppServerManager.EnsureServerRunningAsync(model, _cancellationTokenSource.Token, contextSize, extraArguments);
+            var extraArgumentsOnly = isAdvanced && Se.Settings.AutoTranslate.LlamaCppAdvanced.ServerArgumentsOnly;
+            await LlamaCppServerManager.EnsureServerRunningAsync(model, _cancellationTokenSource.Token, contextSize, extraArguments, extraArgumentsOnly);
         }
         catch (Exception ex)
         {
@@ -1529,14 +1532,7 @@ public partial class AutoTranslateViewModel : ObservableObject
                     index += translatedCount;
                     _translationProgressIndex = index;
 
-                    var advancedProgressIndex = index;
-                    Dispatcher.UIThread.Invoke(() =>
-                    {
-                        ProgressValue = (double)advancedProgressIndex * 100 / Rows.Count;
-                        ProgressText = $"{(int)ProgressValue} %";
-                        HasTranslatedSomething = true;
-                        SelectAndScrollToRow(advancedProgressIndex - 1);
-                    });
+                    EnqueueTranslateProgress(index);
                 }
 
                 return; // the finally block below reports completion
@@ -1567,16 +1563,9 @@ public partial class AutoTranslateViewModel : ObservableObject
                     noErrorCount++;
                     index += linesMergedAndTranslated;
 
-                    var index1 = index;
                     if (!_onlyCurrentLine)
                     {
-                        Dispatcher.UIThread.Invoke(() =>
-                        {
-                            ProgressValue = (double)index1 * 100 / Rows.Count;
-                            ProgressText = $"{(int)ProgressValue} %";
-                            HasTranslatedSomething = true;
-                            SelectAndScrollToRow(index1 - 1);
-                        });
+                        EnqueueTranslateProgress(index);
                     }
                     else
                     {
@@ -1624,14 +1613,7 @@ public partial class AutoTranslateViewModel : ObservableObject
                 {
                     index += translateCount;
                     noProgressCount = 0;
-                    var progressIndex = index;
-                    Dispatcher.UIThread.Invoke(() =>
-                    {
-                        ProgressValue = (double)progressIndex * 100 / Rows.Count;
-                        ProgressText = $"{(int)ProgressValue} %";
-                        HasTranslatedSomething = true;
-                        SelectAndScrollToRow(progressIndex - 1);
-                    });
+                    EnqueueTranslateProgress(index);
 
                     if (_onlyCurrentLine)
                     {
@@ -1716,6 +1698,10 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             Dispatcher.UIThread.Invoke(() =>
             {
+                // Apply whatever is still queued first, so the final progress/selection below
+                // is the last word instead of being overridden by a stale queued update.
+                TranslateUiUpdates.Flush();
+
                 IsTranslateEnabled = true;
                 IsProgressEnabled = false;
 
@@ -1768,6 +1754,30 @@ public partial class AutoTranslateViewModel : ObservableObject
             BaiduTranslate => settings.BaiduUrl,
             _ => string.Empty,
         };
+    }
+
+    /// <summary>
+    /// Coalesced per-batch UI feedback during translation (#13885, the pattern OCR uses).
+    /// Only the pure feedback - progress and the follow-along selection - is queued. The row
+    /// TranslatedText writes stay immediate on purpose: the advanced engines read them back for
+    /// the next batch's rolling context (AdvancedTranslatorBase.CollectHistory) and
+    /// MergeAndSplitHelper reads existing translations when re-applying formatting, so a
+    /// deferred write would silently degrade the translation itself.
+    /// </summary>
+    private CoalescedUiUpdateQueue TranslateUiUpdates { get; }
+
+    private void ApplyTranslateProgress(double value, string text)
+    {
+        ProgressValue = value;
+        ProgressText = text;
+    }
+
+    private void EnqueueTranslateProgress(int translatedIndex)
+    {
+        var progressValue = (double)translatedIndex * 100 / Rows.Count;
+        TranslateUiUpdates.EnqueueProgress(progressValue, $"{(int)progressValue} %");
+        TranslateUiUpdates.EnqueueUpdate(() => HasTranslatedSomething = true);
+        TranslateUiUpdates.EnqueueSelect(translatedIndex - 1);
     }
 
     private void SelectAndScrollToRow(int index)

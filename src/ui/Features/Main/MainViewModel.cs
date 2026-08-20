@@ -88,6 +88,7 @@ using Nikse.SubtitleEdit.Features.Shared.GetAudioClips;
 using Nikse.SubtitleEdit.Features.Shared.GoToLineNumber;
 using Nikse.SubtitleEdit.Features.Shared.MediaInfoView;
 using Nikse.SubtitleEdit.Features.Shared.PickAlignment;
+using Nikse.SubtitleEdit.Features.Shared.PickTeletextAlignment;
 using Nikse.SubtitleEdit.Features.Shared.PickFontName;
 using Nikse.SubtitleEdit.Features.Shared.PickLayer;
 using Nikse.SubtitleEdit.Features.Shared.PickLayerFilter;
@@ -304,6 +305,9 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _showColumnEndTime;
     [ObservableProperty] private bool _showColumnGap;
     [ObservableProperty] private bool _showColumnDuration;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTeletextColumnVisible))]
+    private bool _showColumnTeletext;
     [ObservableProperty] private bool _showColumnActor;
     [ObservableProperty] private bool _showColumnStyle;
     [ObservableProperty] private bool _showColumnCps;
@@ -351,6 +355,26 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _isFormatWebVtt;
 
     /// <summary>
+    /// True for EBU STL. Teletext line/alignment editing only makes sense there, so the
+    /// teletext dialog, the "TT" column and the alignment preview are all gated on this.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTeletextColumnVisible))]
+    [NotifyPropertyChangedFor(nameof(IsTeletextPreviewActive))]
+    private bool _isFormatEbu;
+
+    /// <summary>
+    /// The "TT" column and the alignment preview only mean anything for EBU STL, but the user's
+    /// choice has to survive switching to another format and back - unlike ShowColumnLayer, which
+    /// is cleared outright, these gate the view while <see cref="ShowColumnTeletext"/> and
+    /// <see cref="TeletextAlignmentPreview"/> keep the remembered setting.
+    /// </summary>
+    public bool IsTeletextColumnVisible => ShowColumnTeletext && IsFormatEbu;
+
+    /// <inheritdoc cref="IsTeletextColumnVisible"/>
+    public bool IsTeletextPreviewActive => TeletextAlignmentPreview && IsFormatEbu;
+
+    /// <summary>
     /// Header of the grid's actor/voice toggle in the column context menu - the column itself is
     /// "Actor" for most formats and "Voice" for WebVTT, and the toggle shows the two columns.
     /// </summary>
@@ -374,6 +398,9 @@ public partial class MainViewModel :
     [ObservableProperty] private ObservableCollection<string> _videoSeekAmounts;
     [ObservableProperty] private string _selectedVideoSeekAmount;
     [ObservableProperty] private bool _showWaveformDisplayModeSeparator;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTeletextPreviewActive))]
+    private bool _teletextAlignmentPreview;
     [ObservableProperty] private bool _showWaveformOnlyWaveform;
     [ObservableProperty] private bool _showWaveformOnlySpectrogram;
     [ObservableProperty] private bool _showWaveformWaveformAndSpectrogram;
@@ -874,6 +901,8 @@ public partial class MainViewModel :
         ShowColumnStartTime = Se.Settings.General.ShowColumnStartTime;
         ShowColumnEndTime = Se.Settings.General.ShowColumnEndTime;
         ShowColumnDuration = Se.Settings.General.ShowColumnDuration;
+        ShowColumnTeletext = Se.Settings.General.ShowColumnTeletext;
+        TeletextAlignmentPreview = Se.Settings.General.TeletextAlignmentPreview;
         ShowColumnGap = Se.Settings.General.ShowColumnGap;
         ShowColumnActor = Se.Settings.General.ShowColumnActor;
         ShowColumnStyle = Se.Settings.General.ShowColumnStyle;
@@ -1121,14 +1150,21 @@ public partial class MainViewModel :
                 {
                     try
                     {
-                        if (File.Exists(libMpvFileName))
+                        // The update folder also carries libmpv's bundled dependencies
+                        // (e.g. vulkan-1.dll, issue #13856), so move everything in it.
+                        var updateFolder = Path.GetDirectoryName(newFileName)!;
+                        foreach (var sourceFileName in Directory.GetFiles(updateFolder))
                         {
-                            File.Delete(libMpvFileName);
+                            var targetFileName = Path.Combine(Se.DataFolder, Path.GetFileName(sourceFileName));
+                            if (File.Exists(targetFileName))
+                            {
+                                File.Delete(targetFileName);
+                            }
+
+                            File.Move(sourceFileName, targetFileName);
                         }
 
-                        File.Move(newFileName, libMpvFileName);
-
-                        Directory.Delete(Path.GetDirectoryName(newFileName)!);
+                        Directory.Delete(updateFolder);
                     }
                     catch
                     {
@@ -11236,7 +11272,7 @@ public partial class MainViewModel :
         var oldSettngsSerialized = JsonSerializer.Serialize(Se.Settings);
 
         var viewModel = await ShowDialogAsync<SettingsWindow, SettingsViewModel>(
-            vm => { vm.Initialize(this); });
+    vm => { vm.Initialize(this); });
 
         if (!viewModel.OkPressed)
         {
@@ -12880,6 +12916,14 @@ public partial class MainViewModel :
             return;
         }
 
+        // EBU STL places subtitles on a teletext line rather than an ASSA anchor, so the same
+        // menu item opens the teletext dialog for that format.
+        if (IsFormatEbu)
+        {
+            await ShowTeletextAlignmentPicker(selected);
+            return;
+        }
+
         var result = await ShowDialogAsync<PickAlignmentWindow, PickAlignmentViewModel>(vm => { vm.Initialize(selected, SubtitleGridSelectedCount); });
 
         if (result.OkPressed)
@@ -12887,6 +12931,127 @@ public partial class MainViewModel :
             SetAlignmentToSelected(result.Alignment);
             _updateAudioVisualizer = true;
         }
+    }
+
+    private async Task ShowTeletextAlignmentPicker(SubtitleLineViewModel selected)
+    {
+        var selectedItems = SubtitleGridSelectedItems;
+
+        var result = await ShowDialogAsync<PickTeletextAlignmentWindow, PickTeletextAlignmentViewModel>(
+            vm => vm.Initialize(
+                selected,
+                Se.Settings.General.TeletextAlignmentPreview,
+                Se.Settings.General.ShowColumnTeletext));
+
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        TeletextAlignmentPreview = result.Preview;
+        ShowColumnTeletext = result.ShowTeletextColumn;
+
+        Se.Settings.General.TeletextAlignmentPreview = result.Preview;
+        Se.Settings.General.ShowColumnTeletext = result.ShowTeletextColumn;
+
+        // Teletext line is only changed when explicitly selected.
+        if (result.ApplyTeletextLine)
+        {
+            var marginV = result.TeletextLine.ToString(CultureInfo.InvariantCulture);
+
+            foreach (var item in selectedItems)
+            {
+                item.MarginV = marginV;
+            }
+        }
+
+        // Teletext lines are shifted relatively when explicitly selected.
+        if (result.ApplyLineShift && result.LineShift != 0)
+        {
+            foreach (var item in selectedItems)
+            {
+                if (int.TryParse(item.MarginV, out var teletextLine))
+                {
+                    var shiftedLine = teletextLine + result.LineShift;
+
+                    if (shiftedLine < 1)
+                    {
+                        shiftedLine = 1;
+                    }
+                    else if (shiftedLine > 23)
+                    {
+                        shiftedLine = 23;
+                    }
+
+                    item.MarginV = shiftedLine.ToString(CultureInfo.InvariantCulture);
+                }
+            }
+        }
+
+        // Replace one specific teletext line with another.
+        if (result.ApplyLineReplace &&
+            result.ReplaceFromLine != result.ReplaceToLine)
+        {
+            foreach (var item in selectedItems)
+            {
+                if (int.TryParse(item.MarginV, out var teletextLine) &&
+                    teletextLine == result.ReplaceFromLine)
+                {
+                    item.MarginV = result.ReplaceToLine.ToString(CultureInfo.InvariantCulture);
+                }
+            }
+        }
+
+        // Horizontal alignment is only changed when explicitly selected. SetAlignmentToSelected
+        // is not usable here: it applies one tag to every line, which would flatten each line's
+        // own top/middle/bottom band, and it walks a different row set than the loops above.
+        if (result.ApplyHorizontalAlignment)
+        {
+            var column = result.HorizontalAlignment switch
+            {
+                var value when value == Se.Language.General.Left => 1,
+                var value when value == Se.Language.General.Right => 3,
+                _ => 2,
+            };
+
+            foreach (var item in selectedItems)
+            {
+                item.Text = AlignmentTagHelper.SetAlignment(
+                    item.Text,
+                    GetHorizontalAlignmentTag(item.Text, column),
+                    Se.Settings.General.WriteAn2Tag);
+            }
+        }
+
+        _updateAudioVisualizer = true;
+    }
+
+    /// <summary>
+    /// Picks the "anX" tag for the wanted horizontal column (1 = left, 2 = centre, 3 = right)
+    /// while keeping whichever vertical band the text already uses, so changing the horizontal
+    /// alignment of a "{\an8}" line gives "{\an7}".."{\an9}" rather than dropping it to the bottom.
+    /// </summary>
+    private static string GetHorizontalAlignmentTag(string text, int column)
+    {
+        var row = 0; // bottom - an1..an3
+
+        if (text != null)
+        {
+            if (text.StartsWith("{\\an4}", StringComparison.Ordinal) ||
+                text.StartsWith("{\\an5}", StringComparison.Ordinal) ||
+                text.StartsWith("{\\an6}", StringComparison.Ordinal))
+            {
+                row = 1; // middle - an4..an6
+            }
+            else if (text.StartsWith("{\\an7}", StringComparison.Ordinal) ||
+                     text.StartsWith("{\\an8}", StringComparison.Ordinal) ||
+                     text.StartsWith("{\\an9}", StringComparison.Ordinal))
+            {
+                row = 2; // top - an7..an9
+            }
+        }
+
+        return "an" + (row * 3 + column).ToString(CultureInfo.InvariantCulture);
     }
 
     [RelayCommand]
@@ -17277,6 +17442,36 @@ public partial class MainViewModel :
         textBox.Paste();
     }
 
+    /// <summary>
+    /// Routes a WM_PASTE sent to the window's HWND (clipboard managers and automation tools
+    /// send it instead of synthesizing Ctrl+V) to whichever control has keyboard focus.
+    /// Avalonia has a single HWND per window, so the message always lands on the window and
+    /// never on the focused control itself. Returns false when no paste target is focused,
+    /// so the hook can leave the message unhandled.
+    /// </summary>
+    internal bool PasteViaWindowMessage()
+    {
+        if (Window?.FocusManager?.GetFocusedElement() is TextBox textBox)
+        {
+            textBox.Paste();
+            return true;
+        }
+
+        if (IsSubtitleGridFocused())
+        {
+            SubtitleGridPasteCommand.Execute(null);
+            return true;
+        }
+
+        if (AudioVisualizer is { IsFocused: true })
+        {
+            WaveformPasteFromClipboardCommand.Execute(null);
+            return true;
+        }
+
+        return false;
+    }
+
     [RelayCommand]
     private void TextBoxSelectAll()
     {
@@ -17509,6 +17704,22 @@ public partial class MainViewModel :
             ShowStatus(string.Format(Se.Language.Main.TrimmedXLines, countOfTrimmedLines));
             _updateAudioVisualizer = true;
         }
+    }
+
+    /// <summary>
+    /// Rewrites the current subtitle as the ASSA the Japanese profile markup renders to - one cue can
+    /// become several absolutely positioned lines, so the paragraph list is replaced wholesale.
+    /// </summary>
+    private void ConvertNetflixImsc11JapaneseToAssa()
+    {
+        var width = _mediaInfo?.Dimension.Width ?? 1280;
+        var height = _mediaInfo?.Dimension.Height ?? 720;
+        var converted = NetflixImsc11JapaneseToAss.ConvertToSubtitle(_subtitle, width, height);
+        _subtitle.Paragraphs.Clear();
+        _subtitle.Paragraphs.AddRange(converted.Paragraphs);
+        _subtitle.Header = converted.Header;
+        _subtitle.Footer = converted.Footer;
+        _subtitle.Renumber();
     }
 
     [RelayCommand]
@@ -21178,6 +21389,8 @@ public partial class MainViewModel :
             Se.Settings.General.ShowColumnStartTime = ShowColumnStartTime;
             Se.Settings.General.ShowColumnEndTime = ShowColumnEndTime;
             Se.Settings.General.ShowColumnDuration = ShowColumnDuration;
+            Se.Settings.General.ShowColumnTeletext = ShowColumnTeletext;
+            Se.Settings.General.TeletextAlignmentPreview = TeletextAlignmentPreview;
             Se.Settings.General.ShowColumnGap = ShowColumnGap;
             Se.Settings.General.ShowColumnActor = ShowColumnActor;
             Se.Settings.General.ShowColumnStyle = ShowColumnStyle;
@@ -22602,6 +22815,9 @@ public partial class MainViewModel :
                 hash = hash * 23 + (p.Extra?.GetHashCode() ?? 0);
                 hash = hash * 23 + (p.Actor?.GetHashCode() ?? 0);
                 hash = hash * 23 + p.Layer;
+                // The teletext dialog edits MarginV and nothing else, so without it here that
+                // edit is invisible to undo and to the modified/save tracking below.
+                hash = hash * 23 + (p.MarginV?.GetHashCode() ?? 0);
             }
 
             return hash;
@@ -22659,6 +22875,7 @@ public partial class MainViewModel :
                 hash = hash * 23 + (p.Extra?.GetHashCode() ?? 0);
                 hash = hash * 23 + (p.Actor?.GetHashCode() ?? 0);
                 hash = hash * 23 + p.Layer;
+                hash = hash * 23 + (p.MarginV?.GetHashCode() ?? 0);
             }
 
             return hash;
@@ -24965,6 +25182,11 @@ public partial class MainViewModel :
     internal void ApplyDragSelectRange(int anchorIndex, int currentIndex)
     {
         SelectGridRange(Math.Min(anchorIndex, currentIndex), Math.Max(anchorIndex, currentIndex), currentIndex);
+
+        // Auto-scrolling a long drag can unrealize the row that had focus when the drag started,
+        // dropping keyboard focus out of the grid and disabling its shortcuts (#13864).
+        Dispatcher.UIThread.Post(() => TableViewExtras.FocusRow(SubtitleGrid));
+
         SubtitleGridSelectionChanged();
     }
 
@@ -25022,6 +25244,15 @@ public partial class MainViewModel :
                     SelectGridRange(Math.Min(anchor, rowIndex), Math.Max(anchor, rowIndex), rowIndex);
 
                     SubtitleGrid.ScrollIntoView(Subtitles[rowIndex]);
+
+                    // Handling the press ourselves means the TableView never focuses the clicked
+                    // row, so keyboard focus stays on whatever it was - and if the grid was
+                    // scrolled since, that container is unrealized and focus has already been
+                    // dropped out of the grid, which kills every SubtitleGrid shortcut (Delete
+                    // did nothing after a shift+click range that involved scrolling, #13864).
+                    // Same re-focus the shift+arrow path does after layout.
+                    Dispatcher.UIThread.Post(() => TableViewExtras.FocusRow(SubtitleGrid));
+
                     SubtitleGridSelectionChanged();
                     e.Handled = true;
                     return;
@@ -27458,6 +27689,19 @@ public partial class MainViewModel :
         IsFormatSsa = SelectedSubtitleFormat is SubStationAlpha;
         IsFormatAssaOrSsa = SelectedSubtitleFormat is AdvancedSubStationAlpha or SubStationAlpha;
         IsFormatWebVtt = SelectedSubtitleFormat is WebVTT or WebVTTFileWithLineNumber;
+        IsFormatEbu = SelectedSubtitleFormat is Ebu;
+
+        // A teletext page is narrower than the general line-length limit, so for EBU STL an
+        // over-wide row counts as a text error (red Text cell, error list, next-error).
+        if (SubtitleLineViewModel.UseTeletextLineLength != IsFormatEbu)
+        {
+            SubtitleLineViewModel.UseTeletextLineLength = IsFormatEbu;
+            foreach (var row in Subtitles)
+            {
+                row.RefreshAfterSettingsChanged();
+            }
+        }
+
         HasFormatStyle = IsFormatAssaOrSsa || IsFormatWebVtt;
         ShowActorColumnMenuHeader = IsFormatWebVtt
             ? Se.Language.File.WebVtt.ShowVoiceColumn
@@ -27490,9 +27734,19 @@ public partial class MainViewModel :
                     _subtitleOriginal = GetUpdateSubtitleOriginal();
                 }
 
-                oldFormat.RemoveNativeFormatting(_subtitle, format);
+                if (format is AdvancedSubStationAlpha && oldFormat is NetflixImsc11Japanese)
+                {
+                    // Converting to ASSA is the only way to keep furigana/bouten/vertical writing -
+                    // they become extra positioned lines. RemoveNativeFormatting would just drop the
+                    // tags, so it must not run here (issue #13861).
+                    ConvertNetflixImsc11JapaneseToAssa();
+                }
+                else
+                {
+                    oldFormat.RemoveNativeFormatting(_subtitle, format);
+                }
 
-                if (format is AdvancedSubStationAlpha)
+                if (format is AdvancedSubStationAlpha && oldFormat is not NetflixImsc11Japanese)
                 {
                     if (oldFormat is WebVTT || oldFormat is WebVTTFileWithLineNumber)
                     {
