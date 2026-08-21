@@ -89,6 +89,7 @@ using Nikse.SubtitleEdit.Features.Shared.GoToLineNumber;
 using Nikse.SubtitleEdit.Features.Shared.MediaInfoView;
 using Nikse.SubtitleEdit.Features.Shared.PickAlignment;
 using Nikse.SubtitleEdit.Features.Shared.PickTeletextAlignment;
+using Nikse.SubtitleEdit.Features.Shared.PickTeletextColor;
 using Nikse.SubtitleEdit.Features.Shared.PickFontName;
 using Nikse.SubtitleEdit.Features.Shared.PickLayer;
 using Nikse.SubtitleEdit.Features.Shared.PickLayerFilter;
@@ -619,6 +620,7 @@ public partial class MainViewModel :
     private long _playheadSeekTargetTs;
     private const double PlayheadSeekArriveToleranceSeconds = 0.15;
     private const double PlayheadSeekPinTimeoutMs = 600;
+    private const double PlayheadSeekPinMaxMs = 5000; // hard cap while the player says the seek is still in flight (see UpdatePlayheadEstimate)
     private const double PlayheadResyncThresholdSeconds = 0.5; // drift beyond this = real discontinuity -> snap
     private const double PlayheadDriftCorrection = 0.05; // gentle pull toward mpv when its clock is live
 
@@ -13205,9 +13207,45 @@ public partial class MainViewModel :
             return;
         }
 
+        if (IsFormatEbu)
+        {
+            await ShowTeletextColorPicker(selectedItems);
+            return;
+        }
+
         var result = await ShowDialogAsync<ColorPickerWindow, ColorPickerViewModel>(vm => vm.Initialize(Se.Settings.Tools.LastColorPickerColor.FromHexToColor()));
         if (!result.OkPressed)
         {
+            return;
+        }
+
+        if (ColorTextBoxIfSelected(result.SelectedColor))
+        {
+            return;
+        }
+
+        _colorService.SetColor(selectedItems, result.SelectedColor, GetUpdateSubtitle(), SelectedSubtitleFormat);
+        _updateAudioVisualizer = true;
+    }
+
+    /// <summary>
+    /// EBU STL open subtitles can only carry the eight teletext colors, and default
+    /// white without a color code differs from explicit white (37 vs 36 usable
+    /// characters), so the full RGB picker is replaced by a constrained palette.
+    /// </summary>
+    private async Task ShowTeletextColorPicker(List<SubtitleLineViewModel> selectedItems)
+    {
+        var result = await ShowDialogAsync<PickTeletextColorWindow, PickTeletextColorViewModel>(
+            vm => vm.Initialize(selectedItems[0].Text));
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        if (result.NoColorPressed)
+        {
+            _colorService.RemoveColorTags(selectedItems, GetUpdateSubtitle(), SelectedSubtitleFormat);
+            _updateAudioVisualizer = true;
             return;
         }
 
@@ -15859,6 +15897,42 @@ public partial class MainViewModel :
         if (AudioVisualizer != null && AudioVisualizer.WavePeaks != null)
         {
             AudioVisualizerCenterOnPositionIfNeeded(s.StartTime.TotalSeconds);
+        }
+
+        _updateAudioVisualizer = true;
+    }
+
+    /// <summary>
+    /// SE 4 parity ("Go to sub position and pause"): jump the video to the selected line's start
+    /// and stop there, so the frame at the cue point can be studied. SE 5 had the jump on its own
+    /// (VideoSetPositionCurrentSubtitleStart) but it left playback running, which carries the
+    /// picture away from the cue before it can be looked at (#13938).
+    /// </summary>
+    [RelayCommand]
+    private void VideoGoToSubtitlePositionAndPause()
+    {
+        var s = SelectedSubtitle;
+        var vp = GetVideoPlayerControl();
+        if (s == null || vp == null)
+        {
+            return;
+        }
+
+        // Pause before seeking, the order SE 4 used - seeking first would let a playing video
+        // run on from the new position while the seek settles.
+        if (vp.VideoPlayer.IsPlaying)
+        {
+            RequestPausePlayheadFreeze();
+        }
+
+        vp.VideoPlayer.Pause();
+
+        var position = Math.Max(0, s.StartTime.TotalSeconds);
+        vp.Position = position;
+
+        if (AudioVisualizer != null && AudioVisualizer.WavePeaks != null)
+        {
+            AudioVisualizerCenterOnPositionIfNeeded(position);
         }
 
         _updateAudioVisualizer = true;
@@ -25704,7 +25778,8 @@ public partial class MainViewModel :
             }
         }
         else if (e.PropertyName is nameof(SubtitleLineViewModel.Text)
-            or nameof(SubtitleLineViewModel.EndTime))
+            or nameof(SubtitleLineViewModel.EndTime)
+            or nameof(SubtitleLineViewModel.MarginV))
         {
             // Preview only: the buffer holds live references sorted by start time, so text
             // and end-time edits change neither membership nor order. Marking it dirty here
@@ -25806,7 +25881,21 @@ public partial class MainViewModel :
         {
             var target = _playheadSeekTarget.Value;
             var arrived = Math.Abs(rawPosition - target) < PlayheadSeekArriveToleranceSeconds;
-            var timedOut = (nowTimestamp - _playheadSeekTargetTs) * 1000.0 / Stopwatch.Frequency > PlayheadSeekPinTimeoutMs;
+
+            // The 600 ms timeout is a guess at "the seek must have landed by now", and for a
+            // slow seek (network share, cold spinning disk, heavy 4K hr-seek) it guesses wrong:
+            // the pin expired mid-seek, the cursor snapped back to the old position, then jumped
+            // again when the seek finally landed. When the player reports seek completion
+            // exactly (mpv's MPV_EVENT_PLAYBACK_RESTART), don't give up while the seek is still
+            // in flight - hold the pin up to a hard cap instead. The restart signal is only ever
+            // used to extend the hold, never to release the pin early: a restart from an older
+            // seek in a scrub burst would otherwise release a newer pin onto a stale position.
+            var pinElapsedMs = (nowTimestamp - _playheadSeekTargetTs) * 1000.0 / Stopwatch.Frequency;
+            var player = vp.VideoPlayer;
+            var seekStillInFlight = player.SupportsPlaybackRestartEvents &&
+                                    !player.HasPlaybackRestartedSince(_playheadSeekTargetTs);
+            var timedOut = pinElapsedMs > PlayheadSeekPinTimeoutMs &&
+                           (!seekStillInFlight || pinElapsedMs > PlayheadSeekPinMaxMs);
 
             // A pause was requested but mpv still reports playing: it keeps decoding for ~100-200 ms and
             // its position runs on past the pinned spot, which is within the arrive tolerance, so "arrived"
@@ -26675,8 +26764,53 @@ public partial class MainViewModel :
             PromoteReferenceOnlyRow(selectedSubtitle);
         }
 
+        AdjustTeletextRowForLineCountChange(selectedSubtitle);
         MakeSubtitleTextInfo(selectedSubtitle.Text, selectedSubtitle);
         _updateAudioVisualizer = true;
+    }
+
+    private Guid _teletextLineCountSubtitleId;
+    private int _teletextLineCountLastSeen;
+
+    // Seed the line-count tracker on selection, so the very first edit to a row can already be
+    // recognized as a line-count change.
+    partial void OnSelectedSubtitleChanged(SubtitleLineViewModel? value)
+    {
+        if (value != null)
+        {
+            _teletextLineCountSubtitleId = value.Id;
+            _teletextLineCountLastSeen = (value.Text ?? string.Empty).SplitToLines().Count;
+        }
+    }
+
+    /// <summary>
+    /// Keeps a bottom-anchored teletext subtitle on the bottom while the user edits its text: a
+    /// single-line subtitle on row 23 that gains a line break moves to row 21, and back to 23 when
+    /// the break is removed. Intentionally positioned subtitles (anything not on the bottom row
+    /// for their previous line count) are left alone.
+    /// </summary>
+    private void AdjustTeletextRowForLineCountChange(SubtitleLineViewModel subtitle)
+    {
+        var newLineCount = (subtitle.Text ?? string.Empty).SplitToLines().Count;
+
+        // The edit box also raises TextChanged when the selection swaps its content to another
+        // row - only line-count changes within the same row are edits.
+        var isSameRow = subtitle.Id == _teletextLineCountSubtitleId;
+        var oldLineCount = _teletextLineCountLastSeen;
+        _teletextLineCountSubtitleId = subtitle.Id;
+        _teletextLineCountLastSeen = newLineCount;
+
+        if (!IsFormatEbu || !isSameRow)
+        {
+            return;
+        }
+
+        var newRow = TeletextRowHelper.GetAdjustedBottomRow(subtitle.MarginV, oldLineCount, newLineCount,
+            Configuration.Settings.SubtitleSettings.EbuStlTeletextUseDoubleHeight);
+        if (newRow.HasValue)
+        {
+            subtitle.MarginV = newRow.Value.ToString(CultureInfo.InvariantCulture);
+        }
     }
 
     /// <summary>
@@ -27024,6 +27158,11 @@ public partial class MainViewModel :
 
     internal void OnVideoPlayerUserSeeked(double newPositionSeconds)
     {
+        // Glue the waveform cursor to the drag/wheel target like every other seek path
+        // does: without the pin, a drag during playback shows the cursor lagging on mpv's
+        // old position and then snapping once each seek lands.
+        PinPlayheadTo(newPositionSeconds);
+
         var av = AudioVisualizer;
         if (av?.WavePeaks == null || av.Bounds.Width <= 0 || av.ZoomFactor <= 0 || av.WavePeaks.SampleRate <= 0)
         {

@@ -17,6 +17,7 @@ using Nikse.SubtitleEdit.Features.Assa;
 using Nikse.SubtitleEdit.Features.Help.CheckForUpdates;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Options.DoNotBreakAfterList;
+using Nikse.SubtitleEdit.Features.Options.Settings.MinGapCalculate;
 using Nikse.SubtitleEdit.Features.Options.Settings.SyntaxColorTooWideSettings;
 using Nikse.SubtitleEdit.Features.Tools.BeautifyTimeCodes.Profile;
 using Nikse.SubtitleEdit.Features.Options.Settings.WaveformThemes;
@@ -107,6 +108,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private AlignmentItem _mpvPreviewSelectedFontAlignment;
     [ObservableProperty] private int _mpvPreviewMargin;
     [ObservableProperty] private bool _mpvPreviewUsePositionFromFile;
+    [ObservableProperty] private bool _mpvPreviewMarginIsPartOfSubtitleArea;
     [ObservableProperty] private Color _mpvPreviewColorPrimary;
     [ObservableProperty] private Color _mpvPreviewColorOutline;
     [ObservableProperty] private Color _mpvPreviewColorShadow;
@@ -1042,6 +1044,7 @@ public partial class SettingsViewModel : ObservableObject
         MpvPreviewFontBold = video.MpvPreviewFontBold;
         MpvPreviewMargin = video.MpvPreviewMargin;
         MpvPreviewUsePositionFromFile = video.MpvPreviewUsePositionFromFile;
+        MpvPreviewMarginIsPartOfSubtitleArea = video.MpvPreviewMarginIsPartOfSubtitleArea;
         MpvPreviewSelectedFontAlignment = MpvPreviewFontAlignments.FirstOrDefault(p => p.Code == video.MpvPreviewAlignment) ?? MpvPreviewFontAlignments[7];
         MpvPreviewOutlineWidth = video.MpvPreviewOutlineWidth;
         MpvPreviewShadowWidth = video.MpvPreviewShadowWidth;
@@ -1868,6 +1871,7 @@ public partial class SettingsViewModel : ObservableObject
         video.MpvPreviewFontBold = MpvPreviewFontBold;
         video.MpvPreviewMargin = MpvPreviewMargin;
         video.MpvPreviewUsePositionFromFile = MpvPreviewUsePositionFromFile;
+        video.MpvPreviewMarginIsPartOfSubtitleArea = MpvPreviewMarginIsPartOfSubtitleArea;
         video.MpvPreviewOutlineWidth = MpvPreviewOutlineWidth;
         video.MpvPreviewAlignment = MpvPreviewSelectedFontAlignment.Code;
         video.MpvPreviewShadowWidth = MpvPreviewShadowWidth;
@@ -2163,6 +2167,29 @@ public partial class SettingsViewModel : ObservableObject
             ColorTextTooWidePixels = viewModel.MaxWidthPixels;
             ColorTextTooWideFontName = viewModel.SelectedFont;
             ColorTextTooWideFontSize = viewModel.FontSize;
+        }
+    }
+
+    /// <summary>
+    /// Delivery specs give the minimum gap in frames, the setting is in milliseconds - offer the
+    /// same frame rate calculator Subtitle Edit 4 had behind the "..." button (issue #13906).
+    /// </summary>
+    [RelayCommand]
+    private async Task CalculateMinGapMs()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var viewModel = await _windowService.ShowDialogAsync<MinGapCalculateWindow, MinGapCalculateViewModel>(
+            Window,
+            vm => vm.Initialize(MinGapFrames ?? 2));
+
+        if (viewModel.OkPressed)
+        {
+            MinGapMs = viewModel.MinGapMs;
+            RuleValueChanged();
         }
     }
 
