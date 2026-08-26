@@ -11,6 +11,7 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Nikse.SubtitleEdit.Controls;
 using Nikse.SubtitleEdit.Controls.SyntaxTextEditorControl;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -749,6 +750,9 @@ public partial class MainViewModel :
     public MenuItem MenuItemAudioVisualizerCopyText { get; set; }
     public ITextBoxWrapper EditTextBoxOriginal { get; set; }
     public ITextBoxWrapper EditTextBox { get; set; }
+    public TimeCodeUpDown? EditBoxStartTimeUpDown { get; set; }
+    public TimeCodeUpDown? EditBoxEndTimeUpDown { get; set; }
+    public SecondsUpDown? EditBoxDurationUpDown { get; set; }
     public StackPanel PanelSingleLineLengthsOriginal { get; set; }
     public MenuItem MenuItemStyles { get; set; }
     public MenuItem MenuItemActors { get; set; }
@@ -3140,6 +3144,24 @@ public partial class MainViewModel :
         _subtitleOriginal = captured;
     }
 
+    /// <summary>
+    /// Makes the pre-translation text in the rows' original column the original subtitle. A
+    /// translation made from the current rows leaves that text in the rows only, while the original
+    /// subtitle stays empty - so a wholesale rebuild (<see cref="SetSubtitles(Subtitle, Subtitle?)"/>,
+    /// as most tools do) blanks the column, and saving the original then writes a file with time
+    /// codes and no text at all over the subtitle the translation was made from (#14091).
+    /// </summary>
+    private void CaptureOriginalFromTranslatedRows()
+    {
+        _subtitleOriginal ??= new Subtitle();
+        _subtitleOriginal.OriginalFormat = _subtitle.OriginalFormat ?? SelectedSubtitleFormat;
+
+        // Rebuilds the original from the rows - one line per row, in order - and re-points every
+        // row at the line it just produced. The callers have already left the modes that would
+        // make this a projection instead of the whole original.
+        GetUpdateSubtitleOriginal();
+    }
+
     /// <summary>Drops every display-only reference row, leaving the working subtitle behind.</summary>
     private void RemoveReferenceOnlyRows()
     {
@@ -3902,7 +3924,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerBluRaySup();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -3928,7 +3950,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerBdnXml();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -3958,7 +3980,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerBdnXml(true);
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -3984,7 +4006,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerImscImage();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4010,7 +4032,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerWebVttThumbnail();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4036,7 +4058,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerDCinemaInteropPng();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4062,7 +4084,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerDCinemaSmpte2014Png();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4088,7 +4110,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerDost();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4114,7 +4136,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerFcp();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4140,7 +4162,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerImagesWithTimeCode();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4166,7 +4188,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerDvdSup();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4192,7 +4214,7 @@ public partial class MainViewModel :
         IExportHandler exportHandler = new ExportHandlerVobSub();
         var result = await ShowDialogAsync<ExportImageBasedWindow, ExportImageBasedViewModel>(vm =>
         {
-            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName);
+            vm.Initialize(exportHandler, Subtitles, _subtitleFileName, _videoFileName, _subtitle.Header);
         });
 
         if (!result.OkPressed)
@@ -4500,7 +4522,28 @@ public partial class MainViewModel :
             return;
         }
 
-        format.Save(fileName, GetUpdateSubtitle());
+        try
+        {
+            // A failed write must surface as an error dialog: an exception out of an async command
+            // dies silently, which read as "Save does nothing" in the field (unquoted font colors
+            // used to throw here).
+            if (!format.Save(fileName, GetUpdateSubtitle()))
+            {
+                await MessageBox.Show(Window!, Se.Language.General.Error,
+                    string.Format(Se.Language.General.CouldNotSaveFileXErrorY, fileName, string.Empty),
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            SeLogger.Error(ex, "Export to EBU STL failed for " + fileName);
+            await MessageBox.Show(Window!, Se.Language.General.Error,
+                string.Format(Se.Language.General.CouldNotSaveFileXErrorY, fileName, ex.Message),
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
         ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToFileY, format.Name, fileName));
     }
 
@@ -6595,21 +6638,25 @@ public partial class MainViewModel :
             return;
         }
 
+        // A display-only row of a read-only original carries no text to translate from, and the
+        // original it shows is replaced by the rows' text here (#14091).
+        RemoveReferenceOnlyRows();
+
         foreach (var subtitle in Subtitles)
         {
             subtitle.OriginalText = subtitle.Text;
             subtitle.Text = string.Empty;
+            subtitle.ReferenceParagraphId = null;
         }
 
         _subtitleFileNameOriginal = _subtitleFileName;
-        _subtitleOriginal ??= new Subtitle();
-        _subtitleOriginal.OriginalFormat = _subtitle.OriginalFormat ?? SelectedSubtitleFormat;
         _subtitleFileName = null;
         _converted = true;
         _shortcutManager.ClearKeys();
         IsOriginalReadOnly = false; // a translation made here always lines up 1:1 with its original
         IsShowingOriginalNonMatchingLines = false;
         ShowColumnOriginalText = true;
+        CaptureOriginalFromTranslatedRows();
         AutoFitColumns();
         ShowStatus(Se.Language.Main.CreatedEmptyTranslation);
     }
@@ -9502,6 +9549,12 @@ public partial class MainViewModel :
         }
 
         var engine = speakersResult.SelectedEngine;
+
+        // The speakers are confirmed, so the subtitle gets its actors (and the ASSA format that
+        // keeps them) before the cloning starts - a failed or cancelled clone used to throw the
+        // whole diarization away with it, leaving the subtitle exactly as it was.
+        ApplyAutoCastToSubtitle(transcription, speakersResult.RenamedSpeakers);
+
         var clonedVoiceNames = await CloneSpeakerVoicesAsync(engine, speakersResult.SpeakersToClone);
         if (clonedVoiceNames.Count == 0)
         {
@@ -9514,7 +9567,6 @@ public partial class MainViewModel :
             return;
         }
 
-        ApplyAutoCastToSubtitle(transcription, speakersResult.RenamedSpeakers);
         SaveAutoCastMappings(engine, clonedVoiceNames);
 
         ShowStatus(string.Format(Se.Language.Video.TextToSpeech.AutoCastDoneXVoices, clonedVoiceNames.Count));
@@ -9593,7 +9645,7 @@ public partial class MainViewModel :
     /// An open subtitle keeps its own lines and only gains actors, matched to the diarized
     /// segments by overlap; with nothing open, the transcription becomes the subtitle.
     /// </remarks>
-    private void ApplyAutoCastToSubtitle(Subtitle transcription, Dictionary<string, string> renamedSpeakers)
+    internal void ApplyAutoCastToSubtitle(Subtitle transcription, Dictionary<string, string> renamedSpeakers)
     {
         string Rename(string detected) =>
             renamedSpeakers.TryGetValue(detected, out var name) && !string.IsNullOrWhiteSpace(name) ? name : detected;
@@ -10751,6 +10803,13 @@ public partial class MainViewModel :
 
         var wasOldTranslationChanged = _changeSubtitleHash != GetFastHash();
 
+        // The dialog was handed GetUpdateSubtitle(), which leaves the display-only rows of a
+        // read-only original out - so they must go before the rows are matched with the result by
+        // index, or every row past the first of them would take the wrong translation, and the
+        // reference rows themselves would have their original text overwritten with nothing
+        // (#14091). The original they display is replaced by the pre-translation text below anyway.
+        RemoveReferenceOnlyRows();
+
         for (var i = 0; i < Subtitles.Count; i++)
         {
             if (result.Rows.Count <= i)
@@ -10760,6 +10819,10 @@ public partial class MainViewModel :
 
             Subtitles[i].OriginalText = Subtitles[i].Text;
             Subtitles[i].Text = result.Rows[i].TranslatedText;
+
+            // Whatever original this row pointed into is gone - the pre-translation text is the
+            // original now.
+            Subtitles[i].ReferenceParagraphId = null;
         }
 
         // The subtitle language just changed, so the cached detected language is stale (issue #12144).
@@ -10772,8 +10835,6 @@ public partial class MainViewModel :
 
         var targetLanguageCode = result.SelectedTargetLanguage?.TwoLetterIsoLanguageName;
         _subtitleFileNameOriginal = _subtitleFileName;
-        _subtitleOriginal ??= new Subtitle();
-        _subtitleOriginal.OriginalFormat = _subtitle.OriginalFormat ?? SelectedSubtitleFormat;
         if (!string.IsNullOrEmpty(_subtitleFileName) && !string.IsNullOrEmpty(targetLanguageCode))
         {
             var directory = Path.GetDirectoryName(_subtitleFileName) ?? string.Empty;
@@ -10804,12 +10865,26 @@ public partial class MainViewModel :
                 }
             }
 
-            _subtitleFileName = Path.Combine(directory, nameWithoutExt + "." + targetLanguageCode + extension);
+            var translatedFileName = Path.Combine(directory, nameWithoutExt + "." + targetLanguageCode + extension);
 
-            // Saving must offer the translated name, not the video's name - otherwise the
-            // default video-first SaveAsBehavior suggests overwriting the subtitle that was
-            // just translated from.
-            _saveAsFileNameSuggestion = _subtitleFileName;
+            // A source file that already carries the target language code ("movie.nl.srt"
+            // translated to Dutch) would keep its name here, and saving writes both the
+            // translation and the original to it - the second write wiping the first. Leave it
+            // untitled instead, so "Save as" asks for a name (#14091).
+            if (translatedFileName.Equals(_subtitleFileNameOriginal, StringComparison.OrdinalIgnoreCase))
+            {
+                _subtitleFileName = string.Empty;
+                _saveAsFileNameSuggestion = null;
+            }
+            else
+            {
+                _subtitleFileName = translatedFileName;
+
+                // Saving must offer the translated name, not the video's name - otherwise the
+                // default video-first SaveAsBehavior suggests overwriting the subtitle that was
+                // just translated from.
+                _saveAsFileNameSuggestion = _subtitleFileName;
+            }
         }
         else
         {
@@ -10820,6 +10895,7 @@ public partial class MainViewModel :
         IsOriginalReadOnly = false; // the translation was made from the current rows, so it lines up 1:1
         IsShowingOriginalNonMatchingLines = false;
         ShowColumnOriginalText = true;
+        CaptureOriginalFromTranslatedRows();
         AutoFitColumns();
         _updateAudioVisualizer = true;
     }
@@ -10894,34 +10970,42 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<CopyPasteTranslateWindow, CopyPasteTranslateViewModel>(vm => { vm.Initialize(Subtitles.ToList()); });
+        // The display-only rows of a read-only original hold no text of the working subtitle -
+        // they have nothing to translate, and the original they show is replaced below (#14091).
+        var rows = Subtitles.Where(p => !p.IsReferenceOnly).ToList();
+
+        var result = await ShowDialogAsync<CopyPasteTranslateWindow, CopyPasteTranslateViewModel>(vm => { vm.Initialize(rows); });
 
         if (!result.OkPressed)
         {
             return;
         }
 
-        for (var i = 0; i < Subtitles.Count && i < result.Subtitles.Count; i++)
+        for (var i = 0; i < rows.Count; i++)
         {
-            if (!result.TranslatedRowIndices.Contains(i))
-            {
-                continue;
-            }
+            // The source text of every row goes into the original column, translated or not: the
+            // original is saved from those rows, so a skipped row left blank there would write a
+            // line with no text over the subtitle the translation was made from (#14091).
+            rows[i].OriginalText = rows[i].Text;
+            rows[i].ReferenceParagraphId = null;
 
-            Subtitles[i].OriginalText = Subtitles[i].Text;
-            Subtitles[i].Text = result.Subtitles[i].Text;
+            if (i < result.Subtitles.Count && result.TranslatedRowIndices.Contains(i))
+            {
+                rows[i].Text = result.Subtitles[i].Text;
+            }
         }
+
+        RemoveReferenceOnlyRows();
 
         // The subtitle language just changed, so the cached detected language is stale (issue #12144).
         _detectedLanguageCode = null;
 
         _subtitleFileNameOriginal = _subtitleFileName;
-        _subtitleOriginal ??= new Subtitle();
-        _subtitleOriginal.OriginalFormat = _subtitle.OriginalFormat ?? SelectedSubtitleFormat;
         _subtitleFileName = string.Empty;
         IsOriginalReadOnly = false; // the translation was made from the current rows, so it lines up 1:1
         IsShowingOriginalNonMatchingLines = false;
         ShowColumnOriginalText = true;
+        CaptureOriginalFromTranslatedRows();
         AutoFitColumns();
         _updateAudioVisualizer = true;
         _converted = true;
@@ -19836,6 +19920,19 @@ public partial class MainViewModel :
             SetSubtitleFormat(SubtitleFormats.FirstOrDefault(p => p.Name == subtitle?.OriginalFormat?.Name) ??
                               SelectedSubtitleFormat);
 
+            // The STL header declares the frame rate the timecodes were authored in, so the
+            // HH:MM:SS:FF display (forced on for EBU STL) shows the file's own frame numbers.
+            // Skipped when the header's disk format code is unreadable - the frame rate would
+            // just be a guessed fallback then (#14076). A video loaded later still wins.
+            if (subtitle?.OriginalFormat is Ebu ebuFormat &&
+                ebuFormat.Header is { } ebuHeader &&
+                ebuHeader.DiskFormatCode != null &&
+                ebuHeader.DiskFormatCode.StartsWith("STL", StringComparison.Ordinal) &&
+                ebuHeader.FrameRate is > 20 and < 130)
+            {
+                SetSelectedFrameRate(ebuHeader.FrameRate);
+            }
+
             if (fileEncoding.WebName.StartsWith("utf-8", StringComparison.OrdinalIgnoreCase))
             {
                 if (FileUtil.HasUtf8Bom(fileName))
@@ -21639,7 +21736,25 @@ public partial class MainViewModel :
         }
 
         var originalFormat = _subtitleOriginal?.OriginalFormat ?? SelectedSubtitleFormat;
-        var text = GetUpdateSubtitleOriginal(true).ToText(originalFormat);
+        var originalSubtitle = GetUpdateSubtitleOriginal(true);
+
+        // A whole original without a single line of text is never something the user typed - the
+        // column was blanked somewhere (a rebuild, a lost translation source). Writing it out
+        // would leave numbers and time codes and no subtitles at all, over the file the
+        // translation was made from, so refuse instead (#14091) - a single-line original
+        // included, it is overwritten just as irreversibly.
+        if (originalSubtitle.Paragraphs.Count > 0 &&
+            originalSubtitle.Paragraphs.All(p => string.IsNullOrWhiteSpace(p.Text)))
+        {
+            if (!isAutoSave)
+            {
+                ShowStatus(Se.Language.Main.OriginalIsEmptyNotSaved);
+            }
+
+            return false;
+        }
+
+        var text = originalSubtitle.ToText(originalFormat);
 
         try
         {
@@ -28707,6 +28822,35 @@ public partial class MainViewModel :
         }
     }
 
+    /// <summary>
+    /// EBU STL is a frame-based format, so while it is the active format the timecodes are shown
+    /// as HH:MM:SS:FF via a session-only override - the persisted "use frame mode" setting is left
+    /// untouched, and the display reverts when the format changes away again (#14076).
+    /// </summary>
+    private void UpdateTemporaryFrameMode()
+    {
+        var general = Se.Settings.General;
+        var wasFrameMode = general.UseFrameMode;
+        general.UseFrameModeOverride = IsFormatEbu ? true : null;
+        if (general.UseFrameMode == wasFrameMode)
+        {
+            return;
+        }
+
+        Configuration.Settings.General.UseTimeFormatHHMMSSFF = general.UseFrameMode;
+
+        foreach (var s in Subtitles)
+        {
+            s.RefreshTimeCodes();
+        }
+
+        EditBoxStartTimeUpDown?.RefreshDisplayFormat();
+        EditBoxEndTimeUpDown?.RefreshDisplayFormat();
+        EditBoxDurationUpDown?.RefreshDisplayFormat();
+        RefreshVideoSeekAmounts();
+        _updateAudioVisualizer = true;
+    }
+
     internal void ComboBoxSubtitleFormatChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (!_changingFormatProgrammatically)
@@ -28731,6 +28875,8 @@ public partial class MainViewModel :
                 row.RefreshAfterSettingsChanged();
             }
         }
+
+        UpdateTemporaryFrameMode();
 
         HasFormatStyle = IsFormatAssaOrSsa || IsFormatWebVtt;
         ShowActorColumnMenuHeader = IsFormatWebVtt

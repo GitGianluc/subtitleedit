@@ -84,6 +84,23 @@ public class EbuTest
     }
 
     [Fact]
+    public void EbuStl_Load_ExposesHeaderFrameRateOnTheParsingInstance()
+    {
+        // The SE5 main view reads the frame rate off the parsing instance's header after open, to
+        // show the file's own frame numbers in the forced HH:MM:SS:FF display (#14076).
+        Ebu.EbuUiHelper = new TestEbuUiHelper();
+        using var ms = new MemoryStream();
+        ((IBinaryPersistableSubtitle)new Ebu()).Save("test.stl", ms, MakeSubtitle(), batchMode: true);
+
+        var ebu = new Ebu();
+        ebu.LoadSubtitle(new Subtitle(), ms.ToArray());
+
+        Assert.NotNull(ebu.Header);
+        Assert.StartsWith("STL25", ebu.Header.DiskFormatCode);
+        Assert.Equal(25.0, ebu.Header.FrameRate);
+    }
+
+    [Fact]
     public void EbuStl_ToText_IsNotUsableForSaving()
     {
         // Guards the root cause: ToText is a stub for this binary format, so the save path must use
@@ -158,5 +175,35 @@ public class EbuTest
         new Ebu().LoadSubtitle(new Subtitle(), withoutCodes);
         Assert.False(Configuration.Settings.SubtitleSettings.EbuStlTeletextUseBox);
         Assert.False(Configuration.Settings.SubtitleSettings.EbuStlTeletextUseDoubleHeight);
+    }
+
+    // The teletext color writer assumed the font tag's color value ends with a double quote and
+    // took a Substring up to it. For an unquoted value ("<font color=#ffff00>" is common in
+    // SubRip files) with any double quote later in the line - a quotation in the dialogue - that
+    // Substring length came out as -13 and the whole save crashed, so no STL file was written at
+    // all (reported by email against 5.2.0-beta24 as "The value -13 must be positive").
+    [Theory]
+    [InlineData("<font color=#ffff00>He said \"hello\" to me</font>")]
+    [InlineData("<font color='#ffff00'>He said \"hello\" to me</font>")]
+    [InlineData("<font color=\"#ffff00\">He said \"hello\" to me</font>")]
+    [InlineData("<font color=yellow size=\"12\">He said hello</font>")]
+    public void TeletextSave_FontColorValueQuotingVariants_AllWriteTheColor(string text)
+    {
+        Ebu.EbuUiHelper = new TestEbuUiHelper();
+        var subtitle = new Subtitle();
+        subtitle.Paragraphs.Add(new Paragraph(text, 1000, 3000));
+
+        var header = new Ebu.EbuGeneralSubtitleInformation { DisplayStandardCode = "1" };
+        using var ms = new MemoryStream();
+        var ok = new Ebu().Save("test.stl", ms, subtitle, batchMode: true, header);
+        var bytes = ms.ToArray();
+
+        Assert.True(ok);
+        Assert.True(bytes.Length >= 1024 + 128, "no TTI block was written");
+
+        // Yellow's teletext color code must sit in the TTI text field (offset 16..127).
+        var textField = new byte[112];
+        Array.Copy(bytes, 1024 + 16, textField, 0, 112);
+        Assert.Contains((byte)0x03, textField);
     }
 }

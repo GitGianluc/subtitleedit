@@ -1437,10 +1437,11 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
     private async Task<bool> RunLlamaCppOcr(IOcrSubtitle imageSubtitles, BatchConvertItem item, CancellationToken cancellationToken)
     {
-        // Curated OCR model from settings (picked in batch convert settings / the OCR window).
-        // The batch run never downloads - the settings dialog prompts for that on OK.
-        var model = LlamaCppServerManager.OcrModels.FirstOrDefault(m => m.FileName == Se.Settings.Ocr.LlamaCppOcrModel)
-                    ?? LlamaCppServerManager.OcrModels.FirstOrDefault(LlamaCppServerManager.IsModelInstalled);
+        // Curated or self-supplied OCR model from settings (picked in batch convert settings /
+        // the OCR window). The batch run never downloads - the settings dialog prompts for that on OK.
+        var ocrModels = LlamaCppServerManager.GetAllOcrModels();
+        var model = ocrModels.FirstOrDefault(m => m.FileName == Se.Settings.Ocr.LlamaCppOcrModel)
+                    ?? ocrModels.FirstOrDefault(LlamaCppServerManager.IsModelInstalled);
         if (model == null || !LlamaCppServerManager.IsEngineInstalled() || !LlamaCppServerManager.IsModelInstalled(model))
         {
             item.Status = Se.Language.Ocr.LlamaCppNotDownloaded;
@@ -1902,6 +1903,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         var (scriptWidth, scriptHeight) = ExportTextTags.GetScriptResolution(item.Subtitle.Header);
 
+        // Same fallback as the export dialog: an empty or unknown preset name in the profile
+        // selects the first list item (soft shadow).
+        var textEffectPreset = Enum.TryParse<TextEffectPreset>(profile.TextEffect, out var parsedPreset)
+            ? parsedPreset
+            : TextEffectPreset.SoftShadow;
+
         var imageParameters = new List<ImageParameter>();
         for (var i = 0; i < item.Subtitle.Paragraphs.Count; i++)
         {
@@ -1939,9 +1946,26 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 FramesPerSecond = profile.FramesPerSecond,
                 IsFullFrame = profile.IsFullFrame,
                 FullFrameBackgroundColor = profile.FullFrameBackgroundColor.FromHexToColor().ToSKColor(),
+                // The text effect configured in the shared export-images dialog - without this
+                // a batch convert silently rendered classic text while the dialog's preview
+                // showed the effect.
+                TextEffects = TextEffectPresetFactory.Create(
+                    profile.TextEffectEnabled,
+                    textEffectPreset,
+                    profile.FontSize,
+                    profile.FontColor.FromHexToColor().ToSKColor(),
+                    profile.OutlineColor.FromHexToColor().ToSKColor(),
+                    profile.ShadowColor.FromHexToColor().ToSKColor(),
+                    profile.TextEffectStrength,
+                    profile.TextEffectLetterSpacing,
+                    profile.TextEffectArcBend,
+                    profile.TextEffectWave),
             };
 
-            // "{\fad(..)}" and "{\alpha&H..&}" change what is drawn - read before rendering.
+            // "{\3c..}"/"{\4c..}"/"{\bord..}"/"{\shad..}", "{\fad(..)}" and "{\alpha&H..&}"
+            // change what is drawn - read before rendering, overrides before the
+            // transparencies that fade them.
+            ExportTextTags.ApplyStyleOverrideTags(imageParameter, subtitle.Text, scriptHeight);
             ExportTextTags.ApplyTransparencyTags(imageParameter, subtitle.Text);
 
             imageParameter.Bitmap = ExportImageBasedViewModel.GenerateBitmap(imageParameter);

@@ -19,7 +19,7 @@ public class Se
     internal const int CurrentMacOsFontMigrationVersion = 1;
     internal const int CurrentShortcutsMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.2.0-beta24";
+    public static string Version { get; set; } = "v5.2.0-beta25";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -460,6 +460,12 @@ public class Se
         MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), true);
 
         UpdateLibSeSettings();
+
+        // Startup-only: the libse mirror of these is session truth - Ebu.LoadSubtitle re-seeds it
+        // from every loaded STL file - so the persisted values may only win before any file is
+        // open (see the note in UpdateLibSeSettings).
+        Configuration.Settings.SubtitleSettings.EbuStlTeletextUseBox = Settings.File.EbuSaveOptions.TeletextUseBox;
+        Configuration.Settings.SubtitleSettings.EbuStlTeletextUseDoubleHeight = Settings.File.EbuSaveOptions.TeletextUseDoubleHeight;
     }
 
     internal static void MigrateMacOsFontSettings(SeAppearance appearance, bool isMacOs, bool isLegacySettings)
@@ -785,6 +791,17 @@ public class Se
 
         var dc = Settings.File.DCinemaSmpte;
         var ss = Configuration.Settings.SubtitleSettings;
+
+        // Ebu.Save reads these off the libse Configuration singleton, so a plain "Save" that
+        // never opens the EBU save options dialog must still see the persisted choices. The
+        // teletext box/double-height flags are deliberately NOT re-applied here: Ebu.LoadSubtitle
+        // seeds them from the loaded file, and this sync runs after every SaveSettings - it would
+        // clobber the file's flags. They are applied once at startup in LoadSettings instead.
+        var ebu = Settings.File.EbuSaveOptions;
+        ss.EbuStlMarginTop = ebu.MarginTop;
+        ss.EbuStlMarginBottom = ebu.MarginBottom;
+        ss.EbuStlNewLineRows = ebu.NewLineRows;
+
         ss.WebVttUseXTimestampMap = Settings.Formats.WebVttUseXTimestampMap;
         ss.WebVttUseMultipleXTimestampMap = Settings.Formats.WebVttUseMultipleXTimestampMap;
         ss.WebVttMergeLinesWithSameText = Settings.Formats.WebVttMergeLinesWithSameText;
