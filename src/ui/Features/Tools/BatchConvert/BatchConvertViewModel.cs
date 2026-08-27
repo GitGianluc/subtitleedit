@@ -256,6 +256,13 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private string _assaChangeStyleImportedStyleHeader;
     [ObservableProperty] private bool _assaChangeStyleTrimUnusedStyles;
 
+    // ASSA change style properties
+    [ObservableProperty] private bool _assaChangeStylePropertiesSetSpacing;
+    [ObservableProperty] private decimal _assaChangeStylePropertiesSpacing;
+    [ObservableProperty] private bool _assaChangeStylePropertiesSetAlignment;
+    [ObservableProperty] private ObservableCollection<DisplayAlignment> _assaChangeStylePropertiesAlignmentOptions;
+    [ObservableProperty] private DisplayAlignment? _selectedAssaChangeStylePropertiesAlignment;
+
     // Merge short lines
     // Embed fonts (ASSA)
     [ObservableProperty] private bool _assaEmbedFontsTrim;
@@ -463,6 +470,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         AssaChangeStyleImportFileName = string.Empty;
         AssaChangeStyleImportedStyleHeader = string.Empty;
         AssaChangeStyleTrimUnusedStyles = false;
+
+        AssaChangeStylePropertiesAlignmentOptions = new ObservableCollection<DisplayAlignment>(DisplayAlignment.GetAll());
+        SelectedAssaChangeStylePropertiesAlignment = AssaChangeStylePropertiesAlignmentOptions[1];
+        AssaChangeStylePropertiesSetSpacing = true;
+        AssaChangeStylePropertiesSpacing = 0;
+        AssaChangeStylePropertiesSetAlignment = false;
 
         FixCommonErrorsProfile = LoadDefaultProfile();
 
@@ -703,6 +716,13 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // Change speed
         Se.Settings.Tools.BatchConvert.ChangeSpeedPercent = ChangeSpeedPercent;
 
+        // Merge lines with same text / same time codes (shared with the standalone dialogs)
+        Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines = MergeSameTextMaxMillisecondsBetweenLines;
+        Se.Settings.Tools.MergeSameText.IncludeIncrementingLines = MergeSameTextIncludeIncrementingLines;
+        Se.Settings.Tools.MergeSameTimeCode.MaxMillisecondsDifference = MergeSameTimeMaxMillisecondsDifference;
+        Se.Settings.Tools.MergeSameTimeCode.MergeDialog = MergeSameTimeMergeDialog;
+        Se.Settings.Tools.MergeSameTimeCode.AutoBreak = MergeSameTimeAutoBreak;
+
         // Delete lines
         Se.Settings.Tools.BatchConvert.DeleteXFirstLines = DeleteXFirstLines;
         Se.Settings.Tools.BatchConvert.DeleteXLastLines = DeleteXLastLines;
@@ -733,6 +753,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         Se.Settings.Tools.BatchConvert.AssaChangeStyleFromStyle = AssaChangeStyleFromStyle ?? string.Empty;
         Se.Settings.Tools.BatchConvert.AssaChangeStyleToStyle = AssaChangeStyleToStyle ?? string.Empty;
         Se.Settings.Tools.BatchConvert.AssaChangeStyleTrimUnusedStyles = AssaChangeStyleTrimUnusedStyles;
+
+        // ASSA change style properties
+        Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesSetSpacing = AssaChangeStylePropertiesSetSpacing;
+        Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesSpacing = AssaChangeStylePropertiesSpacing;
+        Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesSetAlignment = AssaChangeStylePropertiesSetAlignment;
+        Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesAlignment = SelectedAssaChangeStylePropertiesAlignment?.Code ?? "an2";
 
         // Embed fonts
         Se.Settings.Tools.BatchConvert.AssaEmbedFontsTrim = AssaEmbedFontsTrim;
@@ -1009,6 +1035,16 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         AssaChangeStyleFromStyle = Se.Settings.Tools.BatchConvert.AssaChangeStyleFromStyle ?? string.Empty;
         AssaChangeStyleToStyle = Se.Settings.Tools.BatchConvert.AssaChangeStyleToStyle ?? string.Empty;
         AssaChangeStyleTrimUnusedStyles = Se.Settings.Tools.BatchConvert.AssaChangeStyleTrimUnusedStyles;
+
+        // ASSA change style properties
+        AssaChangeStylePropertiesSetSpacing = Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesSetSpacing;
+        AssaChangeStylePropertiesSpacing = Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesSpacing;
+        AssaChangeStylePropertiesSetAlignment = Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesSetAlignment;
+        var styleAlignment = AssaChangeStylePropertiesAlignmentOptions.FirstOrDefault(p => p.Code == Se.Settings.Tools.BatchConvert.AssaChangeStylePropertiesAlignment);
+        if (styleAlignment != null)
+        {
+            SelectedAssaChangeStylePropertiesAlignment = styleAlignment;
+        }
 
         // Embed fonts
         AssaEmbedFontsTrim = Se.Settings.Tools.BatchConvert.AssaEmbedFontsTrim;
@@ -1575,7 +1611,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [RelayCommand]
     private void ChangeSpeedSetToDropFrameValue()
     {
-        ChangeSpeedPercent = 99.9889;
+        // Inverse of the from-drop-frame preset under the factor = 100 / percent
+        // convention: 100 / 99.9001 = 1.001001, so From -> To round-trips.
+        ChangeSpeedPercent = 99.9001;
     }
 
     [RelayCommand]
@@ -2692,7 +2730,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             MergeLinesWithSameTimeCodes = new BatchConvertConfig.MergeLinesWithSameTimeCodesSettings
             {
                 IsActive = activeFunctions.Contains(BatchConvertFunctionType.MergeLinesWithSameTimeCodes),
-                MaxMillisecondsDifference = MergeSameTextMaxMillisecondsBetweenLines,
+                MaxMillisecondsDifference = MergeSameTimeMaxMillisecondsDifference,
                 MergeDialog = MergeSameTimeMergeDialog,
                 AutoBreak = MergeSameTimeAutoBreak,
             },
@@ -2793,6 +2831,15 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 ToStyle = AssaChangeStyleToStyle ?? string.Empty,
                 ImportedStyleHeader = AssaChangeStyleImportedStyleHeader ?? string.Empty,
                 TrimUnusedStyles = AssaChangeStyleTrimUnusedStyles,
+            },
+
+            AssaChangeStyleProperties = new BatchConvertConfig.AssaChangeStylePropertiesSettings
+            {
+                IsActive = activeFunctions.Contains(BatchConvertFunctionType.AssaChangeStyleProperties),
+                SetSpacing = AssaChangeStylePropertiesSetSpacing,
+                Spacing = AssaChangeStylePropertiesSpacing,
+                SetAlignment = AssaChangeStylePropertiesSetAlignment,
+                Alignment = SelectedAssaChangeStylePropertiesAlignment?.Code ?? "an2",
             },
 
             AssaEmbedFonts = new BatchConvertConfig.AssaEmbedFontsSettings
@@ -3286,7 +3333,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModel = string.Empty;
             AutoTranslateModelBrowseIsVisible = false;
             AutoTranslateModelIsVisible = false;
-            AutoTranslateUrl = Se.Settings.AutoTranslate.NnlbServeUrl;
+            AutoTranslateUrl = Se.Settings.AutoTranslate.NllbServeUrl;
             AutoTranslateUrlIsVisible = true;
             AutoTranslateApiKey = string.Empty;
             AutoTranslateApiKeyIsVisible = false;

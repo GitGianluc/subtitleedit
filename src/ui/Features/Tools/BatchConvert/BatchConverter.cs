@@ -1711,6 +1711,9 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 Text = string.Empty,
                 StartTime = imageSubtitle.GetStartTime(i),
                 EndTime = imageSubtitle.GetEndTime(i),
+                // The source knows which cues are forced - carry it through so a forced
+                // Blu-ray/PGS track stays forced in the exported sup/BDN XML.
+                IsForced = imageSubtitle.GetIsForced(i),
                 FontColor = SKColors.White,
                 FontName = "Arial",
                 FontSize = 24,
@@ -1721,8 +1724,16 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 ShadowWidth = 2,
                 BackgroundColor = SKColors.Transparent,
                 BackgroundCornerRadius = 0,
-                ScreenWidth = imageSubtitle.GetScreenSize(i).Width,
-                ScreenHeight = imageSubtitle.GetScreenSize(i).Height,
+                // Several IOcrSubtitle sources report "unknown" as -1 x -1 (DivX/XSUB, MP4
+                // VobSub, WebVTT images, BDN...). Passing that straight through made every
+                // exported event land at a large negative X/Y, so fall back to the profile's
+                // resolution the way the text-rendering path does.
+                ScreenWidth = imageSubtitle.GetScreenSize(i).Width > 0
+                    ? imageSubtitle.GetScreenSize(i).Width
+                    : profile.ScreenWidth,
+                ScreenHeight = imageSubtitle.GetScreenSize(i).Height > 0
+                    ? imageSubtitle.GetScreenSize(i).Height
+                    : profile.ScreenHeight,
                 BottomTopMargin = 0,
                 LeftRightMargin = 0,
                 Bitmap = ApplyImageAdjustments(imageSubtitle.GetBitmap(i)),
@@ -2024,6 +2035,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             s = FixRightToLeft(s);
             s = AssaChangeResolution(s);
             s = AssaChangeStyle(s);
+            s = AssaChangeStyleProperties(s);
             s = BeautifyTimeCodes(s, item.FileName);
             s = SnapTimeCodesToFrames(s, item.FileName);
             s = SortBy(s);
@@ -2824,6 +2836,78 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         return subtitle;
     }
 
+    /// <summary>
+    /// Sets fields on the styles a file already has, instead of replacing them like
+    /// <see cref="AssaChangeStyle"/> does: a translated Arabic subtitle inherits the source styles,
+    /// and there letter spacing hurts readability and the block may need to sit on the right - but
+    /// the rest of each style (font, colors, margins) should survive (issue #14150).
+    /// </summary>
+    private Subtitle AssaChangeStyleProperties(Subtitle subtitle)
+    {
+        var c = _config.AssaChangeStyleProperties;
+        if (!c.IsActive || (!c.SetSpacing && !c.SetAlignment))
+        {
+            return subtitle;
+        }
+
+        if (subtitle.OriginalFormat == null || subtitle.OriginalFormat.Name != AdvancedSubStationAlpha.NameOfFormat)
+        {
+            return subtitle;
+        }
+
+        var alignment = GetAssaStyleAlignment(c.Alignment);
+        if (c.SetAlignment && alignment == null)
+        {
+            return subtitle;
+        }
+
+        if (string.IsNullOrEmpty(subtitle.Header))
+        {
+            subtitle.Header = AdvancedSubStationAlpha.DefaultHeader;
+        }
+
+        var styles = AdvancedSubStationAlpha.GetSsaStylesFromHeader(subtitle.Header);
+        if (styles.Count == 0)
+        {
+            return subtitle;
+        }
+
+        foreach (var style in styles)
+        {
+            if (c.SetSpacing)
+            {
+                style.Spacing = c.Spacing;
+            }
+
+            if (c.SetAlignment)
+            {
+                style.Alignment = alignment;
+            }
+        }
+
+        subtitle.Header = AdvancedSubStationAlpha.GetHeaderAndStylesFromAdvancedSubStationAlpha(subtitle.Header, styles);
+
+        return subtitle;
+    }
+
+    /// <summary>
+    /// Turns an "an1".."an9" drop-down code into the numpad digit an ASSA style's Alignment field
+    /// holds. Returns null for anything else, so a hand-edited setting cannot write a broken style.
+    /// </summary>
+    internal static string? GetAssaStyleAlignment(string? alignmentCode)
+    {
+        if (alignmentCode == null ||
+            alignmentCode.Length != 3 ||
+            !alignmentCode.StartsWith("an", StringComparison.Ordinal) ||
+            alignmentCode[2] < '1' ||
+            alignmentCode[2] > '9')
+        {
+            return null;
+        }
+
+        return alignmentCode.Substring(2);
+    }
+
     private Subtitle MergeShortLines(Subtitle subtitle)
     {
         if (!_config.MergeShortLines.IsActive)
@@ -2984,7 +3068,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         Configuration.Settings.Tools.AutoTranslateNllbApiUrl = Se.Settings.AutoTranslate.NllbApiUrl;
 
-        Configuration.Settings.Tools.AutoTranslateNllbServeUrl = Se.Settings.AutoTranslate.NnlbServeUrl;
+        Configuration.Settings.Tools.AutoTranslateNllbServeUrl = Se.Settings.AutoTranslate.NllbServeUrl;
 
         Configuration.Settings.Tools.AutoTranslateCrispAsrExe = Se.Settings.AutoTranslate.CrispAsrExe;
         Configuration.Settings.Tools.AutoTranslateCrispAsrModel = Se.Settings.AutoTranslate.CrispAsrModel;
@@ -3022,7 +3106,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         for (var i = 0; i < subtitle.Paragraphs.Count && i < translatedSubtitle.Count; i++)
         {
-            subtitle.Paragraphs[i].Text = translatedSubtitle[i].TranslatedText;
+            // A row the engine never returned text for keeps its source text rather than
+            // being blanked - an engine failure part way through must not empty the rest.
+            if (!string.IsNullOrEmpty(translatedSubtitle[i].TranslatedText))
+            {
+                subtitle.Paragraphs[i].Text = translatedSubtitle[i].TranslatedText;
+            }
         }
 
         return subtitle;
@@ -3055,6 +3144,13 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             RemoveIfOnlyMusicSymbols = s.IsRemoveOnlyMusicSymbolsOn,
             CustomStart = s.CustomStart,
             CustomEnd = s.CustomEnd,
+            // The whitelist the dialog edits, not the libse default: without this the batch run
+            // kept using "YES, NO, WHY, HI, OK, TV" and ignored whatever the user configured.
+            UppercaseWhitelist = (s.UppercaseWhitelist ?? string.Empty)
+                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Trim())
+                .Where(p => p.Length > 0)
+                .ToList(),
         };
 
         foreach (var item in s.TextContains.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries))

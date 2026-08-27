@@ -51,6 +51,7 @@ public partial class CompareViewModel : ObservableObject
     private List<SubtitleLineViewModel> _leftLines = new();
     private List<SubtitleLineViewModel> _rightLines = new();
     private string _language = string.Empty;
+    private bool _languageDirty = true;
 
     // Theme aware - the light pastels are unreadable under the dark theme's near-white text (#13435).
     private static IBrush ListViewRed => CompareColors.OnlyInOneFileRow;
@@ -88,11 +89,14 @@ public partial class CompareViewModel : ObservableObject
 
         IsReloadFromFileVisible = !string.IsNullOrEmpty(LeftFileName);
 
+        _languageDirty = true;
         Dispatcher.UIThread.Post(Compare);
     }
 
     private void Compare()
     {
+        DetectLanguageIfNeeded();
+
         LeftSubtitles.Clear();
         foreach (var l in _leftLines)
         {
@@ -378,6 +382,28 @@ public partial class CompareViewModel : ObservableObject
 
     private bool ShouldBreakToLetter() => _language != null && (_language == "ja" || _language == "zh");
 
+    // The word/letter diff choice needs the subtitle language (letters for ja/zh). Detection
+    // is whole-file work, so it only runs when one of the sides was (re)loaded.
+    private void DetectLanguageIfNeeded()
+    {
+        if (!_languageDirty)
+        {
+            return;
+        }
+
+        _languageDirty = false;
+        var lines = _leftLines.Count > 0 ? _leftLines : _rightLines;
+        var subtitle = new Subtitle();
+        foreach (var line in lines)
+        {
+            subtitle.Paragraphs.Add(new Paragraph(line.Text, line.StartTime.TotalMilliseconds, line.EndTime.TotalMilliseconds));
+        }
+
+        _language = subtitle.Paragraphs.Count > 0
+            ? LanguageAutoDetect.AutoDetectGoogleLanguage(subtitle)
+            : string.Empty;
+    }
+
     private void InsertMissingLines()
     {
         if (LeftSubtitles.Count == 0 || RightSubtitles.Count == 0)
@@ -421,9 +447,12 @@ public partial class CompareViewModel : ObservableObject
             right = GetRightItemOrNull(index);
         }
 
-        // insert rest
+        // insert rest - pad to the max of the *current* collection counts: the alignment
+        // above inserts blanks, so one side may already have grown past the raw-line max,
+        // and every consumer of the two lists assumes equal lengths
+        var maxNow = Math.Max(LeftSubtitles.Count, RightSubtitles.Count);
         var minSub = LeftSubtitles.Count < RightSubtitles.Count ? LeftSubtitles : RightSubtitles;
-        for (var idx = minSub.Count; idx < max; idx++)
+        for (var idx = minSub.Count; idx < maxNow; idx++)
         {
             minSub.Insert(idx, new CompareItem());
         }
@@ -563,6 +592,7 @@ public partial class CompareViewModel : ObservableObject
         LeftFileNameHasChanges = false;
         LeftFileName = fileName;
 
+        _languageDirty = true;
         Dispatcher.UIThread.Post(Compare);
     }
 
@@ -590,6 +620,7 @@ public partial class CompareViewModel : ObservableObject
         RightFileName = fileName;
         IsReloadFromFileVisible = false;
 
+        _languageDirty = true;
         Dispatcher.UIThread.Post(Compare);
     }
 
@@ -617,6 +648,7 @@ public partial class CompareViewModel : ObservableObject
         RightFileName = fileName;
         IsReloadFromFileVisible = false;
 
+        _languageDirty = true;
         Dispatcher.UIThread.Post(Compare);
     }
 
@@ -970,6 +1002,7 @@ public partial class CompareViewModel : ObservableObject
                     LeftFileNameHasChanges = false;
                     LeftFileName = path;
 
+                    _languageDirty = true;
                     Dispatcher.UIThread.Post(Compare);
                     break;
                 }
@@ -1006,6 +1039,7 @@ public partial class CompareViewModel : ObservableObject
 
                     RightFileName = path;
 
+                    _languageDirty = true;
                     Dispatcher.UIThread.Post(Compare);
                     break;
                 }
