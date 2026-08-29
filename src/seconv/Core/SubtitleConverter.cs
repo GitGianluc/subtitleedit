@@ -867,10 +867,15 @@ internal class SubtitleConverter
             subtitle.AddTimeToAllParagraphs(options.Offset.Value);
         }
 
-        // Apply target frame rate via libse (handles frame-based formats correctly)
-        if (options.Fps.HasValue && options.TargetFps.HasValue)
+        // Apply target frame rate via libse (handles frame-based formats correctly).
+        // --target-fps on its own used to be accepted and then silently ignored; SE4 converts from
+        // the current frame rate in that case, and the image path here already does the same.
+        if (options.TargetFps is > 0)
         {
-            subtitle.ChangeFrameRate(options.Fps.Value, options.TargetFps.Value);
+            // Whole milliseconds: scaling start and end independently leaves fractional times in
+            // everything seconv writes, and rounds two equal-length cues to different lengths.
+            // The Change frame rate dialog was fixed the same way for #14056.
+            subtitle.ChangeFrameRateWholeMilliseconds(options.Fps ?? Configuration.Settings.General.CurrentFrameRate, options.TargetFps.Value);
         }
 
         // Scale all times by 100/percent (matches Sync > Change Speed in the UI)
@@ -1159,7 +1164,8 @@ internal record class ConversionOptions
     public string OcrEngine { get; init; } = "tesseract";
 
     /// <summary>Language code or human name passed to the OCR engine (Tesseract: ISO 639-2 like <c>eng</c>; Paddle: <c>en</c>; Ollama: human name like <c>English</c>).</summary>
-    public string OcrLanguage { get; init; } = "eng";
+    /// <summary>Null = let each OCR engine apply its own default code set.</summary>
+    public string? OcrLanguage { get; init; }
 
     /// <summary>Path to a <c>.nocr</c> database file (required when <c>OcrEngine == "nocr"</c>).</summary>
     public string? OcrDb { get; init; }
@@ -1209,6 +1215,12 @@ internal record class ConversionOptions
 
     /// <summary>llama.cpp OCR model: curated <c>.gguf</c> file name or full path (default: first installed OCR model).</summary>
     public string? OcrModel { get; init; }
+
+    /// <summary>
+    /// Prompt for the prompt-driven OCR engines (llamacpp, ollama); <c>{language}</c> is replaced
+    /// with <see cref="OcrLanguage"/>. Null = each engine's built-in default.
+    /// </summary>
+    public string? OcrPrompt { get; init; }
 
     /// <summary>Auto-translate target language (code or English name). Non-null enables translation.</summary>
     public string? TranslateTo { get; init; }

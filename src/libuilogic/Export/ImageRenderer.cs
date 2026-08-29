@@ -330,9 +330,9 @@ public static class ImageRenderer
             {
                 var lineWidth = lineWidths[li];
                 float textX;
-                if (ip.ContentAlignment == ExportContentAlignment.Center)
+                if (ip.ResolvedContentAlignment == ExportContentAlignment.Center)
                     textX = padLeft + (maxLineWidth - lineWidth) / 2;
-                else if (ip.ContentAlignment == ExportContentAlignment.Right)
+                else if (ip.ResolvedContentAlignment == ExportContentAlignment.Right)
                     textX = padLeft + maxLineWidth - lineWidth;
                 else
                     textX = padLeft;
@@ -379,7 +379,12 @@ public static class ImageRenderer
         var lineWidths = new float[lines.Count];
         for (var li = 0; li < lines.Count; li++)
         {
-            var line = lines[li];
+            // Measure in the SAME order the line is drawn in. Reversing for RTL changes which
+            // segment is last, and the 0.17em styled-segment padding is only added to "not the
+            // last one" - so an RTL line was measured with that padding on a different segment
+            // than it was rendered with, shifting centered/right-aligned text and, through
+            // maxLineWidth, every other line of the same subtitle.
+            var line = ip.IsRightToLeft ? lines[li].AsEnumerable().Reverse().ToList() : lines[li];
             for (var j = 0; j < line.Count; j++)
             {
                 var seg = line[j];
@@ -407,11 +412,11 @@ public static class ImageRenderer
             // This keeps all lines within [textStartX, textStartX + maxLineWidth].
             if (ip.IsRightToLeft)
             {
-                if (ip.ContentAlignment == ExportContentAlignment.Center)
+                if (ip.ResolvedContentAlignment == ExportContentAlignment.Center)
                 {
                     currentX = textStartX + (maxLineWidth - lineWidth) / 2;
                 }
-                else if (ip.ContentAlignment == ExportContentAlignment.Left)
+                else if (ip.ResolvedContentAlignment == ExportContentAlignment.Left)
                 {
                     currentX = textStartX + maxLineWidth - lineWidth;
                 }
@@ -422,11 +427,11 @@ public static class ImageRenderer
             }
             else
             {
-                if (ip.ContentAlignment == ExportContentAlignment.Center)
+                if (ip.ResolvedContentAlignment == ExportContentAlignment.Center)
                 {
                     currentX = textStartX + (maxLineWidth - lineWidth) / 2;
                 }
-                else if (ip.ContentAlignment == ExportContentAlignment.Right)
+                else if (ip.ResolvedContentAlignment == ExportContentAlignment.Right)
                 {
                     currentX = textStartX + maxLineWidth - lineWidth;
                 }
@@ -560,7 +565,12 @@ public static class ImageRenderer
         var lineWidths = new float[lines.Count];
         for (var li = 0; li < lines.Count; li++)
         {
-            var line = lines[li];
+            // Measure in the SAME order the line is drawn in. Reversing for RTL changes which
+            // segment is last, and the 0.17em styled-segment padding is only added to "not the
+            // last one" - so an RTL line was measured with that padding on a different segment
+            // than it was rendered with, shifting centered/right-aligned text and, through
+            // maxLineWidth, every other line of the same subtitle.
+            var line = ip.IsRightToLeft ? lines[li].AsEnumerable().Reverse().ToList() : lines[li];
             for (var j = 0; j < line.Count; j++)
             {
                 var seg = line[j];
@@ -590,12 +600,12 @@ public static class ImageRenderer
             var lineWidth = lineWidths[li];
 
             float currentX;
-            if (ip.ContentAlignment == ExportContentAlignment.Center)
+            if (ip.ResolvedContentAlignment == ExportContentAlignment.Center)
             {
                 currentX = textStartX + (maxLineWidth - lineWidth) / 2;
             }
-            else if ((ip.ContentAlignment == ExportContentAlignment.Right && !ip.IsRightToLeft) ||
-                     (ip.ContentAlignment == ExportContentAlignment.Left && ip.IsRightToLeft))
+            else if ((ip.ResolvedContentAlignment == ExportContentAlignment.Right && !ip.IsRightToLeft) ||
+                     (ip.ResolvedContentAlignment == ExportContentAlignment.Left && ip.IsRightToLeft))
             {
                 currentX = textStartX + maxLineWidth - lineWidth;
             }
@@ -714,12 +724,12 @@ public static class ImageRenderer
         {
             var lineWidth = lineWidths[li];
             float lineLeft;
-            if (ip.ContentAlignment == ExportContentAlignment.Center)
+            if (ip.ResolvedContentAlignment == ExportContentAlignment.Center)
             {
                 lineLeft = textStartX + (maxLineWidth - lineWidth) / 2;
             }
-            else if ((ip.ContentAlignment == ExportContentAlignment.Right && !ip.IsRightToLeft) ||
-                     (ip.ContentAlignment == ExportContentAlignment.Left && ip.IsRightToLeft))
+            else if ((ip.ResolvedContentAlignment == ExportContentAlignment.Right && !ip.IsRightToLeft) ||
+                     (ip.ResolvedContentAlignment == ExportContentAlignment.Left && ip.IsRightToLeft))
             {
                 lineLeft = textStartX + maxLineWidth - lineWidth;
             }

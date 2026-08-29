@@ -1107,7 +1107,9 @@ namespace Nikse.SubtitleEdit.Core.Common
                 text = beginTag + text + endTag;
             }
 
-            if (italicBeginTagCount == 0 && italicEndTagCount == 2)
+            // "else if": the counts above are stale after the block just ran, so this used to undo
+            // it - rewriting the closing tag it had just added into a second opening tag.
+            else if (italicBeginTagCount == 0 && italicEndTagCount == 2)
             {
                 var firstIndex = text.IndexOf(endTag, StringComparison.Ordinal);
                 text = text.Remove(firstIndex, endTag.Length).Insert(firstIndex, beginTag);
@@ -1184,7 +1186,11 @@ namespace Nikse.SubtitleEdit.Core.Common
 
             //<i>- You think they're they gone?<i>
             //<i>- That can't be.</i>
-            if (italicBeginTagCount == 3 && italicEndTagCount == 1 && noOfLines == 2)
+            // GetNumberOfLines counts '\n', so noOfLines is 2 for a text broken with a bare "\n"
+            // too - and on Windows IndexOf(Environment.NewLine) then returns -1 and Substring
+            // threw. The sibling branches in this method all guard the index the same way.
+            if (italicBeginTagCount == 3 && italicEndTagCount == 1 && noOfLines == 2 &&
+                text.IndexOf(Environment.NewLine, StringComparison.Ordinal) > 0)
             {
                 var newLineIdx = text.IndexOf(Environment.NewLine, StringComparison.Ordinal);
                 var firstLine = text.Substring(0, newLineIdx).Trim();

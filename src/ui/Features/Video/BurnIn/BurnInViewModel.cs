@@ -325,6 +325,14 @@ public partial class BurnInViewModel : ObservableObject
 
         _timerAnalyze.Stop();
 
+        // A failed analyze pass writes no statistics file, so pass 2 could only fail too - it used
+        // to run anyway and report whatever was already at the output path.
+        if (_ffmpegProcess.ExitCode != 0)
+        {
+            ReportFfmpegFailure(JobItems[_jobItemIndex], "Two-pass analyze (pass 1) failed for");
+            return;
+        }
+
         Dispatcher.UIThread.Invoke(async () =>
         {
             var jobItem = JobItems[_jobItemIndex];
@@ -393,29 +401,18 @@ public partial class BurnInViewModel : ObservableObject
         var jobItem = JobItems[_jobItemIndex];
         Se.WriteToolsLog($"Burn-in ffmpeg finished with exit code {_ffmpegProcess.ExitCode} for \"{jobItem.OutputVideoFileName}\"");
 
+        // The output file existing is not proof that this run produced it: with an old file at the
+        // target path a refused or failed ffmpeg passed the check, and the job was reported as
+        // "Done" while the stale file was left untouched (issue #14210).
+        if (_ffmpegProcess.ExitCode != 0)
+        {
+            ReportFfmpegFailure(jobItem, "ffmpeg failed for");
+            return;
+        }
+
         if (!File.Exists(jobItem.OutputVideoFileName))
         {
-            Se.WriteToolsLog("Output video file not found: " + jobItem.OutputVideoFileName + Environment.NewLine +
-                             "ffmpeg: " + _ffmpegProcess.StartInfo.FileName + Environment.NewLine +
-                             "Parameters: " + _ffmpegProcess.StartInfo.Arguments + Environment.NewLine +
-                             "OS: " + Environment.OSVersion + Environment.NewLine +
-                             "64-bit: " + Environment.Is64BitOperatingSystem + Environment.NewLine +
-                             "ffmpeg exit code: " + _ffmpegProcess.ExitCode + Environment.NewLine +
-                             "ffmpeg log: " + _log);
-
-            Dispatcher.UIThread.Invoke(async () =>
-            {
-                await MessageBox.Show(Window!,
-                    "Unable to generate video",
-                    "Output video file not generated: " + jobItem.OutputVideoFileName + Environment.NewLine +
-                    "Parameters: " + _ffmpegProcess.StartInfo.Arguments,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-
-                IsGenerating = false;
-                ProgressValue = 0;
-            });
-
+            ReportFfmpegFailure(jobItem, "Output video file not generated:");
             return;
         }
 
@@ -461,6 +458,37 @@ public partial class BurnInViewModel : ObservableObject
         });
     }
 
+    /// <summary>
+    /// Tells the user that an ffmpeg run failed, and writes the full command line, exit code and
+    /// ffmpeg log to the tools log for bug reports.
+    /// </summary>
+    private void ReportFfmpegFailure(BurnInJobItem jobItem, string reason)
+    {
+        Se.WriteToolsLog(reason + " " + jobItem.OutputVideoFileName + Environment.NewLine +
+                         "ffmpeg: " + _ffmpegProcess!.StartInfo.FileName + Environment.NewLine +
+                         "Parameters: " + _ffmpegProcess.StartInfo.Arguments + Environment.NewLine +
+                         "OS: " + Environment.OSVersion + Environment.NewLine +
+                         "64-bit: " + Environment.Is64BitOperatingSystem + Environment.NewLine +
+                         "ffmpeg exit code: " + _ffmpegProcess.ExitCode + Environment.NewLine +
+                         "ffmpeg log: " + _log);
+
+        jobItem.Status = Se.Language.General.Error;
+
+        Dispatcher.UIThread.Invoke(async () =>
+        {
+            await MessageBox.Show(Window!,
+                "Unable to generate video",
+                reason + " " + jobItem.OutputVideoFileName + Environment.NewLine +
+                "ffmpeg exit code: " + _ffmpegProcess.ExitCode + Environment.NewLine +
+                "Parameters: " + _ffmpegProcess.StartInfo.Arguments,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            IsGenerating = false;
+            ProgressValue = 0;
+        });
+    }
+
     private async Task InitAndStartJobItem(int index)
     {
         _startTicks = DateTime.UtcNow.Ticks;
@@ -482,12 +510,16 @@ public partial class BurnInViewModel : ObservableObject
                 jobItem.TotalSeconds = cutSeconds;
             }
         }
-        if (mediaInfo.Dimension.Width > 0 && mediaInfo.Dimension.Height > 0)
+        // Only adopt the source resolution when the user asked for it. Unconditionally copying it
+        // threw away an explicitly picked output resolution (e.g. 720p from a 4K source), so the
+        // job still encoded at the source size.
+        if (mediaInfo.Dimension.Width > 0 && mediaInfo.Dimension.Height > 0 &&
+            (UseSourceResolution || jobItem.Width <= 0 || jobItem.Height <= 0))
         {
             jobItem.Width = mediaInfo.Dimension.Width;
             jobItem.Height = mediaInfo.Dimension.Height;
         }
-        else
+        else if (mediaInfo.Dimension.Width <= 0 || mediaInfo.Dimension.Height <= 0)
         {
             // No video stream to read a resolution from - keep the resolution chosen in the
             // UI and burn the subtitles onto a generated black canvas (issue #11570).
@@ -850,7 +882,8 @@ public partial class BurnInViewModel : ObservableObject
             : _tempSubtitleFiles.Write(subtitle, new SubRip());
 
         _mediaInfo = FfmpegMediaInfo2.Parse(VideoFileName);
-        if (_mediaInfo.Dimension.Width > 0 && _mediaInfo.Dimension.Height > 0)
+        if (_mediaInfo.Dimension.Width > 0 && _mediaInfo.Dimension.Height > 0 &&
+            (UseSourceResolution || VideoWidth is null or <= 0 || VideoHeight is null or <= 0))
         {
             VideoWidth = _mediaInfo.Dimension.Width;
             VideoHeight = _mediaInfo.Dimension.Height;
@@ -1047,7 +1080,7 @@ public partial class BurnInViewModel : ObservableObject
 
         var result = await _windowService.ShowDialogAsync<BurnInLogoWindow, BurnInLogoViewModel>(Window!, vm =>
         {
-            vm.BurnInLogo = BurnInLogo;
+            vm.BurnInLogo = BurnInLogo.Clone();
             vm.Initialize(VideoFileName, VideoWidth.Value, VideoHeight.Value);
         });
 
@@ -1715,7 +1748,7 @@ public partial class BurnInViewModel : ObservableObject
 
     private void FillPreset(string videoCodec)
     {
-        VideoPresetText = "Preset";
+        VideoPresetText = Se.Language.Video.BurnIn.Preset;
         var previousPreset = SelectedVideoPreset;
         SelectedVideoPreset = null;
 
@@ -1828,7 +1861,7 @@ public partial class BurnInViewModel : ObservableObject
 
             defaultItem = "standard";
 
-            VideoPresetText = "Profile";
+            VideoPresetText = Se.Language.General.Profile;
         }
         else if (videoCodec.Contains("av1"))
         {
@@ -1871,7 +1904,7 @@ public partial class BurnInViewModel : ObservableObject
     {
         var previousCrf = SelectedVideoCrf;
         SelectedVideoCrf = null;
-        VideoCrfText = "CRF";
+        VideoCrfText = Se.Language.Video.BurnIn.Crf;
         VideoCrfHint = string.Empty;
 
         var items = new List<string> { " " };
@@ -1920,7 +1953,7 @@ public partial class BurnInViewModel : ObservableObject
                 items.Add(i.ToString(CultureInfo.InvariantCulture));
             }
 
-            VideoCrfText = "Quality";
+            VideoCrfText = Se.Language.General.Quality;
             VideoCrfHint = "0=best quality, 10=best speed";
             VideoCrf.Clear();
             VideoCrf.AddRange(items);
@@ -1937,7 +1970,7 @@ public partial class BurnInViewModel : ObservableObject
                 items.Add(i.ToString(CultureInfo.InvariantCulture));
             }
 
-            VideoCrfText = "Quality";
+            VideoCrfText = Se.Language.General.Quality;
             VideoCrfHint = "1=lowest quality, 100=best quality (Apple silicon only)";
             VideoCrf.Clear();
             VideoCrf.AddRange(items);

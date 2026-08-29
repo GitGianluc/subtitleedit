@@ -413,7 +413,14 @@ public partial class SpeechToTextViewModel : ObservableObject
         {
             Se.Settings.Tools.AudioToText.WhisperLanguageCode = SelectedLanguage?.Code ?? string.Empty;
         }
-        Se.Settings.Tools.AudioToText.CrispAsrForcedAligner = SelectedForcedAligner?.Choice ?? ForcedAlignerOption.BuiltInChoice;
+        // Only write when this window actually has an aligner selected. SaveSettings runs on
+        // every EngineChanged, so with a non-CrispASR engine (SelectedForcedAligner == null) the
+        // "?? built-in" fallback overwrote the aligner the user had chosen in Import plain text >
+        // Forced aligner setup - the only place that reads this key back.
+        if (SelectedForcedAligner != null)
+        {
+            Se.Settings.Tools.AudioToText.CrispAsrForcedAligner = SelectedForcedAligner.Choice;
+        }
 
         Se.Settings.Tools.OpenAiCompatibleSttUrl = OpenAiCompatibleSttUrl ?? string.Empty;
         Se.Settings.Tools.OpenAiCompatibleSttApiKey = OpenAiCompatibleSttApiKey ?? string.Empty;
@@ -537,7 +544,10 @@ public partial class SpeechToTextViewModel : ObservableObject
             ? ForcedAlignerOption.BuiltInChoice
             : (crispEngine is CrispAsrQwen3 or CrispAsrMega or CrispAsrFunAsrNano ? ForcedAlignerOption.Qwen3Choice : ForcedAlignerOption.CanaryCtcChoice);
 
-        var match = ForcedAligners.FirstOrDefault(p => p.Choice == preferredChoice)
+        // Prefer what was saved - otherwise this window could never restore the user's own pick
+        // either, since nothing here ever read the setting back.
+        var match = ForcedAligners.FirstOrDefault(p => p.Choice == Se.Settings.Tools.AudioToText.CrispAsrForcedAligner)
+                    ?? ForcedAligners.FirstOrDefault(p => p.Choice == preferredChoice)
                     ?? ForcedAligners.FirstOrDefault();
         if (!ReferenceEquals(SelectedForcedAligner, match))
         {
@@ -923,7 +933,10 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// subtitles and said so, which is all the user was told in #14038. The concrete case there
     /// was the crispasr v0.8.29 GPU packages, built with AVX-512 against a CI runner that had it
     /// (CrispASR #374) - every CPU without AVX-512 got this on the CUDA/Vulkan build while the CPU
-    /// build ran fine, so naming the installed package is most of the answer.
+    /// build ran fine, so naming the installed package is most of the answer. That build flaw is
+    /// fixed from v0.8.30 (the current pin), but the message still earns its keep: a pre-AVX2 CPU
+    /// hits the same silent death on the AVX2 CPU package, and an install predating the pin bump
+    /// keeps the broken GPU binary until the user downloads the engine again.
     /// </summary>
     /// <param name="exitCode">The engine process exit code, or null when it could not be read.</param>
     /// <param name="variant">
@@ -2227,7 +2240,9 @@ public partial class SpeechToTextViewModel : ObservableObject
         _filesToDelete.Add(targetFile);
         try
         {
-            var process = GetFfmpegProcess(_videoFileName, _audioTrackNumber, targetFile);
+            // One ffmpeg per batch item; the sibling _whisperProcess is disposed, and the
+            // text-to-speech twin uses "using var" for the same call.
+            using var process = GetFfmpegProcess(_videoFileName, _audioTrackNumber, targetFile);
             if (process == null)
             {
                 return null;

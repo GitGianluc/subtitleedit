@@ -708,7 +708,9 @@ namespace Nikse.SubtitleEdit.Core.Common
 
             foreach (var prefix in Prefixes)
             {
-                if (newFirstWord.StartsWith(prefix, StringComparison.Ordinal) && !newFirstWord.EndsWith(prefix + Environment.NewLine, StringComparison.Ordinal))
+                // EndsWith cannot express "the prefix is followed by a line break" - the prefix was
+                // just matched at the START. HasPrefix below is the correct twin of this test.
+                if (newFirstWord.StartsWith(prefix, StringComparison.Ordinal) && !newFirstWord.StartsWith(prefix + Environment.NewLine, StringComparison.Ordinal))
                 {
                     newFirstWord = newFirstWord.Substring(prefix.Length);
                 }
@@ -962,15 +964,15 @@ namespace Nikse.SubtitleEdit.Core.Common
             var endIndex = input.LastIndexOf("</", StringComparison.Ordinal);
             if (endIndex >= 0)
             {
+                // A truncated closing tag ("</i" with no '>') made IndexOf return -1, and the +1
+                // turned that into 0 - a negative Substring length below, which threw.
+                var closeIndex = input.IndexOf('>', endIndex);
                 if (startIndex == endIndex)
                 {
                     startIndex = 0;
-                    endIndex = input.IndexOf('>', endIndex) + 1;
                 }
-                else
-                {
-                    endIndex = input.IndexOf('>', endIndex) + 1;
-                }
+
+                endIndex = closeIndex >= 0 ? closeIndex + 1 : input.Length;
             }
             else
             {

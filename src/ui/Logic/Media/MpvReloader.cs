@@ -72,6 +72,7 @@ public class MpvReloader : IMpvReloader
             // Applied on every refresh, not only on load: toggling "margin is part of the
             // subtitle area" in settings has to take effect on the video already open (#13934).
             mpvContext.ApplySubtitleMarginArea();
+            mpvContext.ApplySubtitleJustify();
 
             var uiFormatType = uiFormat.GetType();
 
@@ -241,43 +242,9 @@ public class MpvReloader : IMpvReloader
                 subtitle.Header = MpvPreviewStyleHeader;
             }
 
-            if (oldHeader != null && oldHeader.Length > 20 && oldHeader.AsSpan(3, 3).SequenceEqual("STL"))
+            if (EbuStlPreviewStyler.IsStlHeader(oldHeader))
             {
-                var previewFontName = Configuration.IsRunningOnLinux ? Configuration.DefaultLinuxFontName : "Tahoma";
-                var boxStyle = $"Style: Box,{previewFontName},12,&H00FFFFFF,&H0300FFFF,&H00000000,&H02000000,-1,0,0,0,100,100,0,0,3,2,0,2,10,10,10,1{Environment.NewLine}Style: Default,";
-                subtitle.Header = subtitle.Header.Replace("Style: Default,", boxStyle, StringComparison.Ordinal);
-
-                var useBox = false;
-                if (Configuration.Settings.SubtitleSettings.EbuStlTeletextUseBox)
-                {
-                    try
-                    {
-                        var encoding = Ebu.GetEncoding(oldHeader[..3]);
-                        var buffer = encoding.GetBytes(oldHeader);
-                        var header = Ebu.ReadHeader(buffer);
-                        if (header.DisplayStandardCode != "0")
-                        {
-                            useBox = true;
-                        }
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-                }
-
-                for (var index = 0; index < subtitle.Paragraphs.Count; index++)
-                {
-                    var p = subtitle.Paragraphs[index];
-
-                    p.Extra = useBox ? "Box" : "Default";
-
-                    if (p.Text.Contains("<box>", StringComparison.Ordinal))
-                    {
-                        p.Extra = "Box";
-                        p.Text = p.Text.Replace("<box>", string.Empty).Replace("</box>", string.Empty);
-                    }
-                }
+                EbuStlPreviewStyler.Apply(subtitle, oldHeader, GetMpvPreviewStyle(Se.Settings.Video), MpvPreviewTitle);
             }
 
             // TTML regions, PAC vertical alignment and EBU STL teletext rows say where the line
@@ -310,10 +277,12 @@ public class MpvReloader : IMpvReloader
         set => _mpvPreviewStyleHeader = value;
     }
 
+    private const string MpvPreviewTitle = "MPV preview file";
+
     public void UpdateMpvStyle()
     {
         var mpvStyle = GetMpvPreviewStyle(Se.Settings.Video);
-        MpvPreviewStyleHeader = string.Format(AdvancedSubStationAlpha.HeaderNoStyles, "MPV preview file", mpvStyle.ToRawAss(SsaStyle.DefaultAssStyleFormat));
+        MpvPreviewStyleHeader = string.Format(AdvancedSubStationAlpha.HeaderNoStyles, MpvPreviewTitle, mpvStyle.ToRawAss(SsaStyle.DefaultAssStyleFormat));
     }
 
     private static SsaStyle GetMpvPreviewStyle(SeVideo gs)

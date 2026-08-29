@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Core.Forms.FixCommonErrors;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Logic.Config.Language;
+using Nikse.SubtitleEdit.UiLogic.Ocr;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -19,7 +20,7 @@ public class Se
     internal const int CurrentMacOsFontMigrationVersion = 1;
     internal const int CurrentShortcutsMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.2.0-beta26";
+    public static string Version { get; set; } = "v5.2.0-beta28";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -38,6 +39,16 @@ public class Se
     public string Surround2Right { get; set; } = "♫";
     public string Surround3Left { get; set; } = "[";
     public string Surround3Right { get; set; } = "]";
+    public string Surround4Left { get; set; } = string.Empty;
+    public string Surround4Right { get; set; } = string.Empty;
+    public string Surround5Left { get; set; } = string.Empty;
+    public string Surround5Right { get; set; } = string.Empty;
+    public string Surround6Left { get; set; } = string.Empty;
+    public string Surround6Right { get; set; } = string.Empty;
+    public string Surround7Left { get; set; } = string.Empty;
+    public string Surround7Right { get; set; } = string.Empty;
+    public string Surround8Left { get; set; } = string.Empty;
+    public string Surround8Right { get; set; } = string.Empty;
     public string Actor1 { get; set; } = "Actor 1";
     public string Actor2 { get; set; } = "Actor 2";
     public string Actor3 { get; set; } = "Actor 3";
@@ -313,6 +324,53 @@ public class Se
         }
     }
 
+    /// <summary>
+    /// Number of configurable "surround with" slots (#14232). Slots are one-based; the ones left
+    /// blank are simply hidden from the subtitle grid context menu.
+    /// </summary>
+    public const int SurroundWithSlotCount = 8;
+
+    public string GetSurroundLeft(int slotNumber) => slotNumber switch
+    {
+        1 => Surround1Left,
+        2 => Surround2Left,
+        3 => Surround3Left,
+        4 => Surround4Left,
+        5 => Surround5Left,
+        6 => Surround6Left,
+        7 => Surround7Left,
+        8 => Surround8Left,
+        _ => string.Empty,
+    };
+
+    public string GetSurroundRight(int slotNumber) => slotNumber switch
+    {
+        1 => Surround1Right,
+        2 => Surround2Right,
+        3 => Surround3Right,
+        4 => Surround4Right,
+        5 => Surround5Right,
+        6 => Surround6Right,
+        7 => Surround7Right,
+        8 => Surround8Right,
+        _ => string.Empty,
+    };
+
+    public void SetSurround(int slotNumber, string left, string right)
+    {
+        switch (slotNumber)
+        {
+            case 1: Surround1Left = left; Surround1Right = right; break;
+            case 2: Surround2Left = left; Surround2Right = right; break;
+            case 3: Surround3Left = left; Surround3Right = right; break;
+            case 4: Surround4Left = left; Surround4Right = right; break;
+            case 5: Surround5Left = left; Surround5Right = right; break;
+            case 6: Surround6Left = left; Surround6Right = right; break;
+            case 7: Surround7Left = left; Surround7Right = right; break;
+            case 8: Surround8Left = left; Surround8Right = right; break;
+        }
+    }
+
     public void InitializeMainShortcuts(MainViewModel vm)
     {
         MigrateShortcuts();
@@ -436,28 +494,31 @@ public class Se
 
     public static void LoadSettings(string settingsFileName)
     {
-        if (!System.IO.File.Exists(settingsFileName))
+        // Only the deserialize is conditional. Returning early on a missing file also skipped
+        // UpdateLibSeSettings() - the single bridge onto libse's Configuration.Settings - so on a
+        // first run libse kept its own defaults for the whole session. Among them
+        // RememberUseAlwaysList, which gates every <lang>_UseAlways.xml load and save, so spell
+        // check's "Change all" was silently session-only until the first settings save.
+        var settingsFileExists = System.IO.File.Exists(settingsFileName);
+        if (settingsFileExists)
         {
-            MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), false);
-            return;
+            try
+            {
+                // Stream + source-generated metadata: no UTF-16 string round-trip and no
+                // runtime reflection over the settings type graph.
+                using var stream = System.IO.File.OpenRead(settingsFileName);
+                Settings = JsonSerializer.Deserialize(stream, SeJsonContext.Default.Se)!;
+            }
+            catch (Exception exception)
+            {
+                Se.LogError(exception);
+                Settings = new Se();
+            }
+
+            SetDefaultValues();
         }
 
-        try
-        {
-            // Stream + source-generated metadata: no UTF-16 string round-trip and no
-            // runtime reflection over the settings type graph.
-            using var stream = System.IO.File.OpenRead(settingsFileName);
-            Settings = JsonSerializer.Deserialize(stream, SeJsonContext.Default.Se)!;
-        }
-        catch (Exception exception)
-        {
-            Se.LogError(exception);
-            Settings = new Se();
-        }
-
-        SetDefaultValues();
-
-        MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), true);
+        MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), settingsFileExists);
 
         UpdateLibSeSettings();
 
@@ -483,6 +544,22 @@ public class Se
 
         // Once marked, a later explicit System Font selection must remain untouched.
         appearance.MacOsFontMigrationVersion = CurrentMacOsFontMigrationVersion;
+    }
+
+    /// <summary>
+    /// Moves a settings file still holding the pre-#14221 llama.cpp OCR prompt onto the current
+    /// default. That prompt asked the models to "preserve line breaks", which measurably merged
+    /// two-line subtitles into one (see <see cref="SeOcrDefaults.LlamaCppOcrPrompt"/>), and the
+    /// default is persisted, so without this only fresh installs would ever get the fix. Matched
+    /// verbatim: a user who has edited the prompt at all keeps their own version.
+    /// </summary>
+    internal static void MigrateLlamaCppOcrPrompt(SeOcr ocr)
+    {
+        const string legacyPrompt = "Extract all text exactly as written. The language is {language}. Preserve line breaks.";
+        if (ocr.LlamaCppOcrPrompt?.Trim() == legacyPrompt)
+        {
+            ocr.LlamaCppOcrPrompt = SeOcrDefaults.LlamaCppOcrPrompt;
+        }
     }
 
     /// <summary>
@@ -690,6 +767,8 @@ public class Se
             Settings.Ocr = new();
         }
 
+        MigrateLlamaCppOcrPrompt(Settings.Ocr);
+
         if (Settings.Formats == null)
         {
             Settings.Formats = new SeFormats();
@@ -803,6 +882,7 @@ public class Se
         // seeds them from the loaded file, and this sync runs after every SaveSettings - it would
         // clobber the file's flags. They are applied once at startup in LoadSettings instead.
         var ebu = Settings.File.EbuSaveOptions;
+        ss.EbuStlJustificationCode = ebu.JustificationCode;
         ss.EbuStlMarginTop = ebu.MarginTop;
         ss.EbuStlMarginBottom = ebu.MarginBottom;
         ss.EbuStlNewLineRows = ebu.NewLineRows;

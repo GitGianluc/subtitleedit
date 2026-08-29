@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -803,7 +803,7 @@ public partial class BinaryEditViewModel : ObservableObject
             var subtitles = tsParser.GetDvbSubtitles(0);
             if (subtitles.Count > 0)
             {
-                return new OcrSubtitleTransportStream(tsParser, subtitles, fileName);
+                return new OcrSubtitleTransportStream(subtitles);
             }
 
             return null;
@@ -2226,14 +2226,14 @@ public partial class BinaryEditViewModel : ObservableObject
         var imageSubtitle = await LoadImageSubtitle(fileName);
         if (imageSubtitle == null)
         {
-            await MessageBox.Show(Window, Se.Language.General.Error, "Image based subtitle format not found/supported.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            await MessageBox.Show(Window, Se.Language.General.Error, Se.Language.Tools.ImageBasedEdit.ImageBasedFormatNotSupported, MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
         var ocrItems = imageSubtitle.MakeOcrSubtitleItems();
         if (ocrItems.Count == 0)
         {
-            await MessageBox.Show(Window, Se.Language.General.Error, "No subtitles found in the file.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            await MessageBox.Show(Window, Se.Language.General.Error, Se.Language.General.NoSubtitlesFound, MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 

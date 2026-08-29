@@ -48,6 +48,7 @@ using Nikse.SubtitleEdit.Features.Edit.ShowHistory;
 using Nikse.SubtitleEdit.Features.Files.Compare;
 using Nikse.SubtitleEdit.Features.Files.Export.ExportEbuStl;
 using Nikse.SubtitleEdit.Features.Files.ExportCavena890;
+using Nikse.SubtitleEdit.Features.Files.ExportDvbTeletext;
 using Nikse.SubtitleEdit.Features.Files.ExportCustomTextFormat;
 using Nikse.SubtitleEdit.Features.Files.ExportEbuStl;
 using Nikse.SubtitleEdit.Features.Files.ExportImageBased;
@@ -144,6 +145,8 @@ using Nikse.SubtitleEdit.Features.Tools.MergeSubtitlesWithSameTimeCodes;
 using Nikse.SubtitleEdit.Features.Tools.RemoveTextForHearingImpaired;
 using Nikse.SubtitleEdit.Features.Tools.Renumber;
 using Nikse.SubtitleEdit.Features.Tools.SortBy;
+using Nikse.SubtitleEdit.Features.Main.AssistedMove;
+using Nikse.SubtitleEdit.Features.Main.AssistedSplit;
 using Nikse.SubtitleEdit.Features.Tools.SplitBreakLongLines;
 using Nikse.SubtitleEdit.Features.Tools.SplitSubtitle;
 using Nikse.SubtitleEdit.Features.Translate;
@@ -422,6 +425,19 @@ public partial class MainViewModel :
     [ObservableProperty] private string _surroundWith1Text;
     [ObservableProperty] private string _surroundWith2Text;
     [ObservableProperty] private string _surroundWith3Text;
+    [ObservableProperty] private string _surroundWith4Text;
+    [ObservableProperty] private string _surroundWith5Text;
+    [ObservableProperty] private string _surroundWith6Text;
+    [ObservableProperty] private string _surroundWith7Text;
+    [ObservableProperty] private string _surroundWith8Text;
+    [ObservableProperty] private bool _isSurroundWith1Visible;
+    [ObservableProperty] private bool _isSurroundWith2Visible;
+    [ObservableProperty] private bool _isSurroundWith3Visible;
+    [ObservableProperty] private bool _isSurroundWith4Visible;
+    [ObservableProperty] private bool _isSurroundWith5Visible;
+    [ObservableProperty] private bool _isSurroundWith6Visible;
+    [ObservableProperty] private bool _isSurroundWith7Visible;
+    [ObservableProperty] private bool _isSurroundWith8Visible;
     [ObservableProperty] private bool _isSubtitleSecondaryVisible;
 
     public TableView SubtitleGrid { get; set; }
@@ -547,7 +563,7 @@ public partial class MainViewModel :
     VideoPlayerUndockedViewModel? _videoPlayerUndockedViewModel;
     AudioVisualizerUndockedViewModel? _audioVisualizerUndockedViewModel;
     bool _suppressUndockedTopmost;
-    bool _mainWindowLostForegroundToOtherApp;
+    bool _foregroundBelongsToMainWindow;
     bool _undockedWindowPointerPressed;
     FindViewModel? _findViewModel;
     Control? _findPreviousFocus;
@@ -893,6 +909,14 @@ public partial class MainViewModel :
         _subtitleFileName = string.Empty;
         Subtitles = [];
         FilePropertiesText = string.Empty;
+        SurroundWith1Text = string.Empty;
+        SurroundWith2Text = string.Empty;
+        SurroundWith3Text = string.Empty;
+        SurroundWith4Text = string.Empty;
+        SurroundWith5Text = string.Empty;
+        SurroundWith6Text = string.Empty;
+        SurroundWith7Text = string.Empty;
+        SurroundWith8Text = string.Empty;
 
         SubtitleFormats = [.. SubtitleFormatHelper.GetSubtitleFormatsWithFavoritesAtTop()];
         _changingFormatProgrammatically = true;
@@ -1009,9 +1033,7 @@ public partial class MainViewModel :
         InitializeLibMpv();
         LibVlcDynamicPlayer.LibVlcPath = Se.VlcFolder;
         LoadShortcuts();
-        SurroundWith1Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround1Left, Se.Settings.Surround1Right);
-        SurroundWith2Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround2Left, Se.Settings.Surround2Right);
-        SurroundWith3Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround3Left, Se.Settings.Surround3Right);
+        UpdateSurroundWithMenuItems();
 
         StartTimers();
         _autoBackupService.StartAutoBackup(this);
@@ -1242,9 +1264,7 @@ public partial class MainViewModel :
             _shortcutManager.RegisterShortcut(shortCut);
         }
 
-        SurroundWith1Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround1Left, Se.Settings.Surround1Right);
-        SurroundWith2Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround2Left, Se.Settings.Surround2Right);
-        SurroundWith3Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround3Left, Se.Settings.Surround3Right);
+        UpdateSurroundWithMenuItems();
     }
 
     [RelayCommand]
@@ -2156,8 +2176,11 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<SsaPropertiesWindow, SsaPropertiesViewModel>(vm =>
         {
+            // Pass the dimensions we already know, as the ASSA dialog does - without them the
+            // "get resolution from video" button always re-shells ffmpeg, and does nothing at all
+            // when ffmpeg cannot parse the file.
             vm.Initialize(_subtitle, SelectedSubtitleFormat, _subtitleFileName ?? string.Empty,
-                _videoFileName ?? string.Empty);
+                _videoFileName ?? string.Empty, _mediaInfo?.Dimension.Width ?? 0, _mediaInfo?.Dimension.Height ?? 0);
         });
 
         if (result.OkPressed)
@@ -4520,6 +4543,51 @@ public partial class MainViewModel :
     }
 
     [RelayCommand]
+    private async Task ExportDvbTeletext()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        if (IsEmpty)
+        {
+            ShowSubtitleNotLoadedMessage();
+            return;
+        }
+
+        var result = await ShowDialogAsync<ExportDvbTeletextWindow, ExportDvbTeletextViewModel>(vm =>
+            vm.Initialize(Se.Settings.File.ExportDvbTeletextPageNumber, Se.Settings.File.ExportDvbTeletextLanguageCode));
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        Se.Settings.File.ExportDvbTeletextPageNumber = result.PageNumber;
+        Se.Settings.File.ExportDvbTeletextLanguageCode = result.LanguageCode;
+
+        var fileName = await _fileHelper.PickSaveFile(
+            Window!,
+            new[] { (Se.Language.File.Export.TitleExportDvbTeletext, ".dvbttx") },
+            Utilities.GetPathAndFileNameWithoutExtension(GetNewFileName()) + ".dvbttx",
+            string.Format(Se.Language.Main.SaveXFileAs, Se.Language.File.Export.TitleExportDvbTeletext));
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        var writer = new ManzanitaTeletextWriter
+        {
+            PageNumber = result.PageNumber,
+            LanguageCode = result.LanguageCode,
+            FrameRate = Configuration.Settings.General.CurrentFrameRate,
+        };
+        await File.WriteAllBytesAsync(fileName, writer.GetBytes(GetUpdateSubtitle()));
+
+        ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, Se.Language.File.Export.TitleExportDvbTeletext, fileName));
+    }
+
+    [RelayCommand]
     private async Task ExportPac()
     {
         if (Window == null)
@@ -4614,6 +4682,11 @@ public partial class MainViewModel :
         {
             saveHelper.SetFrameRate(result.StoredHeader, result.FrameRateFromSaveDialog);
         }
+
+        // The box, the justification and the row options all change how the lines are drawn in
+        // the video preview. Only subtitle edits mark it dirty, so a settings-only change used to
+        // sit there unseen until the next keystroke.
+        _mpvPreviewDirty = true;
 
         return true;
     }
@@ -8086,7 +8159,11 @@ public partial class MainViewModel :
 
             AreVideoControlsUndocked = true;
 
-            var position = vp.Position;
+            // Not vp.Position: this rebuild can land while the outgoing player is still
+            // restoring its own position - Settings -> Apply rebuilds the undocked windows and
+            // OK rebuilds them again a moment later - and a player that has not finished
+            // loading reports 0, which would come back as a rewind to the start (issue #14218).
+            var position = vp.PositionForRestore;
             var volume = vp.Volume;
             var videoFileName = vp.VideoPlayer.FileName;
 
@@ -8206,9 +8283,21 @@ public partial class MainViewModel :
     /// minimized), Windows activates the frontmost window of this process, which is a tool
     /// window, not the main window the user left. Same family as the startup case in #13569.
     ///
-    /// Only corrected when the main window was the one that lost the foreground, and only when
-    /// the activation was not aimed at the tool window itself - a click that activates a window
-    /// is delivered after the activation on Windows, so the decision waits a beat for it.
+    /// The claim on the SE foreground (_foregroundBelongsToMainWindow) is re-armable state, not a
+    /// one-shot flag: it follows the user (set while the main window is active, moved to a tool
+    /// window only by an activation the user aimed at it) and is read fresh on EVERY tool-window
+    /// activation. The first cut latched a flag when the main window deactivated and consumed it
+    /// on the first tool-window Activated, which a single churn activation - topmost churn while
+    /// another application takes over, or the foreground bouncing between the two tool windows -
+    /// disarmed for the whole round (#14168 beta 26 feedback).
+    ///
+    /// "Aimed at" is decided by the physical pointer buttons: a click that activates a window
+    /// (client area or title bar, including a drag by the title bar) still has the button down
+    /// while the activation is delivered, whereas the OS handing the foreground over because
+    /// another application's window went away does not. Where the buttons cannot be sampled the
+    /// cursor resting over the window has to do - knowing that the closing application may have
+    /// merely exposed the tool window under the cursor. The Avalonia press event only covers the
+    /// client area and arrives after the activation, so the decision still waits a beat for it.
     ///
     /// The one case this cannot tell apart from the OS handing over the foreground is the user
     /// Alt+Tabbing straight back to a tool window (they are separate entries in the task
@@ -8226,19 +8315,36 @@ public partial class MainViewModel :
 
         undockedWindow.Activated += (_, _) =>
         {
-            if (!_mainWindowLostForegroundToOtherApp)
+            if (!_foregroundBelongsToMainWindow)
             {
+                return; // the user was already working in a tool window - leave it in front
+            }
+
+            if (IsUndockedActivationAimedAtToolWindow(
+                    CursorPositionHelper.IsAnyPointerButtonDown(),
+                    undockedWindow.IsPointerOver))
+            {
+                _foregroundBelongsToMainWindow = false; // the user moved to the tool window
                 return;
             }
 
-            _mainWindowLostForegroundToOtherApp = false;
             _undockedWindowPointerPressed = false;
 
             DispatcherTimer.RunOnce(() =>
             {
-                if (Window is not { } mainWindow || !ShouldHandForegroundBackToMainWindow(
-                        _undockedWindowPointerPressed,
-                        undockedWindow.IsPointerOver,
+                if (_undockedWindowPointerPressed)
+                {
+                    // A press the button sampling missed (e.g. touch) - the user aimed here.
+                    _foregroundBelongsToMainWindow = false;
+                    return;
+                }
+
+                // Re-checked because the beat is long enough for the state to move: the user may
+                // have clicked into the main window, or the foreground may have bounced
+                // to the other tool window - whose own Activated handler owns the decision then.
+                if (!_foregroundBelongsToMainWindow ||
+                    Window is not { } mainWindow ||
+                    !ShouldHandForegroundBackToMainWindow(
                         undockedWindow.IsActive,
                         mainWindow.IsActive,
                         mainWindow.WindowState == WindowState.Minimized,
@@ -8253,22 +8359,31 @@ public partial class MainViewModel :
     }
 
     /// <summary>
-    /// Whether an undocked tool window that just took the foreground should hand it to the main
+    /// Whether an undocked tool window's activation was the user's doing rather than the OS
+    /// handing the foreground over - see <see cref="WatchUndockedForegroundSteal"/>. Pure so the
+    /// rule can be tested.
+    /// </summary>
+    internal static bool IsUndockedActivationAimedAtToolWindow(
+        bool? pointerButtonDown,
+        bool pointerOverToolWindow)
+    {
+        // The button state is authoritative when it can be sampled: the cursor merely resting
+        // over the tool window is NOT aiming - closing another application's window exposes the
+        // tool window under a cursor that never moved (Windows even synthesizes the mouse-move
+        // that flips IsPointerOver). Hover is only trusted where the buttons cannot be read.
+        return pointerButtonDown ?? pointerOverToolWindow;
+    }
+
+    /// <summary>
+    /// Whether an undocked tool window that took the foreground should hand it to the main
     /// window - see <see cref="WatchUndockedForegroundSteal"/>. Pure so the rule can be tested.
     /// </summary>
     internal static bool ShouldHandForegroundBackToMainWindow(
-        bool undockedWindowPointerPressed,
-        bool undockedWindowPointerOver,
         bool undockedWindowIsActive,
         bool mainWindowIsActive,
         bool mainWindowIsMinimized,
         bool modalDialogOpen)
     {
-        if (undockedWindowPointerPressed || undockedWindowPointerOver)
-        {
-            return false; // the user aimed at the tool window - leave it in front
-        }
-
         if (!undockedWindowIsActive || mainWindowIsActive)
         {
             return false; // the foreground already moved on
@@ -10763,7 +10878,18 @@ public partial class MainViewModel :
             return;
         }
 
-        var frameRate = _mediaInfo != null ? (double)_mediaInfo.FramesRateNonNormalized : Se.Settings.General.CurrentFrameRate;
+        // A non-null _mediaInfo can still carry a rate of 0 (ffmpeg missing, or audio-only media
+        // whose log has no fps line), so the null check alone protected nothing: "seconds" became
+        // Infinity and every shot change was pushed out of range - silently emptying the user's
+        // whole shot-change list. The sibling command above already guards it this way.
+        var frameRate = _mediaInfo != null && _mediaInfo.FramesRateNonNormalized > 0
+            ? (double)_mediaInfo.FramesRateNonNormalized
+            : Se.Settings.General.CurrentFrameRate;
+        if (frameRate < 1)
+        {
+            return;
+        }
+
         var milliseconds = 1000.0 / frameRate;
         var seconds = milliseconds / 1000.0;
 
@@ -10792,7 +10918,18 @@ public partial class MainViewModel :
             return;
         }
 
-        var frameRate = _mediaInfo != null ? (double)_mediaInfo.FramesRateNonNormalized : Se.Settings.General.CurrentFrameRate;
+        // A non-null _mediaInfo can still carry a rate of 0 (ffmpeg missing, or audio-only media
+        // whose log has no fps line), so the null check alone protected nothing: "seconds" became
+        // Infinity and every shot change was pushed out of range - silently emptying the user's
+        // whole shot-change list. The sibling command above already guards it this way.
+        var frameRate = _mediaInfo != null && _mediaInfo.FramesRateNonNormalized > 0
+            ? (double)_mediaInfo.FramesRateNonNormalized
+            : Se.Settings.General.CurrentFrameRate;
+        if (frameRate < 1)
+        {
+            return;
+        }
+
         var milliseconds = 1000.0 / frameRate;
         var seconds = milliseconds / 1000.0;
 
@@ -11571,6 +11708,12 @@ public partial class MainViewModel :
             return;
         }
 
+        // Map each paragraph handed to the dialog back to its row. The dialog copies its input
+        // with generateNewId:false, so these ids survive and still name a row in the result -
+        // which positional indexing does not: rules that remove a paragraph (FixEmptyLines is on
+        // by default) shift every later result onto its neighbour's row.
+        var rowByParagraphId = new Dictionary<Guid, SubtitleLineViewModel>(selectedItems.Count);
+
         var result = await ShowDialogAsync<FixCommonErrorsWindow, FixCommonErrorsViewModel>(vm =>
         {
             var sub = new Subtitle();
@@ -11590,6 +11733,10 @@ public partial class MainViewModel :
                     Bookmark = line.Bookmark,
                 };
                 sub.Paragraphs.Add(p);
+                if (p.Id.HasValue)
+                {
+                    rowByParagraphId[p.Id.Value] = line;
+                }
             }
 
             vm.Initialize(sub, SelectedSubtitleFormat);
@@ -11601,14 +11748,11 @@ public partial class MainViewModel :
             return;
         }
 
-        for (var i = 0; i < result.FixedSubtitle.Paragraphs.Count; i++)
+        foreach (var paragraph in result.FixedSubtitle.Paragraphs)
         {
-            var text = result.FixedSubtitle.Paragraphs[i].Text;
-            var id = selectedItems[i].Id;
-            var p = Subtitles.FirstOrDefault(x => x.Id == id);
-            if (p != null)
+            if (paragraph.Id.HasValue && rowByParagraphId.TryGetValue(paragraph.Id.Value, out var row))
             {
-                p.Text = text;
+                row.Text = paragraph.Text;
             }
         }
 
@@ -11791,8 +11935,7 @@ public partial class MainViewModel :
         _oldGenerateSpectrogram = Se.Settings.Waveform.GenerateSpectrogram;
         _oldSpectrogramStyle = Se.Settings.Waveform.SpectrogramStyle;
 
-        Se.Settings.General.WindowPositions = Se.Settings.General.WindowPositions.OrderBy(p => p.WindowName).ToList();
-        var oldSettngsSerialized = JsonSerializer.Serialize(Se.Settings);
+        var oldSettngsSerialized = SettingsChangeSnapshot.Take();
 
         var viewModel = await ShowDialogAsync<SettingsWindow, SettingsViewModel>(
     vm => { vm.Initialize(this); });
@@ -11802,10 +11945,15 @@ public partial class MainViewModel :
             return;
         }
 
-        Se.Settings.General.WindowPositions = Se.Settings.General.WindowPositions.OrderBy(p => p.WindowName).ToList();
-        var newSettingsSerialized = JsonSerializer.Serialize(Se.Settings);
+        // Apply already ran the whole thing, so only what changed *since the last Apply* is
+        // still unapplied. Comparing against the pre-dialog snapshot instead made Apply followed
+        // by OK rebuild the layout - and with it the video player - a second time, which is what
+        // rewound the video: the second rebuild sampled the position from a player that was
+        // still restoring the position the first one gave it (issue #14218).
+        var baselineSerialized = viewModel.AppliedSettingsSnapshot ?? oldSettngsSerialized;
+        var newSettingsSerialized = SettingsChangeSnapshot.Take();
 
-        if (oldSettngsSerialized != newSettingsSerialized)
+        if (baselineSerialized != newSettingsSerialized)
         {
             var firstSelectedIndex = SubtitleGrid.SelectedIndex;
 
@@ -11827,7 +11975,7 @@ public partial class MainViewModel :
                 vp.FullScreenIsVisible = Se.Settings.Video.ShowFullscreenButton;
             }
 
-            if (OnlyVideoPlayerVisibilityFlagsChanged(oldSettngsSerialized, newSettingsSerialized))
+            if (OnlyVideoPlayerVisibilityFlagsChanged(baselineSerialized, newSettingsSerialized))
             {
                 return;
             }
@@ -14073,19 +14221,85 @@ public partial class MainViewModel :
     [RelayCommand]
     private void SurroundWith1()
     {
-        SurroundWith(Se.Settings.Surround1Left, Se.Settings.Surround1Right);
+        SurroundWithSlot(1);
     }
 
     [RelayCommand]
     private void SurroundWith2()
     {
-        SurroundWith(Se.Settings.Surround2Left, Se.Settings.Surround2Right);
+        SurroundWithSlot(2);
     }
 
     [RelayCommand]
     private void SurroundWith3()
     {
-        SurroundWith(Se.Settings.Surround3Left, Se.Settings.Surround3Right);
+        SurroundWithSlot(3);
+    }
+
+    [RelayCommand]
+    private void SurroundWith4()
+    {
+        SurroundWithSlot(4);
+    }
+
+    [RelayCommand]
+    private void SurroundWith5()
+    {
+        SurroundWithSlot(5);
+    }
+
+    [RelayCommand]
+    private void SurroundWith6()
+    {
+        SurroundWithSlot(6);
+    }
+
+    [RelayCommand]
+    private void SurroundWith7()
+    {
+        SurroundWithSlot(7);
+    }
+
+    [RelayCommand]
+    private void SurroundWith8()
+    {
+        SurroundWithSlot(8);
+    }
+
+    private void SurroundWithSlot(int slotNumber)
+    {
+        SurroundWith(Se.Settings.GetSurroundLeft(slotNumber), Se.Settings.GetSurroundRight(slotNumber));
+    }
+
+    /// <summary>
+    /// Refreshes the "surround with" context menu entries; slots left unconfigured stay hidden so
+    /// the eight available slots (#14232) do not clutter the menu.
+    /// </summary>
+    private void UpdateSurroundWithMenuItems()
+    {
+        SurroundWith1Text = ShortcutsMain.GetSurroundWithTitle(1);
+        SurroundWith2Text = ShortcutsMain.GetSurroundWithTitle(2);
+        SurroundWith3Text = ShortcutsMain.GetSurroundWithTitle(3);
+        SurroundWith4Text = ShortcutsMain.GetSurroundWithTitle(4);
+        SurroundWith5Text = ShortcutsMain.GetSurroundWithTitle(5);
+        SurroundWith6Text = ShortcutsMain.GetSurroundWithTitle(6);
+        SurroundWith7Text = ShortcutsMain.GetSurroundWithTitle(7);
+        SurroundWith8Text = ShortcutsMain.GetSurroundWithTitle(8);
+
+        IsSurroundWith1Visible = IsSurroundWithSlotConfigured(1);
+        IsSurroundWith2Visible = IsSurroundWithSlotConfigured(2);
+        IsSurroundWith3Visible = IsSurroundWithSlotConfigured(3);
+        IsSurroundWith4Visible = IsSurroundWithSlotConfigured(4);
+        IsSurroundWith5Visible = IsSurroundWithSlotConfigured(5);
+        IsSurroundWith6Visible = IsSurroundWithSlotConfigured(6);
+        IsSurroundWith7Visible = IsSurroundWithSlotConfigured(7);
+        IsSurroundWith8Visible = IsSurroundWithSlotConfigured(8);
+    }
+
+    private static bool IsSurroundWithSlotConfigured(int slotNumber)
+    {
+        return !string.IsNullOrEmpty(Se.Settings.GetSurroundLeft(slotNumber)) ||
+               !string.IsNullOrEmpty(Se.Settings.GetSurroundRight(slotNumber));
     }
 
     [RelayCommand]
@@ -15326,26 +15540,81 @@ public partial class MainViewModel :
         });
     }
 
-    // Replaces the subtitle grid selection with the given rows.
-    private void ApplyGridSelection(IReadOnlyList<SubtitleLineViewModel> items)
+    /// <summary>
+    /// Replaces the subtitle grid selection with the given rows.
+    /// </summary>
+    /// <param name="current">
+    /// The row that should end up as the current one - the row the edit box shows, the shift-
+    /// selection anchor, and the row the grid scrolls to. Null means the first of
+    /// <paramref name="items"/>, which is what a caller whose selection is a result set (the
+    /// matches of a Modify selection) wants. Pass a row explicitly when the new selection is not
+    /// something to jump to, or row 1 would drag the view to the top of the file.
+    /// </param>
+    private void ApplyGridSelection(IReadOnlyList<SubtitleLineViewModel> items, SubtitleLineViewModel? current = null)
     {
         // Map items to indexes in one pass - Selection works on indexes, and per-item
         // IndexOf would be O(n²) on large selections.
         var wanted = new HashSet<SubtitleLineViewModel>(items);
+        var currentRow = current ?? (items.Count > 0 ? items[0] : null);
+        var currentIndex = currentRow != null ? Subtitles.IndexOf(currentRow) : -1;
+
         BatchGridSelection(() =>
         {
             SubtitleGrid.Selection.Clear();
-            for (var i = 0; i < Subtitles.Count && wanted.Count > 0; i++)
+
+            // The row selected first becomes SelectedItem and the selection anchor, the same
+            // trick SelectGridRange uses for the moving end of a shift-selection. It is covered
+            // again by one of the ranges below, which is a no-op.
+            if (currentIndex >= 0)
+            {
+                SubtitleGrid.Selection.Select(currentIndex);
+            }
+
+            // Hand the rest over as contiguous ranges rather than one Select per row.
+            // SelectionModel.Select forces the anchor to the row it selects, so a per-row loop
+            // leaves the anchor on the *last* row of the selection - and SelectingItemsControl
+            // posts a ScrollIntoView for the anchor, which threw the grid to the end of the file
+            // after an inverse selection. SelectRange leaves an anchor that is already set alone.
+            var runStart = -1;
+            for (var i = 0; i < Subtitles.Count; i++)
             {
                 if (wanted.Remove(Subtitles[i]))
                 {
-                    SubtitleGrid.Selection.Select(i);
+                    if (runStart < 0)
+                    {
+                        runStart = i;
+                    }
+
+                    continue;
+                }
+
+                if (runStart >= 0)
+                {
+                    SubtitleGrid.Selection.SelectRange(runStart, i - 1);
+                    runStart = -1;
+                }
+
+                if (wanted.Count == 0)
+                {
+                    break;
                 }
             }
 
-            SelectedSubtitle = items.Count > 0 ? items[0] : null;
-            SelectedSubtitleIndex = SelectedSubtitle != null ? Subtitles.IndexOf(SelectedSubtitle) : null;
+            if (runStart >= 0)
+            {
+                SubtitleGrid.Selection.SelectRange(runStart, Subtitles.Count - 1);
+            }
         });
+
+        // Only now that the batch has committed. SelectedSubtitle is TwoWay-bound to the grid's
+        // SelectedItem, and SelectionModel's SelectedIndex setter is a Clear() + Select() - so
+        // assigning it while the batch was still open wrote back through the binding and wiped
+        // every row the batch had queued: an inverse selection queued 299 of 300 rows and came
+        // out with one row selected, so every command that reads the selection saw a single
+        // line. After the commit the grid already has this row as SelectedItem, so the binding
+        // write is a no-op and the selection survives.
+        SelectedSubtitle = currentIndex >= 0 ? Subtitles[currentIndex] : null;
+        SelectedSubtitleIndex = currentIndex >= 0 ? currentIndex : null;
 
         SubtitleGridSelectionChanged();
     }
@@ -15409,7 +15678,7 @@ public partial class MainViewModel :
             return;
         }
 
-        SelectAndScrollToRow(idx);
+        SelectAndScrollToRowCentered(idx);
 
         if (WaveformCenter)
         {
@@ -15469,7 +15738,7 @@ public partial class MainViewModel :
             return;
         }
 
-        SelectAndScrollToRow(idx);
+        SelectAndScrollToRowCentered(idx);
 
         if (WaveformCenter)
         {
@@ -15501,7 +15770,7 @@ public partial class MainViewModel :
             return;
         }
 
-        SelectAndScrollToRow(idx);
+        SelectAndScrollToRowCentered(idx);
         vp.Position = Subtitles[idx].StartTime.TotalSeconds;
 
         if (AudioVisualizer != null && AudioVisualizer.WavePeaks != null)
@@ -15530,7 +15799,7 @@ public partial class MainViewModel :
         }
 
         vp.Position = Subtitles[idx].StartTime.TotalSeconds;
-        SelectAndScrollToRow(idx);
+        SelectAndScrollToRowCentered(idx);
 
         if (AudioVisualizer != null && AudioVisualizer.WavePeaks != null)
         {
@@ -15649,7 +15918,7 @@ public partial class MainViewModel :
         }
 
         vp.Position = next.StartTime.TotalSeconds;
-        SelectAndScrollToRow(idx);
+        SelectAndScrollToRowCentered(idx);
         AudioVisualizerCenterOnPositionIfNeeded(next, next.StartTime.TotalSeconds);
         _updateAudioVisualizer = true;
     }
@@ -15701,7 +15970,7 @@ public partial class MainViewModel :
         }
 
         vp.Position = previous.StartTime.TotalSeconds;
-        SelectAndScrollToRow(idx);
+        SelectAndScrollToRowCentered(idx);
         AudioVisualizerCenterOnPositionIfNeeded(previous, previous.StartTime.TotalSeconds);
         _updateAudioVisualizer = true;
     }
@@ -15950,7 +16219,11 @@ public partial class MainViewModel :
         }
 
         PauseVideoAndFreezePlayhead(control);
-        var position = control.Position;
+
+        // PositionForRestore, not Position: going fullscreen right after a layout rebuild would
+        // otherwise open the fullscreen player at the 0 the still-restoring docked player
+        // reports (issue #14218).
+        var position = control.PositionForRestore;
         var volume = control.Volume;
         var parent = (Control)control.Parent!;
 
@@ -15999,7 +16272,7 @@ public partial class MainViewModel :
 
         var fullScreenWindow = new FullScreenVideoWindow(_fullScreenVideoPlayerControl, _videoFileName, _subtitleFileName ?? string.Empty, position, volume, () =>
         {
-            control!.Position = _fullScreenVideoPlayerControl.Position;
+            control!.Position = _fullScreenVideoPlayerControl.PositionForRestore;
             control!.Volume = _fullScreenVideoPlayerControl.Volume;
             _fullScreenVideoPlayerControl = null;
 
@@ -16380,6 +16653,105 @@ public partial class MainViewModel :
     private void SplitAtVideoPositionAndTextBoxCursorPosition()
     {
         SplitSelectedLine(true, true);
+    }
+
+    [RelayCommand]
+    private async Task AssistedSplit()
+    {
+        var s = SelectedSubtitle;
+        if (s == null || s.IsReferenceOnly)
+        {
+            return;
+        }
+
+        var language = LanguageAutoDetect.AutoDetectGoogleLanguage(GetUpdateSubtitle());
+        var candidates = AssistedSplitCandidateGenerator.Generate(s, language, _splitManager);
+        if (candidates.Count == 0)
+        {
+            ShowStatus(Se.Language.General.AssistedSplitNoSuggestions);
+            return;
+        }
+
+        var vm = await ShowDialogAsync<AssistedSplitWindow, AssistedSplitViewModel>(viewModel =>
+        {
+            viewModel.Initialize(s, candidates);
+        });
+
+        if (!vm.OkPressed || vm.SelectedCandidate == null)
+        {
+            return;
+        }
+
+        var countBefore = Subtitles.Count;
+        RunWithoutChangeDetection(() =>
+        {
+            _splitManager.Split(Subtitles, s, vm.SelectedCandidate.TextIndex, language);
+            Renumber();
+        });
+
+        if (Subtitles.Count > countBefore)
+        {
+            var newHalf = Subtitles.GetOrNull(Subtitles.IndexOf(s) + 1);
+            if (newHalf != null)
+            {
+                RevealRowPosted(newHalf);
+            }
+        }
+
+        _updateAudioVisualizer = true;
+    }
+
+    [RelayCommand]
+    private async Task AssistedMove()
+    {
+        var s = SelectedSubtitle;
+        if (s == null || s.IsReferenceOnly)
+        {
+            return;
+        }
+
+        var idx = Subtitles.IndexOf(s);
+        var previous = GetPreviousWorkingRow(idx);
+        var next = GetNextWorkingRow(idx);
+        var candidates = AssistedMoveCandidateGenerator.Generate(s, previous, next, GetDetectedLanguageCode());
+        if (candidates.Count == 0)
+        {
+            ShowStatus(Se.Language.General.AssistedMoveNoSuggestions);
+            return;
+        }
+
+        var vm = await ShowDialogAsync<AssistedMoveWindow, AssistedMoveViewModel>(viewModel =>
+        {
+            viewModel.Initialize(s, candidates);
+        });
+
+        if (!vm.OkPressed || vm.SelectedCandidate == null)
+        {
+            return;
+        }
+
+        var candidate = vm.SelectedCandidate;
+        s.Text = candidate.NewCurrentText;
+        if (candidate.Kind == AssistedMoveKind.WithPrevious && previous != null)
+        {
+            previous.Text = candidate.NewOtherText;
+            if (candidate.NewFirstEnd != null && candidate.NewSecondStart != null)
+            {
+                previous.EndTime = candidate.NewFirstEnd.Value;
+                s.SetStartTimeOnly(candidate.NewSecondStart.Value);
+            }
+        }
+        else if (candidate.Kind == AssistedMoveKind.WithNext && next != null)
+        {
+            next.Text = candidate.NewOtherText;
+            if (candidate.NewFirstEnd != null && candidate.NewSecondStart != null)
+            {
+                s.EndTime = candidate.NewFirstEnd.Value;
+                next.SetStartTimeOnly(candidate.NewSecondStart.Value);
+            }
+        }
+
+        _updateAudioVisualizer = true;
     }
 
     [RelayCommand]
@@ -16984,7 +17356,14 @@ public partial class MainViewModel :
 
         RunWithoutChangeDetection(() =>
         {
-            for (var i = index; i < Subtitles.Count; i++)
+            // Set the END of the selected line and offset only the lines AFTER it. The loop used
+            // to start at "index" and slide the selected line bodily with SetStartTimeKeepDuration,
+            // so its start moved by the end-delta too and its duration never changed - the exact
+            // opposite of "set end". (The start twin above is right to start at index: there the
+            // delta is measured from the start, so moving the whole line is the intent.)
+            s.EndTime = videoTime;
+
+            for (var i = index + 1; i < Subtitles.Count; i++)
             {
                 var subtitle = Subtitles[i];
                 subtitle.SetStartTimeKeepDuration(subtitle.StartTime + difference);
@@ -18085,7 +18464,16 @@ public partial class MainViewModel :
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         foreach (var item in selectedItems)
         {
-            var prev = Subtitles.GetOrNull(Subtitles.IndexOf(item) - 1);
+            // "The previous line" means the previous line of the subtitle being edited, not a
+            // display-only reference row of a mismatched original (#13962) - which is what the
+            // raw grid predecessor could be. Every sibling timing command uses these helpers.
+            var idx = Subtitles.IndexOf(item);
+            if (idx < 0)
+            {
+                continue;
+            }
+
+            var prev = GetPreviousWorkingRow(idx);
             if (prev == null)
             {
                 continue;
@@ -19154,6 +19542,31 @@ public partial class MainViewModel :
         SubtitleGrid.SelectAll();
     }
 
+    /// <summary>
+    /// The row nearest <paramref name="index"/> that is not in <paramref name="excluded"/> -
+    /// searching down from it first, then up. Null when every row is excluded.
+    /// </summary>
+    private SubtitleLineViewModel? NearestRowNotIn(HashSet<SubtitleLineViewModel> excluded, int index)
+    {
+        for (var i = Math.Max(0, index); i < Subtitles.Count; i++)
+        {
+            if (!excluded.Contains(Subtitles[i]))
+            {
+                return Subtitles[i];
+            }
+        }
+
+        for (var i = Math.Min(index, Subtitles.Count) - 1; i >= 0; i--)
+        {
+            if (!excluded.Contains(Subtitles[i]))
+            {
+                return Subtitles[i];
+            }
+        }
+
+        return null;
+    }
+
     private void InverseRowSelection()
     {
         if (Subtitles.Count == 0)
@@ -19165,10 +19578,29 @@ public partial class MainViewModel :
         // With reference: inverting works on rows as displayed, so a selected reference row
         // must count as selected and end up deselected.
         var selectedItems = new HashSet<SubtitleLineViewModel>(SubtitleGridSelectedItemsWithReference);
+        var currentIndex = SelectedSubtitleIndex ?? 0;
 
-        // Inverting a small selection on a large file selects almost every row, so
-        // apply via the detach/reattach helper to avoid the per-row hang (#11529).
-        ApplyGridSelection(Subtitles.Where(s => !selectedItems.Contains(s)).ToList());
+        // SE 4 inverted by flipping each row's Selected flag and never touched the focused row
+        // or the scroll offset, so the user stayed where they were looking. The current row is
+        // always inverted away, and letting the first row of the new selection become current
+        // instead - row 1 whenever the user had a single row selected - pulled the grid to the
+        // top of the file and put line 1 in the edit box. Hand the current row to the nearest
+        // row that survived the inversion.
+        var current = NearestRowNotIn(selectedItems, currentIndex);
+        if (current == null)
+        {
+            // Everything was selected, so the inverse is nothing - but the grid is
+            // AlwaysSelected and would re-pick row 1 and scroll to the top. Collapse to the
+            // row the user is on instead.
+            var row = Subtitles.GetOrNull(currentIndex) ?? Subtitles[0];
+            ApplyGridSelection(new[] { row }, row);
+            return;
+        }
+
+        // Inverting a small selection on a large file selects almost every row, so it goes
+        // through ApplyGridSelection, which applies it as index ranges in one batch instead of
+        // row by row (#11529).
+        ApplyGridSelection(Subtitles.Where(s => !selectedItems.Contains(s)).ToList(), current);
     }
 
     private void SelectAndScrollToRow(int index)
@@ -19179,6 +19611,21 @@ public partial class MainViewModel :
         }
 
         SelectAndScrollToRow(index, null);
+    }
+
+    /// <summary>
+    /// <see cref="SelectAndScrollToRow(int)"/> for the "go to previous/next line" commands: with
+    /// "subtitle grid, center when selecting prev/next row" on, these re-center the view on every
+    /// step, not only when the target row happens to be off screen.
+    /// </summary>
+    private void SelectAndScrollToRowCentered(int index)
+    {
+        if (index < 0 || index >= Subtitles.Count)
+        {
+            return;
+        }
+
+        SelectAndScrollToRow(index, null, null, Se.Settings.General.SubtitleGridCenterSelectedRow);
     }
 
     /// <summary>
@@ -19207,7 +19654,13 @@ public partial class MainViewModel :
         SelectAndScrollToRow(index, row, restoreGridFocus);
     }
 
-    private void SelectAndScrollToRow(int index, SubtitleLineViewModel? row, bool? restoreGridFocus = null)
+    /// <param name="centerEvenIfVisible">
+    /// Center the target row even when it is already fully on screen - what the prev/next-line
+    /// navigation needs with "center when selecting prev/next row" on. Off for the rest, where
+    /// the scroll offset is left alone for a visible row (see <paramref name="row"/> callers such
+    /// as delete/insert, which must not move the rows out from under the user).
+    /// </param>
+    private void SelectAndScrollToRow(int index, SubtitleLineViewModel? row, bool? restoreGridFocus = null, bool centerEvenIfVisible = false)
     {
         _shiftSelectAnchorIndex = -1;
         _shiftSelectCurrentIndex = -1;
@@ -19304,7 +19757,7 @@ public partial class MainViewModel :
                     EditTextBoxOriginal.CaretIndex = 0;
                 }
 
-                if (Se.Settings.General.SubtitleGridCenterSelectedRow && !alreadyVisible)
+                if (Se.Settings.General.SubtitleGridCenterSelectedRow && (!alreadyVisible || centerEvenIfVisible))
                 {
                     CenterSelectedRowInSubtitleGrid(itemToScroll);
                 }
@@ -19433,6 +19886,18 @@ public partial class MainViewModel :
     private void CenterSelectedRowInSubtitleGrid(SubtitleLineViewModel itemToCenter)
     {
         TableViewExtras.CenterRow(SubtitleGrid, itemToCenter);
+    }
+
+    /// <summary>
+    /// Centers whatever row the grid has selected right now - for the arrow keys, where the
+    /// selection is moved by TableView's own list navigation rather than by a command.
+    /// </summary>
+    private void CenterCurrentRowInSubtitleGrid()
+    {
+        if (SubtitleGrid.SelectedItem is SubtitleLineViewModel current)
+        {
+            CenterSelectedRowInSubtitleGrid(current);
+        }
     }
 
     /// <summary>
@@ -19864,6 +20329,16 @@ public partial class MainViewModel :
                     {
                         return;
                     }
+                }
+            }
+
+            // A Manzanita dump is an XML preamble plus raw PES payloads, so it has to be caught
+            // before the text based subtitle formats get a look at it.
+            if (fileSize > 100 && FileUtil.IsManzanita(fileName))
+            {
+                if (await ImportSubtitleFromManzanita(fileName))
+                {
+                    return;
                 }
             }
 
@@ -20789,6 +21264,81 @@ public partial class MainViewModel :
         }
     }
 
+    /// <summary>
+    /// Opens the teletext subtitles of a Manzanita "private_stream_1" dump (.dvbttx).
+    /// </summary>
+    /// <returns>True if subtitles were loaded, false to let the other loaders try the file.</returns>
+    private async Task<bool> ImportSubtitleFromManzanita(string fileName)
+    {
+        ShowStatus(string.Format(Se.Language.General.ParsingXDotDotDot, fileName));
+        var parser = new ManzanitaTransportStreamParser();
+        var pages = new Dictionary<int, List<Paragraph>>();
+        var dvbSubtitles = new List<TransportStreamSubtitle>();
+        try
+        {
+            await Task.Run(() =>
+            {
+                parser.Parse(fileName);
+                pages = parser.GetTeletext();
+                if (pages.Count == 0)
+                {
+                    dvbSubtitles = parser.GetDvbSup();
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            SeLogger.Error(exception, $"Error parsing Manzanita file: {fileName}");
+            ShowStatus(string.Empty);
+            return false;
+        }
+
+        ShowStatus(string.Empty);
+
+        if (pages.Count == 0)
+        {
+            // A "dvb_subtitle" dump carries bitmaps instead of teletext - they have to be OCR'ed.
+            if (dvbSubtitles.Count == 0)
+            {
+                return false;
+            }
+
+            Dispatcher.UIThread.Post(async () =>
+            {
+                var ocrResult = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => vm.Initialize(dvbSubtitles, fileName));
+                if (ocrResult.OkPressed)
+                {
+                    await FinishOcrImportAsync(fileName, ocrResult.OcredSubtitle);
+                }
+            });
+
+            return true;
+        }
+
+        var paragraphs = pages.First().Value;
+        if (pages.Count > 1)
+        {
+            var result = await ShowDialogAsync<PickTsTrackWindow, PickTsTrackViewModel>(vm => vm.Initialize(pages, fileName));
+            if (!result.OkPressed || result.SelectedTrack == null)
+            {
+                return true; // the file was ours, the user just did not pick a page
+            }
+
+            paragraphs = result.SelectedTrack.Teletext;
+        }
+
+        VideoCloseFile();
+        ResetSubtitle();
+        _subtitle = new Subtitle(paragraphs);
+        _subtitle.Renumber();
+        ReplaceSubtitles(_subtitle.Paragraphs.Select(p => new SubtitleLineViewModel(p, SelectedSubtitleFormat)));
+        SelectAndScrollToRow(0);
+        _subtitleFileName = Utilities.GetPathAndFileNameWithoutExtension(fileName) + SelectedSubtitleFormat.Extension;
+        _converted = true;
+
+        return true;
+    }
+
     private async Task ImportSubtitleFromTransportStream(string fileName, bool skipLoadVideo = false)
     {
         ShowStatus(string.Format(Se.Language.General.ParsingXDotDotDot, fileName));
@@ -20868,7 +21418,7 @@ public partial class MainViewModel :
         var subtitles = tsParser.GetDvbSubtitles(packetId);
         Dispatcher.UIThread.Post(async () =>
         {
-            var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.Initialize(tsParser, subtitles, fileName); });
+            var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.Initialize(subtitles, fileName); });
 
             if (result.OkPressed)
             {
@@ -22916,9 +23466,7 @@ public partial class MainViewModel :
                         TableViewExtras.FocusRow(SubtitleGrid);
                     }
 
-                    SurroundWith1Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround1Left, Se.Settings.Surround1Right);
-                    SurroundWith2Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround2Left, Se.Settings.Surround2Right);
-                    SurroundWith3Text = string.Format(Se.Language.Options.Shortcuts.SurroundWithXY, Se.Settings.Surround3Left, Se.Settings.Surround3Right);
+                    UpdateSurroundWithMenuItems();
                 }
             });
         });
@@ -25671,16 +26219,19 @@ public partial class MainViewModel :
         // Captured before the cleanup below, which can move focus itself.
         _focusBeforeWindowDeactivated = GetRestorableFocusedControl();
 
-        // Note whether the whole application - not just this window - went to the background with
-        // the main window in front, so an undocked tool window taking the foreground back can be
-        // corrected (see WatchUndockedForegroundSteal, #14168). Deferred because the newly active
-        // window's IsActive has not settled while Deactivated runs.
+        // The claim on the SE foreground moves to a dialog when one is what took over; it
+        // deliberately STAYS with the main window otherwise - through the application going to
+        // the background, and through an undocked tool window reading as active here (topmost
+        // churn can flicker one active while another application takes the foreground, and that
+        // must not disarm the correction - the tool window's own Activated watcher decides
+        // whether the user aimed at it; see WatchUndockedForegroundSteal, #14168). Deferred
+        // because the newly active window's IsActive has not settled while Deactivated runs.
         Dispatcher.UIThread.Post(() =>
         {
-            _mainWindowLostForegroundToOtherApp =
-                Window is { IsActive: false } &&
-                !IsUndockedWindowActive() &&
-                GetActiveWindowOtherThanMainAndUndocked() == null;
+            if (GetActiveWindowOtherThanMainAndUndocked() != null)
+            {
+                _foregroundBelongsToMainWindow = false;
+            }
         }, DispatcherPriority.Background);
 
         // Avalonia's AccessKeyHandler must not be left mid-Alt-gesture either: a modal opened
@@ -25726,9 +26277,9 @@ public partial class MainViewModel :
         var previous = _focusBeforeWindowDeactivated;
         _focusBeforeWindowDeactivated = null;
 
-        // The main window is where the foreground belongs, so there is nothing left to correct
-        // (#14168).
-        _mainWindowLostForegroundToOtherApp = false;
+        // The user is in the main window, so that is where the SE foreground belongs until an
+        // activation aimed at a tool window says otherwise (#14168).
+        _foregroundBelongsToMainWindow = true;
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -26359,6 +26910,17 @@ public partial class MainViewModel :
                 {
                     _shiftSelectAnchorIndex = -1;
                     _shiftSelectCurrentIndex = -1;
+
+                    // A plain arrow key is left to TableView's own list navigation, which only
+                    // scrolls when the next row is off screen - so with "center when selecting
+                    // prev/next row" on, the selection walked from the middle of the view all the
+                    // way down to the bottom edge before anything moved, and the view then jumped
+                    // a half screen (#14231). This handler tunnels, so post the centering to run
+                    // after the built-in navigation has moved the selection.
+                    if (Se.Settings.General.SubtitleGridCenterSelectedRow)
+                    {
+                        Dispatcher.UIThread.Post(CenterCurrentRowInSubtitleGrid);
+                    }
                 }
                 else if (keyEventArgs.Key == Key.PageDown && IsExtendSelectionChord(keyEventArgs) && Subtitles.Count > 0)
                 {
@@ -26381,7 +26943,7 @@ public partial class MainViewModel :
                 {
                     keyEventArgs.Handled = true;
                     var current = SelectedSubtitleIndex ?? 0;
-                    SelectAndScrollToRow(TableViewExtras.GetPageTarget(SubtitleGrid, current, keyEventArgs.Key == Key.PageDown));
+                    SelectAndScrollToRowCentered(TableViewExtras.GetPageTarget(SubtitleGrid, current, keyEventArgs.Key == Key.PageDown));
                     return;
                 }
                 else if (keyEventArgs.Key == Key.Home && IsExtendSelectionChord(keyEventArgs) && Subtitles.Count > 0)

@@ -387,10 +387,14 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         _mpvRenderContextSetUpdateCallback = (MpvRenderContextSetUpdateCallback)GetDllType(typeof(MpvRenderContextSetUpdateCallback), "mpv_render_context_set_update_callback");
     }
 
-    private object GetDllType(Type type, string name)
+    private object? GetDllType(Type type, string name)
     {
+        // null, not IntPtr.Zero, when the export is missing: every caller casts the result to a
+        // delegate type, so a boxed IntPtr threw InvalidCastException instead - which made the
+        // "== null" libvlc-4 fallbacks unreachable and turned one missing symbol into a failed
+        // load and a silent EmptyVideoPlayer.
         var address = NativeMethods.CrossGetProcAddress(_library, name);
-        return address != IntPtr.Zero ? Marshal.GetDelegateForFunctionPointer(address, type) : IntPtr.Zero;
+        return address != IntPtr.Zero ? Marshal.GetDelegateForFunctionPointer(address, type) : null;
     }
 
     private bool LoadLibraryInternal()
@@ -772,6 +776,28 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         SetOptionString("sub-ass-force-margins", useMargins ? "yes" : "no");
     }
 
+    /// <summary>
+    /// How the lines of a multi-line preview subtitle are justified inside the text block
+    /// (#14167) - not the same thing as the alignment, which moves the whole block and rides
+    /// along in the generated ASS style. Justification has no ASS style field: it is a player
+    /// option, and sub-justify reaches an ASS subtitle - which the preview is - only with
+    /// sub-ass-justify on, which mpv defaults to "no".
+    ///
+    /// Both options are written on every call, so picking "auto" again restores mpv's own
+    /// defaults instead of leaving the last value in place.
+    /// </summary>
+    public void ApplySubtitleJustify()
+    {
+        var justify = Se.Settings.Video.MpvPreviewJustify;
+        if (string.IsNullOrWhiteSpace(justify))
+        {
+            justify = "auto";
+        }
+
+        SetOptionString("sub-justify", justify);
+        SetOptionString("sub-ass-justify", justify == "auto" ? "no" : "yes");
+    }
+
     public int SetOptionString(string name, string value)
     {
         if (_mpvSetOptionString == null || _mpv == IntPtr.Zero)
@@ -1035,7 +1061,11 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
 
     public void InitializeWithOpenGL(GetProcAddress getProcAddress)
     {
-        LoadLibraryInternal();
+        // LoadLib(), not LoadLibraryInternal(): the latter always calls mpv_create() and
+        // overwrites _mpv. CanLoad() has already created a core by the time the render path gets
+        // here, so this created a second one and orphaned the first - its threads and allocations
+        // leaked for the process lifetime, on every player construction.
+        LoadLib();
         EnsureNotDisposed();
 
         if (_mpvInitialize == null || _mpvRenderContextCreate == null || _mpvRenderContextSetUpdateCallback == null)
@@ -1142,7 +1172,11 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
     [System.Runtime.Versioning.SupportedOSPlatform("macos")]
     public void InitializeWithMetal(IntPtr mtlDevice, IntPtr metalLayer)
     {
-        LoadLibraryInternal();
+        // LoadLib(), not LoadLibraryInternal(): the latter always calls mpv_create() and
+        // overwrites _mpv. CanLoad() has already created a core by the time the render path gets
+        // here, so this created a second one and orphaned the first - its threads and allocations
+        // leaked for the process lifetime, on every player construction.
+        LoadLib();
         EnsureNotDisposed();
 
         if (_mpvInitialize == null || _mpvRenderContextCreate == null || _mpvRenderContextSetUpdateCallback == null)
@@ -1559,6 +1593,7 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
         SetOptionString("rebase-start-time", "no");
 
         ApplySubtitleMarginArea();
+        ApplySubtitleJustify();
 
         _fileName = path;
 
@@ -1744,6 +1779,11 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
 
     private double? _pausedValue;
 
+    // Stopwatch timestamp of the last seek issued through the Position setter; 0 = none yet.
+    // Compared against the playback-restart timestamp so Pause() can tell a seek target that
+    // is still in flight (keep it) from one whose seek finished long ago (stale - clear it).
+    private long _lastSeekIssuedTimestamp;
+
     // Last raw time-pos seen by the Position getter/setter, used to gate the eof-reached
     // probe below. -1 = unknown (always probe).
     private double _lastRawTimePos = -1;
@@ -1878,6 +1918,7 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
             // one per input event), every caller already treats the result as asynchronous
             // (the playhead pin waits for the position to actually arrive), and the error
             // result was never acted on here.
+            Interlocked.Exchange(ref _lastSeekIssuedTimestamp, System.Diagnostics.Stopwatch.GetTimestamp());
             DoMpvCommandFireAndForget("seek", value.ToString(CultureInfo.InvariantCulture), "absolute");
         }
     }
@@ -2070,11 +2111,24 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
             return;
         }
 
-        // Every other state transition clears this (LoadFile/PlayOrPause/CloseFile/Stop/Play/
-        // frame steps). Without it, pausing after a seek made during playback made the Position
-        // getter keep returning that old seek target, so the slider, clock and playhead all
-        // jumped back to it.
-        _pausedValue = null;
+        // A finished seek's target is stale: pausing after a seek made minutes ago during
+        // playback made the Position getter keep returning that old target, so the slider,
+        // clock and playhead all jumped back to it - clear it, like the other state
+        // transitions do (LoadFile/PlayOrPause/CloseFile/Stop/Play/frame steps).
+        //
+        // But a seek still in flight is the opposite case: its target IS where playback is
+        // about to be, and the waveform click path depends on the getter reporting it. A
+        // click seeks first (pointer release) and pauses a moment later (tap), and the
+        // second Position assignment no-ops in Avalonia because the property already holds
+        // the value - so clearing here left the getter serving mpv's pre-seek position
+        // until the async seek landed, and the cursor jumped away from the click (#14187).
+        var seekInFlight = _eventLoopActive &&
+                           Interlocked.Read(ref _lastSeekIssuedTimestamp) != 0 &&
+                           !HasPlaybackRestartedSince(Interlocked.Read(ref _lastSeekIssuedTimestamp));
+        if (!seekInFlight)
+        {
+            _pausedValue = null;
+        }
 
         var err = DoMpvCommand("set", "pause", "yes");
         if (err < 0)
@@ -2307,7 +2361,11 @@ public sealed class LibMpvDynamicPlayer : IDisposable, IVideoPlayer
 
     public void InitializeWithSoftwareRendering()
     {
-        LoadLibraryInternal();
+        // LoadLib(), not LoadLibraryInternal(): the latter always calls mpv_create() and
+        // overwrites _mpv. CanLoad() has already created a core by the time the render path gets
+        // here, so this created a second one and orphaned the first - its threads and allocations
+        // leaked for the process lifetime, on every player construction.
+        LoadLib();
         EnsureNotDisposed();
 
         // Set mpv to use software rendering
