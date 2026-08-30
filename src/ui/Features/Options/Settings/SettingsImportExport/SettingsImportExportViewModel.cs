@@ -102,6 +102,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
     private Se? _importData;
     private string? _importSourceOs;
     private bool _importHasShortcutSlots;
+    private bool _importHasCustomSearchSlots;
 
     // Marker property name written at the top level of the export JSON so the
     // importer can tell which OS the file came from (Se has no such field, so
@@ -177,6 +178,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
 
             _importSourceOs = TryReadExportSourceOs(json);
             _importHasShortcutSlots = TryReadExportIncludesShortcutSlots(json);
+            _importHasCustomSearchSlots = TryReadHasCustomSearchSlots(json);
 
             IsRulesEnabled = _importData.General != null;
             IsAppearanceEnabled = _importData.Appearance != null;
@@ -398,7 +400,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
 
             if (_importHasShortcutSlots)
             {
-                CopyShortcutSlots(importData, Se.Settings);
+                CopyShortcutSlots(importData, Se.Settings, _importHasCustomSearchSlots);
             }
         }
 
@@ -471,11 +473,11 @@ public partial class SettingsImportExportViewModel : ObservableObject
 
     /// <summary>
     /// Copies the shortcut slot values the Shortcuts window owns - colors 1-8, actors 1-10 and the
-    /// "surround with" pairs - which sit as top-level values on <see cref="Se"/> rather than in one
+    /// "surround with" pairs and the "search via" slots - which sit as top-level values on <see cref="Se"/> rather than in one
     /// of its sections. A null <paramref name="from"/> clears them, so an export that leaves
     /// shortcuts out says so instead of shipping a block of defaults.
     /// </summary>
-    private static void CopyShortcutSlots(Se? from, Se to)
+    private static void CopyShortcutSlots(Se? from, Se to, bool includeCustomSearch = true)
     {
         to.Color1 = from?.Color1!;
         to.Color2 = from?.Color2!;
@@ -489,6 +491,17 @@ public partial class SettingsImportExportViewModel : ObservableObject
         for (var slot = 1; slot <= Se.SurroundWithSlotCount; slot++)
         {
             to.SetSurround(slot, from?.GetSurroundLeft(slot)!, from?.GetSurroundRight(slot)!);
+        }
+
+        // The "search via" slots were added after the slot marker, so a file carrying the marker
+        // may still predate them - deserializing then hands back the factory defaults, and
+        // copying those would silently reset the user's own slots. Only copy what the file says.
+        if (includeCustomSearch)
+        {
+            for (var slot = 1; slot <= Se.CustomSearchSlotCount; slot++)
+            {
+                to.SetCustomSearch(slot, from?.GetCustomSearchName(slot)!, from?.GetCustomSearchUrl(slot)!);
+            }
         }
 
         to.Actor1 = from?.Actor1!;
@@ -572,6 +585,37 @@ public partial class SettingsImportExportViewModel : ObservableObject
         catch
         {
             // Missing marker: a file from before the slots travelled - leave them alone.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the export file carries the "search via" slot values at all. They joined the
+    /// existing shortcut-slot marker later, so this is detected off the serialized property
+    /// itself: a file from a build without them lacks the key entirely.
+    /// </summary>
+    private static bool TryReadHasCustomSearchSlots(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, nameof(Se.CustomSearch1Name), StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch
+        {
             return false;
         }
     }

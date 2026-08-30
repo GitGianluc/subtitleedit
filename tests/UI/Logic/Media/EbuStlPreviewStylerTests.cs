@@ -149,9 +149,22 @@ public class EbuStlPreviewStylerTests
     [InlineData("", false)]
     [InlineData("short", false)]
     [InlineData("850STL25.01 and then some padding to get past twenty characters", true)]
-    public void OnlyAGsiBlockIsTreatedAsStl(string header, bool expected)
+    public void OnlyAGsiBlockIsTreatedAsStl(string? header, bool expected)
     {
         Assert.Equal(expected, EbuStlPreviewStyler.IsStlHeader(header));
+    }
+
+    // The GSI block stays on the subtitle when the format is switched in the toolbar, so the header
+    // alone kept the teletext box and the double height on a subtitle now shown as SubRip.
+    [Fact]
+    public void TheStlHeaderOnlyStylesThePreviewWhileTheFormatIsEbu()
+    {
+        var header = MakeStlHeader("1");
+
+        Assert.True(EbuStlPreviewStyler.IsStlPreview(header, typeof(Ebu)));
+        Assert.False(EbuStlPreviewStyler.IsStlPreview(header, typeof(SubRip)));
+        Assert.False(EbuStlPreviewStyler.IsStlPreview(header, null));
+        Assert.False(EbuStlPreviewStyler.IsStlPreview(null, typeof(Ebu)));
     }
 
     // Preview only, and never written to the file - an STL carries a character table, not a

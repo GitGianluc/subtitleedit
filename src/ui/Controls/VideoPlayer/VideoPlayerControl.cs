@@ -196,6 +196,10 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
         // Where an in-flight open+restore sequence is heading. See PositionForRestore.
         private double? _pendingRestorePositionSeconds;
 
+        // How close the player has to be to the restore target to count as arrived. Same value
+        // for the arrival check in the position tick and for EndPositionRestoreIfArrived.
+        private const double PositionRestoreArrivedToleranceSeconds = 0.5;
+
         /// <summary>
         /// The position another player should be handed when this control is thrown away and
         /// rebuilt (layout rebuild, dock/undock, fullscreen) - the pending restore target while
@@ -218,9 +222,9 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
         /// started, so <see cref="PositionForRestore"/> reports that target instead of the 0 the
         /// not-yet-loaded player reports. <see cref="Open"/> calls this itself when given a start
         /// position; callers that seek only after the open (the layout rebuild) call it first.
-        /// The pending value is dropped by <see cref="EndPositionRestore"/> and, as a safety net
-        /// for restores that are abandoned without one, as soon as the player actually reports
-        /// the restored position.
+        /// The pending value is dropped by <see cref="EndPositionRestore"/> /
+        /// <see cref="EndPositionRestoreIfArrived"/> and, as a safety net for restores that are
+        /// abandoned without one, as soon as the player actually reports the restored position.
         /// </summary>
         internal void BeginPositionRestore(double seconds)
         {
@@ -239,6 +243,49 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
             _pendingRestorePositionSeconds = null;
         }
 
+        /// <summary>
+        /// Ends the restore announced by <see cref="BeginPositionRestore"/> only if the player
+        /// has actually arrived there. A restore sequence runs a fixed number of seeks after a
+        /// bounded ready wait, so it can run out while mpv is still loading (a big file, a busy
+        /// machine) - and ending the restore there hands <see cref="PositionForRestore"/> back to
+        /// a player that is still reporting 0, which is exactly the rewind
+        /// <see cref="BeginPositionRestore"/> exists to prevent (issue #14218). Keeping the target
+        /// in that case costs nothing: the position tick drops it the moment the player does
+        /// land, and until then the target is a far better answer for a rebuild than the 0 of a
+        /// player that never got where it was told to go.
+        /// </summary>
+        internal void EndPositionRestoreIfArrived()
+        {
+            // A torn-down player throws rather than reporting a position, and it has nothing left
+            // to say about where the video is anyway - leave the target alone (issue #13083).
+            if (IsDisposed)
+            {
+                return;
+            }
+
+            if (_pendingRestorePositionSeconds is { } pending &&
+                Math.Abs(_videoPlayerInstance.Position - pending) < PositionRestoreArrivedToleranceSeconds)
+            {
+                EndPositionRestore();
+            }
+        }
+
+        /// <summary>
+        /// A seek issued while an open+restore sequence is still in flight moves where the user
+        /// wants to be, so the pending target follows it. Dropping the target instead would
+        /// reopen the issue #14218 rewind (a still-loading player reports 0); keeping the old
+        /// one would make the next rebuild jump back to a spot the user has already left. The
+        /// restore sequence's own seeks re-announce the unchanged target, and the position tick
+        /// still ends the restore once the player lands near the (re)target.
+        /// </summary>
+        private void RetargetPositionRestore(double seconds)
+        {
+            if (_pendingRestorePositionSeconds != null)
+            {
+                _pendingRestorePositionSeconds = seconds;
+            }
+        }
+
         private void NotifyPositionChanged(double newPosition)
         {
             if (Math.Abs(_positionIgnore - newPosition) < 0.001)
@@ -246,13 +293,36 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                 return;
             }
 
+            // Only a control that knows its duration reports trustworthy values here: until it is
+            // published, the bound position slider clamps every write, so this fires with the
+            // clamped echo of the restore sequence's own seeks - retargeting on that would hand
+            // the pending target the near-0 the guard exists to keep out (issue #14218).
+            if (Duration > 0)
+            {
+                RetargetPositionRestore(newPosition);
+            }
+
             // First update our property
             Position = newPosition;
 
-            _videoPlayerInstance.Position = newPosition;
+            _videoPlayerInstance.Position = UiToPlayerSeconds(newPosition);
 
             // Then notify listeners like the ViewModel
             PositionChanged?.Invoke(newPosition);
+        }
+
+        /// <summary>
+        /// UI position values (the <see cref="Position"/> property, the sliders, the waveform
+        /// time axis) run on the SMPTE drop-frame clock while <see cref="IsSmpteTimingEnabled"/>:
+        /// every read from the player is compressed by 1000/1001 (the position timer below, the
+        /// view model's playhead estimator, the waveform peaks). A seek must expand the UI value
+        /// back to the player's real clock, or every seek lands 0.1% early - proportional to the
+        /// absolute position, about a second per 17 minutes - and the playhead pin, whose arrive
+        /// check compares in UI space, then snaps the cursor back once its timeout expires.
+        /// </summary>
+        private double UiToPlayerSeconds(double seconds)
+        {
+            return IsSmpteTimingEnabled ? seconds * 1001.0 / 1000.0 : seconds;
         }
 
         public void SetPosition(double seconds)
@@ -276,6 +346,20 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
         {
             _positionIgnore = seconds;
             Position = seconds;
+        }
+
+        /// <summary>
+        /// Seeks the player and moves the position display with it. Prefer this over assigning
+        /// <see cref="Position"/> when the seek must happen: the styled property drops an
+        /// assignment equal to the value it already holds, so a caller landing on the spot the
+        /// display happens to show (a frame step parking back where the last tick reported)
+        /// would silently never reach the player.
+        /// </summary>
+        public void SeekTo(double seconds)
+        {
+            RetargetPositionRestore(seconds);
+            SetPositionDisplayOnly(seconds);
+            _videoPlayerInstance.Position = UiToPlayerSeconds(seconds);
         }
 
         public int ContentWidth => _contentPresenter?.Bounds.Width > 0 ? (int)_contentPresenter.Bounds.Width : 0;
@@ -1029,7 +1113,8 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                     // target even if the restoring code never got to end it (an abandoned
                     // sequence would otherwise pin PositionForRestore for the rest of the
                     // control's life).
-                    if (_pendingRestorePositionSeconds is { } pending && Math.Abs(pos - pending) < 0.5)
+                    if (_pendingRestorePositionSeconds is { } pending &&
+                        Math.Abs(pos - pending) < PositionRestoreArrivedToleranceSeconds)
                     {
                         EndPositionRestore();
                     }

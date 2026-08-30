@@ -102,4 +102,58 @@ public class VideoPlayerControlRestorePositionTests
 
         Assert.Equal(control.Position, control.PositionForRestore);
     }
+
+    [AvaloniaFact]
+    public async Task ARestoreThatNeverLandedKeepsItsTarget()
+    {
+        var player = new NotYetLoadedVideoPlayer();
+        var control = new VideoPlayerControl(player);
+
+        await control.Open("fake.mkv", 321.5);
+
+        // The restoring code has run out of seeks (a bounded ready wait plus a fixed number of
+        // retries) while the player is still at the start of the file. Handing the live position
+        // back here is what rewound the video: the next rebuild would sample this player's 0.
+        control.EndPositionRestoreIfArrived();
+
+        Assert.Equal(321.5, control.PositionForRestore);
+    }
+
+    [AvaloniaFact]
+    public async Task ASeekDuringAPendingRestoreRetargetsIt()
+    {
+        var player = new NotYetLoadedVideoPlayer();
+        var control = new VideoPlayerControl(player);
+
+        await control.Open("fake.mkv", 600);
+
+        // The user does not wait for the slow restore - they seek somewhere else. The pending
+        // target must follow: keeping 600 would make the next rebuild jump back there, and
+        // dropping it would hand the rebuild the 0 of a player that is still loading (#14218).
+        control.SeekTo(300);
+        player.Position = 0; // the still-loading player swallowed that seek too
+        control.EndPositionRestoreIfArrived();
+
+        Assert.Equal(300, control.PositionForRestore);
+
+        // And once the player lands near the new target, the live position rules again.
+        player.Position = 300;
+        control.EndPositionRestoreIfArrived();
+        Assert.Equal(control.Position, control.PositionForRestore);
+    }
+
+    [AvaloniaFact]
+    public async Task ARestoreThatLandedGivesTheLivePositionBack()
+    {
+        var player = new NotYetLoadedVideoPlayer();
+        var control = new VideoPlayerControl(player);
+
+        await control.Open("fake.mkv", 321.5);
+
+        // The player got where it was told to go, so it is the truth again.
+        player.Position = 321.5;
+        control.EndPositionRestoreIfArrived();
+
+        Assert.Equal(control.Position, control.PositionForRestore);
+    }
 }

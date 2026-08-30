@@ -314,6 +314,7 @@ public class LanguageGeneral
     public string LoadDefaults { get; set; }
     public string LockTimeCodes { get; set; }
     public string Logo { get; set; }
+    public string LookUpX { get; set; }
     public string Margin { get; set; }
     public string Match { get; set; }
     public string MaxCharactersPerSecond { get; set; }
@@ -443,6 +444,7 @@ public class LanguageGeneral
     public string PoweredBy { get; set; }
     public string Prefix { get; set; }
     public string Preview { get; set; }
+    public string PreviewAlignmentInListView { get; set; }
     public string Previous { get; set; }
     public string Profile { get; set; }
     public string Quality { get; set; }
@@ -453,6 +455,7 @@ public class LanguageGeneral
     public string ReDownloadX { get; set; }
     public string Reason { get; set; }
     public string RecentFiles { get; set; }
+    public string RecentlyUsedVideoOffsets { get; set; }
     public string Redo { get; set; }
     public string Redownload { get; set; }
     public string Release { get; set; }
@@ -1108,6 +1111,7 @@ public class LanguageGeneral
         LoadDefaults = "Load defaults";
         LockTimeCodes = "Lock time codes";
         Logo = "Logo";
+        LookUpX = "Look up \"{0}\"";
         Margin = "Margin";
         Match = "Match";
         MaxCharactersPerSecond = "Max characters per second";
@@ -1237,6 +1241,7 @@ public class LanguageGeneral
         PoweredBy = "Powered by";
         Prefix = "Prefix";
         Preview = "Preview";
+        PreviewAlignmentInListView = "Preview alignment in list view";
         Previous = "Previous";
         Profile = "Profile";
         Quality = "Quality";
@@ -1247,6 +1252,7 @@ public class LanguageGeneral
         ReDownloadX = "Re-download {0}";
         Reason = "Reason";
         RecentFiles = "Recent files";
+        RecentlyUsedVideoOffsets = "Recently used video offsets";
         Redo = "Redo";
         Redownload = "Re-download...";
         Release = "Release";
@@ -1352,7 +1358,7 @@ public class LanguageGeneral
         ShowPreview = "Show preview";
         ShowShotChangesList = "Show shot changes list";
         ShowStyleColumn = "Show \"Style\" column";
-        ShowTeletext = "Show TT";
+        ShowTeletext = "Show teletext column in list view";
         ShowTimeCodes = "Show time codes";
         ShowWpmColumn = "Show \"Words/min\" column";
         ShowPixelWidthColumn = "Show \"Pixel width\" column";

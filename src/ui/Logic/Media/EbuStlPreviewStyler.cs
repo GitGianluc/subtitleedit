@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Logic.Config;
 using SkiaSharp;
 using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Nikse.SubtitleEdit.Logic.Media;
 
@@ -21,9 +22,22 @@ internal static class EbuStlPreviewStyler
     /// True when <paramref name="header"/> is the verbatim GSI block Ebu.LoadSubtitle keeps:
     /// 3 characters of code page number, then the disk format code ("STL25.01").
     /// </summary>
-    public static bool IsStlHeader(string header)
+    public static bool IsStlHeader([NotNullWhen(true)] string? header)
     {
         return header != null && header.Length > 20 && header.AsSpan(3, 3).SequenceEqual("STL");
+    }
+
+    /// <summary>
+    /// True when the subtitle in the video preview is still an EBU STL.
+    /// </summary>
+    /// <remarks>
+    /// The GSI block stays on the subtitle when the format is switched in the toolbar, so the
+    /// header on its own says only which file the subtitle was read from - a subtitle shown as
+    /// SubRip must lose the teletext box and the double height with the format.
+    /// </remarks>
+    public static bool IsStlPreview([NotNullWhen(true)] string? header, Type? uiFormatType)
+    {
+        return uiFormatType == typeof(Ebu) && IsStlHeader(header);
     }
 
     /// <summary>

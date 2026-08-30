@@ -301,6 +301,12 @@ public partial class MainViewModel :
     /// <summary>Whether the original text column may be written to (see <see cref="IsOriginalReadOnly"/>).</summary>
     public bool CanEditOriginal => ShowColumnOriginalText && !IsOriginalReadOnly;
 
+    /// <summary>
+    /// Whether the video preview and the waveform show the original text instead of the translation
+    /// (see <see cref="ToggleOriginalTextInPreviewCommand"/>). Never true without an original.
+    /// </summary>
+    public bool ShowOriginalTextInPreview { get; private set; }
+
     public string OriginalTextLabel => IsOriginalReadOnly
         ? Se.Language.Main.OriginalTextReadOnly
         : IsEditOriginalMode
@@ -400,6 +406,8 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _isVideoLoaded;
     [ObservableProperty] private bool _isTextBoxSplitAtCursorAndVideoPositionVisible;
     [ObservableProperty] private bool _isTextBoxGoogleItVisible;
+    [ObservableProperty] private bool _isTextBoxLookUpVisible;
+    [ObservableProperty] private string _textBoxLookUpHeader = string.Empty;
     [ObservableProperty] private ObservableCollection<string> _speeds;
     [ObservableProperty] private string _selectedSpeed;
     [ObservableProperty] private ObservableCollection<string> _videoSeekAmounts;
@@ -438,6 +446,17 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _isSurroundWith6Visible;
     [ObservableProperty] private bool _isSurroundWith7Visible;
     [ObservableProperty] private bool _isSurroundWith8Visible;
+    [ObservableProperty] private string _customSearch1Text;
+    [ObservableProperty] private string _customSearch2Text;
+    [ObservableProperty] private string _customSearch3Text;
+    [ObservableProperty] private string _customSearch4Text;
+    [ObservableProperty] private string _customSearch5Text;
+    [ObservableProperty] private bool _isCustomSearch1Visible;
+    [ObservableProperty] private bool _isCustomSearch2Visible;
+    [ObservableProperty] private bool _isCustomSearch3Visible;
+    [ObservableProperty] private bool _isCustomSearch4Visible;
+    [ObservableProperty] private bool _isCustomSearch5Visible;
+    [ObservableProperty] private bool _isCustomSearchVisible;
     [ObservableProperty] private bool _isSubtitleSecondaryVisible;
 
     public TableView SubtitleGrid { get; set; }
@@ -613,6 +632,7 @@ public partial class MainViewModel :
     private bool _loading;
     private bool _opening;
     private PointerEventArgs? _lastTextEditorPointerArgs;
+    private string? _textBoxLookUpWord;
     private PointerEventArgs? _lastSubtitleGridPointerArgs;
 
     // The dictionary currently loaded into _spellCheckManager for live spell check, null when none
@@ -688,6 +708,18 @@ public partial class MainViewModel :
     private const double PlayheadPausedSettleStableMs = 100; // mpv's position unchanged this long after a pause = its clock is at rest -> snap the cursor there once
     private bool _playheadResyncOnPlay; // armed while paused: re-seed the estimate from mpv once playback actually moves again
     private const double PlayheadResyncOnPlayThresholdSeconds = 0.04; // ~one frame; below this the standing residual isn't worth moving the cursor for
+    private long _frameStepFollowUntilTs; // a native frame step is in flight: treat mpv's un-pause as paused (see BeginFrameStepPlayheadFollow)
+    private const double FrameStepFollowWindowMs = 1000; // safety cap; the window normally closes as soon as the step lands
+
+    // "One frame back/forward with play" (VideoOneFrameWithPlay): mpv really plays for the length of
+    // one frame, so the blip is kept from moving the waveform cursor - it is held on the frame that
+    // was stepped to - and is ended off mpv's own clock. See UpdateFrameStepPlayBlip.
+    private double? _frameStepPlayAnchorSeconds; // the frame the last blip stepped to; also the base for the next press
+    private double _frameStepPlayStopSeconds; // mpv's clock must reach this (one frame on) before the blip ends
+    private long _frameStepPlayStartTs;
+    private bool _frameStepPlayBlipping; // a blip is running: hold the cursor and watch for its end
+    private const double FrameStepPlaySeekWaitMs = 250; // players that can't report seek completion: assume the seek landed after this
+    private const double FrameStepPlayMaxMs = 700; // safety cap: end the blip even if mpv's clock never reaches the stop point
     private CancellationTokenSource _videoOpenTokenSource;
     private readonly HashSet<string> _waveformsBeingGenerated = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _waveformsBeingGeneratedLock = new();
@@ -917,6 +949,11 @@ public partial class MainViewModel :
         SurroundWith6Text = string.Empty;
         SurroundWith7Text = string.Empty;
         SurroundWith8Text = string.Empty;
+        CustomSearch1Text = string.Empty;
+        CustomSearch2Text = string.Empty;
+        CustomSearch3Text = string.Empty;
+        CustomSearch4Text = string.Empty;
+        CustomSearch5Text = string.Empty;
 
         SubtitleFormats = [.. SubtitleFormatHelper.GetSubtitleFormatsWithFavoritesAtTop()];
         _changingFormatProgrammatically = true;
@@ -1034,6 +1071,7 @@ public partial class MainViewModel :
         LibVlcDynamicPlayer.LibVlcPath = Se.VlcFolder;
         LoadShortcuts();
         UpdateSurroundWithMenuItems();
+        UpdateCustomSearchMenuItems();
 
         StartTimers();
         _autoBackupService.StartAutoBackup(this);
@@ -1265,6 +1303,7 @@ public partial class MainViewModel :
         }
 
         UpdateSurroundWithMenuItems();
+        UpdateCustomSearchMenuItems();
     }
 
     [RelayCommand]
@@ -1470,6 +1509,7 @@ public partial class MainViewModel :
         // Change selection first, then assign _playSelectionItem.
         SubtitleGrid.SelectedItem = next;
         SubtitleGrid.ScrollIntoView(next);
+        CenterOrEnsureRowVisibleInSubtitleGrid(next);
         vp.Position = next.StartTime.TotalSeconds;
         PinPlayheadTo(next.StartTime.TotalSeconds);
         _playSelectionItem = new PlaySelectionItem(new List<SubtitleLineViewModel> { next }, next.EndTime, loop);
@@ -1546,6 +1586,7 @@ public partial class MainViewModel :
         // Mirror PlayNextParagraph — change selection first, then assign _playSelectionItem.
         SubtitleGrid.SelectedItem = previous;
         SubtitleGrid.ScrollIntoView(previous);
+        CenterOrEnsureRowVisibleInSubtitleGrid(previous);
         vp.Position = previous.StartTime.TotalSeconds;
         PinPlayheadTo(previous.StartTime.TotalSeconds);
         _playSelectionItem = new PlaySelectionItem(new List<SubtitleLineViewModel> { previous }, previous.EndTime, loop);
@@ -1674,6 +1715,7 @@ public partial class MainViewModel :
     // surface) can trigger it too, via the PlayPauseRequested wiring in InitVideoPlayer (#12233).
     internal void RequestPausePlayheadFreeze()
     {
+        CancelFrameStepPlayBlip(); // a pause supersedes a one-frame play blip too
         _pauseRequested = true;
         _playStartGate.PauseRequested(); // a pause supersedes any play still waiting to be observed
         _playheadPausedSettled = false; // reconcile the cursor to mpv's final frame once this pause settles
@@ -1687,6 +1729,7 @@ public partial class MainViewModel :
     // where the play-start gate is armed.
     internal void CancelPausePlayheadFreeze()
     {
+        CancelFrameStepPlayBlip(); // playback the user started must not be stopped by a stale blip
         _pauseRequested = false;
         _playStartGate.PlayRequested(Stopwatch.GetTimestamp());
     }
@@ -3518,6 +3561,43 @@ public partial class MainViewModel :
         _shortcutManager.ClearKeys();
     }
 
+    /// <summary>
+    /// SE4 parity (MainEditToggleTranslationOriginalInPreviews): show the original text instead of
+    /// the translation in the video preview and in the waveform (#14252). Session state, not a
+    /// saved setting: it only means anything while an original is loaded, and a remembered "on"
+    /// would start the next session with a blank preview and no visible way back.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleOriginalTextInPreview()
+    {
+        if (!ShowColumnOriginalText)
+        {
+            _shortcutManager.ClearKeys();
+            return;
+        }
+
+        SetOriginalTextInPreview(!ShowOriginalTextInPreview);
+
+        ShowStatus(string.Format(
+            Se.Language.Main.VideoAndWaveformPreviewTextX,
+            ShowOriginalTextInPreview ? Se.Language.General.OriginalText : Se.Language.General.Translation));
+
+        _shortcutManager.ClearKeys();
+    }
+
+    private void SetOriginalTextInPreview(bool showOriginal)
+    {
+        ShowOriginalTextInPreview = showOriginal;
+
+        if (AudioVisualizer != null)
+        {
+            AudioVisualizer.ShowOriginalText = showOriginal;
+        }
+
+        _mpvPreviewDirty = true;
+        _updateAudioVisualizer = true;
+    }
+
     [RelayCommand]
     private async Task FileCloseTranslation()
     {
@@ -3643,14 +3723,14 @@ public partial class MainViewModel :
                 _mpvReloader.Reset();
                 // Through RunPreviewRefresh so a rejected push (player just recreated, mpv not
                 // playing yet) arms the dirty-flag retry instead of being lost (#13407).
-                _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetUpdateSubtitle(), _subtitleSecondary, SelectedSubtitleFormat));
+                _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat));
             }
             else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
             {
                 _vlcReloader.Reset();
                 _ = RunPreviewRefresh(async () =>
                 {
-                    await _vlcReloader.RefreshVlc(vlc, GetUpdateSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+                    await _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
                     return true;
                 });
             }
@@ -6925,6 +7005,43 @@ public partial class MainViewModel :
     }
 
     [RelayCommand]
+    private void CopyTextFromTranslationToOriginal()
+    {
+        var selectedItems = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().ToList();
+        if (Window == null || selectedItems.Count == 0 || !ShowColumnOriginalText)
+        {
+            return;
+        }
+
+        if (IsOriginalReadOnly)
+        {
+            ShowStatus(Se.Language.Main.OriginalIsReadOnlyReference);
+            _shortcutManager.ClearKeys();
+            return;
+        }
+
+        if (IsEmpty)
+        {
+            ShowSubtitleNotLoadedMessage();
+            return;
+        }
+
+        foreach (var subtitle in selectedItems)
+        {
+            subtitle.OriginalText = subtitle.Text;
+        }
+
+        _shortcutManager.ClearKeys();
+        var msg = string.Format(Se.Language.Main.XLinesCopiedToOriginal, selectedItems.Count);
+        if (selectedItems.Count == 1)
+        {
+            msg = Se.Language.Main.OneLineCopiedToOriginal;
+        }
+
+        ShowStatus(msg);
+    }
+
+    [RelayCommand]
     private void SwitchOriginalAndTranslationTextSelectedLines()
     {
         var selectedItems = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().ToList();
@@ -9471,40 +9588,36 @@ public partial class MainViewModel :
             return;
         }
 
+        // The dialog stays open and applies through these callbacks, so several offsets can be
+        // tried out without reopening it; "Cancel" just closes and keeps what was applied.
+        await ShowDialogAsync<SetVideoOffsetWindow, SetVideoOffsetViewModel>(vm =>
+        {
+            vm.Initialize(ApplyVideoOffset, ResetVideoOffset);
+        });
+    }
+
+    private void ApplyVideoOffset(TimeSpan offset, bool relativeToCurrentVideoPosition, bool keepTimeCodes)
+    {
         var oldOffsetMs = Se.Settings.General.CurrentVideoOffsetInMs;
 
-        var result = await ShowDialogAsync<SetVideoOffsetWindow, SetVideoOffsetViewModel>();
-
-        if (result.ResetPressed)
-        {
-            Se.Settings.General.CurrentVideoOffsetInMs = 0;
-            UpdateVideoOffsetStatus();
-            _updateAudioVisualizer = true;
-            return;
-        }
-
-        if (!result.OkPressed || !result.TimeOffset.HasValue)
-        {
-            return;
-        }
-
-        var offset = result.TimeOffset.Value;
-        if (result.RelativeToCurrentVideoPosition)
+        if (relativeToCurrentVideoPosition)
         {
             var vp = GetVideoPlayerControl();
             if (vp != null)
             {
                 offset = offset - TimeSpan.FromSeconds(vp.Position);
             }
-
-            Se.Settings.General.CurrentVideoOffsetInMs = (long)Math.Round(offset.TotalMilliseconds, MidpointRounding.AwayFromZero);
         }
+
+        Se.Settings.General.CurrentVideoOffsetInMs = (long)Math.Round(offset.TotalMilliseconds, MidpointRounding.AwayFromZero);
 
         // The video offset is a non-destructive display offset (see TimeSpanToDisplayFullConverter):
         // the listview shows "time code + offset" while the underlying time codes stay untouched.
         // "Keep existing time codes" therefore leaves the time codes alone. When it is NOT checked,
         // we bake the offset change into the time codes so the displayed values stay the same.
-        if (!result.KeepTimeCodes)
+        // The shift is against the offset in force right now, so applying twice from the open
+        // dialog lands on the same time codes as applying the second value straight away.
+        if (!keepTimeCodes)
         {
             var delta = TimeSpan.FromMilliseconds(Se.Settings.General.CurrentVideoOffsetInMs - oldOffsetMs);
             if (delta != TimeSpan.Zero)
@@ -9517,6 +9630,13 @@ public partial class MainViewModel :
             }
         }
 
+        UpdateVideoOffsetStatus();
+        _updateAudioVisualizer = true;
+    }
+
+    private void ResetVideoOffset()
+    {
+        Se.Settings.General.CurrentVideoOffsetInMs = 0;
         UpdateVideoOffsetStatus();
         _updateAudioVisualizer = true;
     }
@@ -12207,12 +12327,12 @@ public partial class MainViewModel :
             if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
             {
                 _mpvReloader.Reset();
-                _mpvReloader.RefreshMpv(mpv, GetUpdateSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+                _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
             }
             else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
             {
                 _vlcReloader.Reset();
-                _vlcReloader.RefreshVlc(vlc, GetUpdateSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+                _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
             }
         }
 
@@ -13646,6 +13766,120 @@ public partial class MainViewModel :
         }
 
         UiUtil.OpenUrl("https://www.google.com/search?q=" + Uri.EscapeDataString(selected));
+    }
+
+    /// <summary>
+    /// macOS "Look up" (#14277): opens the selected text - or the word that was right-clicked - in
+    /// Dictionary.app, which holds every dictionary and thesaurus the user has installed.
+    /// </summary>
+    [RelayCommand]
+    private void LookUpInDictionary()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        var url = MacDictionaryLookup.BuildUrl(_textBoxLookUpWord);
+        if (url == null)
+        {
+            return;
+        }
+
+        UiUtil.OpenUrl(url);
+    }
+
+    [RelayCommand]
+    private void CustomSearch1()
+    {
+        RunCustomSearch(1);
+    }
+
+    [RelayCommand]
+    private void CustomSearch2()
+    {
+        RunCustomSearch(2);
+    }
+
+    [RelayCommand]
+    private void CustomSearch3()
+    {
+        RunCustomSearch(3);
+    }
+
+    [RelayCommand]
+    private void CustomSearch4()
+    {
+        RunCustomSearch(4);
+    }
+
+    [RelayCommand]
+    private void CustomSearch5()
+    {
+        RunCustomSearch(5);
+    }
+
+    /// <summary>
+    /// Opens a "search via" slot's URL with the selected text - or, with nothing selected, with the
+    /// whole text of the focused text box, like SE 4 does.
+    /// </summary>
+    private void RunCustomSearch(int slotNumber)
+    {
+        var url = Se.Settings.GetCustomSearchUrl(slotNumber);
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        var tb = GetFocusedTextBoxWrapper() ?? EditTextBox;
+        var text = tb.SelectedText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            text = tb.Text;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            ShowStatus(Se.Language.General.NothingSelected);
+            return;
+        }
+
+        var searchUrl = CustomSearchUrlBuilder.Build(url, text);
+        if (searchUrl == null)
+        {
+            // Nothing sensible to open - say which slot, so a broken URL is findable in Options.
+            ShowStatus(ShortcutsMain.GetSearchViaTitle(slotNumber) + ": " + url);
+            return;
+        }
+
+        UiUtil.OpenUrl(searchUrl);
+    }
+
+    /// <summary>
+    /// Refreshes the "search via" context menu entries; slots without a URL stay hidden, and the
+    /// submenu itself disappears when no slot is configured at all.
+    /// </summary>
+    private void UpdateCustomSearchMenuItems()
+    {
+        CustomSearch1Text = ShortcutsMain.GetSearchViaTitle(1);
+        CustomSearch2Text = ShortcutsMain.GetSearchViaTitle(2);
+        CustomSearch3Text = ShortcutsMain.GetSearchViaTitle(3);
+        CustomSearch4Text = ShortcutsMain.GetSearchViaTitle(4);
+        CustomSearch5Text = ShortcutsMain.GetSearchViaTitle(5);
+
+        IsCustomSearch1Visible = IsCustomSearchSlotConfigured(1);
+        IsCustomSearch2Visible = IsCustomSearchSlotConfigured(2);
+        IsCustomSearch3Visible = IsCustomSearchSlotConfigured(3);
+        IsCustomSearch4Visible = IsCustomSearchSlotConfigured(4);
+        IsCustomSearch5Visible = IsCustomSearchSlotConfigured(5);
+
+        IsCustomSearchVisible = IsCustomSearch1Visible || IsCustomSearch2Visible || IsCustomSearch3Visible ||
+                                IsCustomSearch4Visible || IsCustomSearch5Visible;
+    }
+
+    private static bool IsCustomSearchSlotConfigured(int slotNumber)
+    {
+        return !string.IsNullOrWhiteSpace(Se.Settings.GetCustomSearchUrl(slotNumber));
     }
 
     [RelayCommand]
@@ -16035,7 +16269,7 @@ public partial class MainViewModel :
         }
 
         vp.Position = foundSeconds;
-        SelectAndScrollToRow(Subtitles.IndexOf(found));
+        SelectAndScrollToRowCentered(Subtitles.IndexOf(found));
         AudioVisualizerCenterOnPositionIfNeeded(found, foundSeconds);
         _updateAudioVisualizer = true;
     }
@@ -16243,6 +16477,7 @@ public partial class MainViewModel :
             }
         };
         _fullScreenVideoPlayerControl.StopRequested += OnVideoPlayerStopRequested;
+        _fullScreenVideoPlayerControl.PositionChanged += OnVideoPlayerPositionSet;
         var toggleKeys = Se.Settings.Shortcuts
             .FirstOrDefault(s => s.ActionName == nameof(VideoFullScreenCommand))?.Keys;
         var showMediaInfoKeys = Se.Settings.Shortcuts
@@ -18290,6 +18525,7 @@ public partial class MainViewModel :
         var vp = GetVideoPlayerControl();
         if (vp != null && vp.VideoPlayer is LibMpvDynamicPlayer mpv)
         {
+            BeginFrameStepPlayheadFollow();
             mpv.StepOneFrameBack();
             return;
         }
@@ -18315,6 +18551,7 @@ public partial class MainViewModel :
         var vp = GetVideoPlayerControl();
         if (vp != null && vp.VideoPlayer is LibMpvDynamicPlayer mpv)
         {
+            BeginFrameStepPlayheadFollow();
             mpv.StepOneFrameForward();
             return;
         }
@@ -18342,9 +18579,10 @@ public partial class MainViewModel :
     }
 
     /// <summary>
-    /// SE4's "one frame back/forward with play": step one frame and play just that frame, so
-    /// the step gives audio/visual feedback. Runs through the play-selection stop, whose
-    /// park-one-frame-before-the-end rule lands the playhead exactly on the stepped-to frame.
+    /// SE4's "one frame back/forward with play": step one frame and play just that frame, so the
+    /// step gives audio as well as visual feedback. The blip is a real (very short) playback, but
+    /// it is not allowed to move the waveform cursor: the cursor is parked on the frame that was
+    /// stepped to and held there while mpv plays the frame out. See UpdateFrameStepPlayBlip.
     /// </summary>
     private void VideoOneFrameWithPlay(bool forward)
     {
@@ -18356,18 +18594,104 @@ public partial class MainViewModel :
 
         var fps = Se.Settings.General.CurrentFrameRate;
         var frameSeconds = fps >= 10 ? 1.0 / fps : 0.04;
-        var target = Math.Max(0, vp.Position + (forward ? frameSeconds : -frameSeconds));
 
-        vp.VideoPlayer.Pause();
-        vp.Position = target;
-        PinPlayheadTo(target);
-        var frameWindow = new SubtitleLineViewModel
+        // Step from the frame the previous press stepped to, not from the player's reported
+        // position: vp.Position is refreshed from mpv by a 50 ms timer and, right after a blip,
+        // holds mpv's overshoot (it keeps decoding for ~100 ms past a pause) rather than the frame
+        // the cursor is parked on. Chaining off that made a held-down shortcut advance a random
+        // one to four frames per press. Every other position change drops the anchor
+        // (CancelFrameStepPlayBlip); the distance check is a net for the ones that don't, exactly
+        // as the relative-seek tracker in MoveVideoPositionMs does it.
+        var from = _frameStepPlayAnchorSeconds is { } anchor && Math.Abs(anchor - vp.Position) < 0.5
+            ? anchor
+            : vp.Position;
+
+        var target = Math.Max(0, from + (forward ? frameSeconds : -frameSeconds));
+        if (vp.Duration > 0 && target > vp.Duration)
         {
-            StartTime = TimeSpan.FromSeconds(target),
-            EndTime = TimeSpan.FromSeconds(target + frameSeconds),
-        };
-        _playSelectionItem = new PlaySelectionItem([frameWindow], frameWindow.EndTime, false);
+            target = vp.Duration;
+        }
+
+        ResetPlaySelection();
+        vp.VideoPlayer.Pause();
+        vp.SeekTo(target);
+        PinPlayheadTo(target);
         PlayVideo(vp);
+
+        // After PlayVideo: it cancels a pending pause freeze, which also cancels a blip.
+        BeginFrameStepPlayBlip(target, target + frameSeconds);
+    }
+
+    /// <summary>
+    /// Arms the "one frame with play" blip started by <see cref="VideoOneFrameWithPlay"/>: mpv is
+    /// playing from <paramref name="anchorSeconds"/> and must be stopped again once its clock
+    /// reaches <paramref name="stopSeconds"/>, one frame on.
+    /// </summary>
+    private void BeginFrameStepPlayBlip(double anchorSeconds, double stopSeconds)
+    {
+        _frameStepPlayAnchorSeconds = anchorSeconds;
+        _frameStepPlayStopSeconds = stopSeconds;
+        _frameStepPlayStartTs = Stopwatch.GetTimestamp();
+        _frameStepPlayBlipping = true;
+    }
+
+    /// <summary>
+    /// Ends a "one frame with play" blip once mpv has actually played the frame, and parks the
+    /// player back on it. Driven from the 16 ms cursor timer and measured against mpv's own clock:
+    /// the play-selection stop this used to run through ticks at 50 ms and compares the *cursor
+    /// estimate*, so a one-frame window overshot by 50-150 ms - the cursor glided a few frames
+    /// forward and then snapped back on every single press.
+    /// </summary>
+    private void UpdateFrameStepPlayBlip(VideoPlayerControl vp)
+    {
+        if (!_frameStepPlayBlipping)
+        {
+            return;
+        }
+
+        var player = vp.VideoPlayer;
+        var elapsedMs = (Stopwatch.GetTimestamp() - _frameStepPlayStartTs) * 1000.0 / Stopwatch.Frequency;
+
+        // The anchor/stop values live in UI time, which in SMPTE mode is the drop-frame clock;
+        // compress the player's real clock the same way the estimator does before comparing.
+        var playerPosition = player.Position;
+        if (IsSmpteTimingEnabled)
+        {
+            playerPosition = playerPosition * 1000.0 / 1001.0;
+        }
+
+        // The seek onto the frame is asynchronous, so until it lands mpv's clock still reports the
+        // spot we came from - which for a backward step is already past the stop point and would
+        // end the blip before it played anything.
+        var seekLanded = player.SupportsPlaybackRestartEvents
+            ? player.HasPlaybackRestartedSince(_frameStepPlayStartTs)
+            : elapsedMs > FrameStepPlaySeekWaitMs;
+
+        var frameIsPlayedOut = seekLanded && playerPosition >= _frameStepPlayStopSeconds;
+        if (!frameIsPlayedOut && elapsedMs < FrameStepPlayMaxMs)
+        {
+            return;
+        }
+
+        _frameStepPlayBlipping = false;
+        var anchor = _frameStepPlayAnchorSeconds ?? playerPosition;
+        PauseVideoAndFreezePlayhead(vp);
+        vp.SeekTo(anchor);
+        PinPlayheadTo(anchor);
+
+        // Pausing and pinning are seek paths and clear the anchor; this one *is* the anchor, and
+        // the next press chains off it.
+        _frameStepPlayAnchorSeconds = anchor;
+    }
+
+    /// <summary>
+    /// Drops a running "one frame with play" blip. Called from every play/pause/seek path, so a
+    /// blip can never pause playback the user started afterwards, or hold the cursor off a seek.
+    /// </summary>
+    private void CancelFrameStepPlayBlip()
+    {
+        _frameStepPlayBlipping = false;
+        _frameStepPlayAnchorSeconds = null;
     }
 
     /// <summary>
@@ -19228,6 +19552,7 @@ public partial class MainViewModel :
         // relative-seek tracker so the next small step resyncs to the real position.
         // MoveVideoPositionMs re-arms it immediately after calling this. (#12027)
         _relativeSeekTargetSeconds = null;
+        CancelFrameStepPlayBlip(); // ...and the frame-with-play anchor, for the same reason
 
         var vp = GetVideoPlayerControl();
         if (vp == null || string.IsNullOrEmpty(_videoFileName) || AudioVisualizer == null)
@@ -19245,7 +19570,14 @@ public partial class MainViewModel :
             newPosition = vp.Duration;
         }
 
-        vp.Position = newPosition;
+        // SeekTo, not the Position property: an assignment equal to the currently displayed
+        // value silently no-ops at the styled-property layer and the seek never reaches the
+        // player. And pin like the waveform click/scrub paths do - without it the cursor sat
+        // on the old position for the 100-200 ms the seek takes while the view below had
+        // already scrolled to the target, so keyboard nudges and snapped frame steps read as
+        // laggy next to a click.
+        vp.SeekTo(newPosition);
+        PinPlayheadTo(newPosition);
 
         if (vp.IsPlaying)
         {
@@ -19886,6 +20218,25 @@ public partial class MainViewModel :
     private void CenterSelectedRowInSubtitleGrid(SubtitleLineViewModel itemToCenter)
     {
         TableViewExtras.CenterRow(SubtitleGrid, itemToCenter);
+    }
+
+    /// <summary>
+    /// The scroll follow-up <see cref="SelectAndScrollToRow(int,SubtitleLineViewModel?,bool?,bool)"/>
+    /// does, for the prev/next-line commands that must move the selection synchronously and so set
+    /// <see cref="SubtitleGrid"/>'s selected item themselves (play next/previous line): center the
+    /// row when "center when selecting prev/next row" is on, otherwise only nudge it fully into
+    /// view. Both halves are posted, so neither disturbs the selection just made.
+    /// </summary>
+    private void CenterOrEnsureRowVisibleInSubtitleGrid(SubtitleLineViewModel row)
+    {
+        if (Se.Settings.General.SubtitleGridCenterSelectedRow)
+        {
+            CenterSelectedRowInSubtitleGrid(row);
+        }
+        else
+        {
+            EnsureRowFullyVisibleInSubtitleGrid(row);
+        }
     }
 
     /// <summary>
@@ -20688,13 +21039,13 @@ public partial class MainViewModel :
                                                                               "You can open media files via the Video menu.");
                     return;
                 }
+            }
 
-                if (subtitle == null)
-                {
-                    var message = Se.Language.General.UnknownSubtitleFormat;
-                    await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+            if (subtitle == null)
+            {
+                var message = Se.Language.General.UnknownSubtitleFormat;
+                await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
             if (!skipLoadVideo)
@@ -20707,14 +21058,15 @@ public partial class MainViewModel :
             AudioVisualizer?.StartPositionSeconds = 0;
             AudioVisualizer?.CurrentVideoPositionSeconds = 0;
 
-            SetSubtitleFormat(SubtitleFormats.FirstOrDefault(p => p.Name == subtitle?.OriginalFormat?.Name) ??
+            var loadedFormatName = subtitle.OriginalFormat?.Name;
+            SetSubtitleFormat(SubtitleFormats.FirstOrDefault(p => p.Name == loadedFormatName) ??
                               SelectedSubtitleFormat);
 
             // The STL header declares the frame rate the timecodes were authored in, so the
             // HH:MM:SS:FF display (forced on for EBU STL) shows the file's own frame numbers.
             // Skipped when the header's disk format code is unreadable - the frame rate would
             // just be a guessed fallback then (#14076). A video loaded later still wins.
-            if (subtitle?.OriginalFormat is Ebu ebuFormat &&
+            if (subtitle.OriginalFormat is Ebu ebuFormat &&
                 ebuFormat.Header is { } ebuHeader &&
                 ebuHeader.DiskFormatCode != null &&
                 ebuHeader.DiskFormatCode.StartsWith("STL", StringComparison.Ordinal) &&
@@ -22686,6 +23038,45 @@ public partial class MainViewModel :
         return _subtitle;
     }
 
+    /// <summary>
+    /// The subtitle the video preview should render: the working subtitle, or - with "toggle
+    /// translation and original in video/audio preview" on - the original text (#14252). The
+    /// original variant goes into a throw-away subtitle rather than through
+    /// <see cref="GetUpdateSubtitleOriginal"/>: that one owns <see cref="_subtitleOriginal"/>, the
+    /// instance that gets saved, and re-stamps every row's reference id - far too much for
+    /// something a timer calls whenever the preview is dirty.
+    /// </summary>
+    private Subtitle GetVideoPreviewSubtitle()
+    {
+        if (!ShowOriginalTextInPreview)
+        {
+            return GetUpdateSubtitle();
+        }
+
+        var subtitle = new Subtitle
+        {
+            Header = _subtitle.Header,
+            Footer = _subtitle.Footer,
+            OriginalFormat = _subtitle.OriginalFormat,
+            FileName = _subtitle.FileName,
+        };
+
+        foreach (var line in Subtitles)
+        {
+            // Rows with no original line contribute nothing here - including the read-only
+            // reference rows, which are the original's non-matching lines and so belong in this
+            // one (unlike in GetUpdateSubtitle, which must leave them out).
+            if (string.IsNullOrEmpty(line.OriginalText))
+            {
+                continue;
+            }
+
+            subtitle.Paragraphs.Add(line.ToParagraphOriginal(SelectedSubtitleFormat));
+        }
+
+        return subtitle;
+    }
+
     public Subtitle GetUpdateSubtitleOriginal(bool subtractVideoOffset = false)
     {
         _subtitleOriginal ??= new Subtitle();
@@ -23015,11 +23406,11 @@ public partial class MainViewModel :
             return false;
         }
 
+        _subtitleOriginal ??= new Subtitle();
         var oldSubtitleFileNameOriginal = _subtitleFileNameOriginal;
         var oldSubtitleOriginalFileName = _subtitleOriginal.FileName;
 
         _subtitleFileNameOriginal = fileName;
-        _subtitleOriginal ??= new Subtitle();
         _subtitleOriginal.FileName = fileName;
 
         // _lastOpenSaveFormat belongs to the *main* subtitle - SaveSubtitle compares it against
@@ -23467,6 +23858,7 @@ public partial class MainViewModel :
                     }
 
                     UpdateSurroundWithMenuItems();
+                    UpdateCustomSearchMenuItems();
                 }
             });
         });
@@ -27620,6 +28012,13 @@ public partial class MainViewModel :
         {
             MakeSubtitleTextInfoOriginal(SelectedSubtitle.OriginalText, SelectedSubtitle);
         }
+
+        // Without an original there is no original text to preview - leaving the flag set would
+        // blank out the waveform text and the video preview (SE4 cleared it the same way).
+        if (!value && ShowOriginalTextInPreview)
+        {
+            SetOriginalTextInPreview(false);
+        }
     }
 
     private void MakeSubtitleTextInfoOriginal(string text, SubtitleLineViewModel item)
@@ -27779,6 +28178,50 @@ public partial class MainViewModel :
         }
 
         var nowTimestamp = Stopwatch.GetTimestamp();
+
+        // A "one frame back/forward with play" blip is running (see VideoOneFrameWithPlay): mpv is
+        // genuinely playing, but only for the length of the frame that was just stepped to, and the
+        // cursor belongs on that frame. Letting it track playback made it glide a few frames forward
+        // and then snap back when the blip parked - the jerky, seemingly random cursor motion of
+        // holding the shortcut down. The blip is cancelled by every other play/pause/seek path, so
+        // this can't hold the cursor against playback the user started.
+        if (_frameStepPlayBlipping && _frameStepPlayAnchorSeconds is { } blipAnchor)
+        {
+            _playheadLastRealSeconds = rawPosition;
+            _playheadLastTimestamp = nowTimestamp;
+            _playheadLastRawChangeTs = nowTimestamp;
+            _playheadEstimateSeconds = blipAnchor;
+            _playheadValid = true;
+            _playheadPausedSettled = true; // the cursor is authoritative on the frame, as after a pinned seek
+            _playheadWasPlaying = false; // the blip's own pause must not read as a play -> pause edge
+            return blipAnchor;
+        }
+
+        // A native frame step is in flight: mpv's `frame-step` is a real un-pause (it sets pause=no,
+        // plays until the next video frame, then sets pause=yes), so the observed pause flag flickers
+        // and reads here as a play->pause cycle. That cleared _playheadPausedSettled on the very tick
+        // mpv reported the stepped-to frame, so the follow-a-paused-seek branch below skipped it - and
+        // settling deliberately never snaps (#12740), so the frame was dropped from the cursor for good
+        // and the step drifted a frame per press until the 0.5 s discontinuity snap caught up (#14245).
+        // How often it bit depended on the audio period (a PipeWire quantum change is enough): that
+        // sets how long the un-pause window lasts and whether mpv coalesces the pause change at all.
+        // Stepping backwards never had this - `frame-back-step` seeks and stays paused - which is why
+        // it always landed the cursor correctly. So treat the core as paused for the duration of the
+        // step and let the paused branch follow mpv's reported position exactly, as it does for a
+        // paused seek. The window closes as soon as the step lands, so a real Play() right after a
+        // step isn't swallowed.
+        var frameStepping = _frameStepFollowUntilTs != 0;
+        if (frameStepping)
+        {
+            var stepLanded = _playheadLastRealSeconds >= 0 &&
+                             Math.Abs(rawPosition - _playheadLastRealSeconds) > 0.0005;
+            if (stepLanded || nowTimestamp > _frameStepFollowUntilTs)
+            {
+                _frameStepFollowUntilTs = 0;
+            }
+
+            isPlaying = false;
+        }
 
         // Any tick with mpv stopped arms a one-shot resync for when playback starts again (see the
         // resync block in the playing branch). Armed here rather than in PlayVideo so every way of
@@ -27967,9 +28410,13 @@ public partial class MainViewModel :
             // discontinuity (a seek while paused, beyond the resync threshold) moves the cursor now.
             if (!isPlaying)
             {
-                if (_playheadWasPlaying)
+                if (_playheadWasPlaying && !frameStepping)
                 {
-                    _playheadPausedSettled = false; // play -> pause edge: wait for mpv's clock to settle
+                    // Play -> pause edge: wait for mpv's clock to settle. Not for a frame step, where
+                    // the "playing" state was mpv's one-frame un-pause (or, when stepping out of real
+                    // playback, an explicit request for the next frame): the cursor belongs on the
+                    // frame mpv reports, so keep it authoritative and let it follow (#14245).
+                    _playheadPausedSettled = false;
                 }
 
                 _pauseRequested = false; // mpv has actually paused now
@@ -28033,10 +28480,25 @@ public partial class MainViewModel :
         return _playheadEstimateSeconds;
     }
 
+    /// <summary>
+    /// Called just before a native mpv frame step (`frame-step` / `frame-back-step`): opens a short
+    /// window in which the playhead estimate treats the core as paused and stays authoritative, so
+    /// the cursor snaps onto the frame mpv steps to instead of losing it to the un-pause that
+    /// `frame-step` really is. See the frame-step block in <see cref="UpdatePlayheadEstimate"/>.
+    /// </summary>
+    private void BeginFrameStepPlayheadFollow()
+    {
+        CancelFrameStepPlayBlip(); // a native step moves the play-head off the blip's frame
+        _frameStepFollowUntilTs = Stopwatch.GetTimestamp() +
+                                 (long)(Stopwatch.Frequency * FrameStepFollowWindowMs / 1000.0);
+        _playheadPausedSettled = true; // stepping: the cursor is at the current frame and follows to the next one
+    }
+
     // Called when the user seeks via the waveform: show the clicked position on the cursor
     // immediately and pin it there until mpv's clock catches up (see UpdatePlayheadEstimate).
     private void PinPlayheadTo(double targetSeconds)
     {
+        CancelFrameStepPlayBlip(); // any other seek moves the cursor off the stepped-to frame
         _playheadSeekTarget = targetSeconds;
         _playheadSeekTargetTs = Stopwatch.GetTimestamp();
         _playheadEstimateSeconds = targetSeconds;
@@ -28074,7 +28536,7 @@ public partial class MainViewModel :
                         var idx = Subtitles.IndexOf(_setEndAtKeyUpLine);
                         if (idx >= 0)
                         {
-                            SelectAndScrollToRow(idx + 1);
+                            SelectAndScrollToRowCentered(idx + 1);
                         }
 
                         _setEndAtKeyUpLine = null;
@@ -28340,6 +28802,11 @@ public partial class MainViewModel :
                 }
             }
 
+            // End a "one frame back/forward with play" blip as soon as mpv has played the frame.
+            // Checked here rather than from the 50 ms position timer so the blip is one frame long
+            // instead of one-frame-plus-however-long-that-timer-took-to-notice.
+            UpdateFrameStepPlayBlip(vp);
+
             // Always advance the estimate: the 50 ms _positionTimer reads _playheadEstimateSeconds as
             // its source of truth (SelectCurrentSubtitleWhilePlaying, play-selection end detection, the
             // auto-scroll branches), and some layouts have a video player but no waveform. Only the
@@ -28470,7 +28937,7 @@ public partial class MainViewModel :
 
         if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
         {
-            var subtitle = GetUpdateSubtitle();
+            var subtitle = GetVideoPreviewSubtitle();
             _mpvPreviewDirty = false; // clear only after subtitle snapshot is successfully obtained
             if (hideLayers)
             {
@@ -28481,7 +28948,7 @@ public partial class MainViewModel :
         }
         else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
         {
-            var subtitle = GetUpdateSubtitle();
+            var subtitle = GetVideoPreviewSubtitle();
             _mpvPreviewDirty = false; // clear only after subtitle snapshot is successfully obtained
             if (hideLayers)
             {
@@ -29096,6 +29563,27 @@ public partial class MainViewModel :
         _updateAudioVisualizer = true;
     }
 
+    /// <summary>
+    /// Raised for every seek that reaches the player through the control's Position/slider path -
+    /// the direct "vp.Position = x" writes (bookmarks, shot changes, seek silence, go-to-line...)
+    /// that never go through <see cref="PinPlayheadTo"/>. An armed "one frame with play" blip
+    /// would survive such a seek and, when it ends a moment later, pause the video and yank it
+    /// back to the blip's anchor frame - swallowing the navigation. The blip's playback is
+    /// transient, so stop it and let the seek win.
+    /// </summary>
+    internal void OnVideoPlayerPositionSet(double newPositionSeconds)
+    {
+        if (_frameStepPlayBlipping)
+        {
+            // The blip started this playback and its end (which would have paused) will never
+            // run - pause here so the foreign seek lands on a paused player, like the frame
+            // step it interrupted.
+            GetVideoPlayerControl()?.VideoPlayer.Pause();
+        }
+
+        CancelFrameStepPlayBlip();
+    }
+
     internal void OnVideoPlayerUserSeeked(double newPositionSeconds)
     {
         // Glue the waveform cursor to the drag/wheel target like every other seek path
@@ -29495,6 +29983,31 @@ public partial class MainViewModel :
         SelectAndScrollToSubtitle(p);
     }
 
+    /// <summary>
+    /// Works out what the macOS "Look up" menu item would look up: the selected text, or - with no
+    /// selection - the word the right-click landed on, like the system context menu does.
+    /// </summary>
+    private void UpdateTextBoxLookUp()
+    {
+        _textBoxLookUpWord = null;
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var selected = EditTextBox.SelectedText;
+            _textBoxLookUpWord = !string.IsNullOrWhiteSpace(selected)
+                ? MacDictionaryLookup.Normalize(selected)
+                : MacDictionaryLookup.Normalize(_lastTextEditorPointerArgs == null
+                    ? null
+                    : EditTextBox.GetWordAtPosition(_lastTextEditorPointerArgs)?.Text);
+        }
+
+        IsTextBoxLookUpVisible = _textBoxLookUpWord != null;
+        if (_textBoxLookUpWord != null)
+        {
+            TextBoxLookUpHeader = MacDictionaryLookup.BuildHeader(Se.Language.General.LookUpX, _textBoxLookUpWord);
+        }
+    }
+
     internal void TextBoxContextOpening(object? sender, EventArgs e)
     {
         IsTextBoxSplitAtCursorAndVideoPositionVisible = false;
@@ -29502,6 +30015,10 @@ public partial class MainViewModel :
         // "Google it" searches the selection, so it only makes sense with one - and it was
         // shortcut-only (with no default gesture), which made it look removed since SE4.
         IsTextBoxGoogleItVisible = !string.IsNullOrWhiteSpace(EditTextBox.SelectedText);
+
+        // macOS "Look up" (#14277). Must run before the spell check block below, which clears
+        // "_lastTextEditorPointerArgs" - that is what tells us which word was right-clicked.
+        UpdateTextBoxLookUp();
 
         var s = SelectedSubtitle;
         var vp = GetVideoPlayerControl();
