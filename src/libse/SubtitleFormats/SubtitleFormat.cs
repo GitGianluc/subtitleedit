@@ -162,6 +162,7 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     new Csv4(),
                     new Csv5(),
                     new CsvDaVinci(),
+                    new CsvExcel(),
                     new CsvNuendo(),
                     new DCinemaInterop(),
                     new DCinemaSmpte2007(),
@@ -177,6 +178,7 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     new DvdSubtitle(),
                     new DvdSubtitleSystem(),
                     new DvSubtitle(),
+                    new DvbTeletext(),
                     new Ebu(),
                     new Edius4Frames(),
                     new Edius4Ms(),
@@ -229,6 +231,7 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     new ImageLogicAutocaption(),
                     new InqScribe(),
                     new IssXml(),
+                    new EbuTt(), // before EbuTtD - a Part 1 document also carries the urn:ebu:tt:style namespace EbuTtD sniffs for
                     new EbuTtD(), // before iTunes/TimedText10 - their generic TTML detection would otherwise claim EBU-TT-D files
                     new ItunesTimedText(),
                     new JacoSub(),
@@ -258,6 +261,8 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     new JsonType21(),
                     new JsonType22(),
                     new JsonType23(),
+                    new WistiaJson(),
+                    new JsonType24(),
                     new KanopyHtml(),
                     new LambdaCap(),
                     new Lrc(),
@@ -314,6 +319,8 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     new SonyDVDArchitectLineDurationLength(),
                     new SonyDVDArchitectTabs(),
                     new SonyDVDArchitectWithLineNumbers(),
+                    new SonicDvdProducer(), // after Adobe Encore w. line# - same layout, this one only takes the column-padded files
+                    new Spc(), // before TMPlayer - TMPlayer reads "00:00:05:25&..." as its own "h:mm:ss:text" and keeps the rest as text
                     new Speechmatics(),
                     new Spruce(),
                     new SpruceWithSpace(),
@@ -452,7 +459,7 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     new UnknownSubtitle79(),
                     new UnknownSubtitle80(),
                     new UnknownSubtitle81(),
-                    new UnknownSubtitle82(),
+                    new YouTubeTimedText(),
                     new UnknownSubtitle83(),
                     new UnknownSubtitle84(),
                     new UnknownSubtitle85(),
@@ -549,6 +556,13 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
         }
 
         public virtual List<string> AlternateExtensions => new List<string>();
+
+        /// <summary>
+        /// Names this format used to be called. Settings store formats by name
+        /// (DefaultSubtitleFormat, FavoriteSubtitleFormats), so renaming a format would
+        /// otherwise silently drop it from an existing user's default and favorites.
+        /// </summary>
+        public virtual List<string> AlternateNames => new List<string>();
 
         public static int MillisecondsToFrames(double milliseconds)
         {
@@ -770,6 +784,7 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
             return new SubtitleFormat[]
             {
                 new Ebu { BatchMode = batchMode },
+                new DvbTeletext(),
                 new Pac { BatchMode = batchMode },
                 new PacUnicode(),
                 new Cavena890 { BatchMode = batchMode },
@@ -841,6 +856,17 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                     format.FriendlyName.Trim().Equals(trimmedFormatName, StringComparison.OrdinalIgnoreCase))
                 {
                     return format;
+                }
+            }
+
+            foreach (var format in AllSubtitleFormats)
+            {
+                foreach (var alternateName in format.AlternateNames)
+                {
+                    if (alternateName.Trim().Equals(trimmedFormatName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return format;
+                    }
                 }
             }
 

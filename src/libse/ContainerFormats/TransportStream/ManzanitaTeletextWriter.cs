@@ -62,6 +62,26 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
         private const int LastRow = 23;
         private const int DefaultBottomRow = 22; // a double height row covers 22 and 23
 
+        // ETS 300 706, chapter 12.3: the enhancement packet and the triplets it holds.
+        private const int EnhancementPacketNumber = 26;
+        private const int TripletsPerPacket = 13;
+        private const byte SetActivePositionMode = 0x04;
+
+        // ETS 300 706, chapter 12.3.1, table 27: an X/26 foreground colour triplet names one of
+        // the 32 colour map entries at a character position - the only road to the Level 2.5
+        // colours beyond the eight a spacing attribute reaches. The map itself travels in a
+        // packet X/28/0.
+        private const byte ForegroundColorMode = 0x00;
+        private const int ColorMapPacketNumber = 28;
+        private const int RowAddressGroupStart = 40;
+        private const int TerminationAddress = 63;
+        private const byte TerminationMode = 0x1f;
+        private const byte TerminationData = 0x7f;
+
+        // The designation code of an X/26 packet is four bits wide, so a page cannot carry more
+        // than sixteen of them - far past what even a full screen of accented text needs.
+        private const int MaxEnhancementPackets = 16;
+
         // Spacing attributes, ETS 300 706 chapter 12.2.
         private const byte DoubleHeight = 0x0d;
         private const byte StartBox = 0x0b;
@@ -83,6 +103,53 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
         {
             public ulong Milliseconds { get; set; }
             public List<byte[]> DataUnits { get; } = new List<byte[]>();
+        }
+
+        /// <summary>
+        /// One cell of a teletext row: the seven bit code the row itself carries, plus the X/26
+        /// triplet that overwrites it when the character needs the G2 set or a diacritical mark.
+        /// </summary>
+        private readonly struct Cell
+        {
+            public Cell(byte value) : this(value, 0, 0)
+            {
+            }
+
+            public Cell(byte value, byte mode, byte data) : this(value, mode, data, -1)
+            {
+            }
+
+            public Cell(byte value, byte mode, byte data, int colorEntry)
+            {
+                Value = value;
+                Mode = mode;
+                Data = data;
+                ColorEntry = colorEntry;
+            }
+
+            public byte Value { get; }
+
+            /// <summary>X/26 mode, or zero when the cell needs no enhancement.</summary>
+            public byte Mode { get; }
+
+            public byte Data { get; }
+
+            /// <summary>
+            /// The colour map entry an X/26 foreground colour triplet paints this cell (and the
+            /// rest of the run) with, or -1 when the Level 1 attributes already have it right.
+            /// </summary>
+            public int ColorEntry { get; }
+        }
+
+        /// <summary>
+        /// An X/26 triplet waiting for the row layout to settle, so it knows its column.
+        /// </summary>
+        private class Enhancement
+        {
+            public int Row { get; set; }
+            public int Column { get; set; }
+            public byte Mode { get; set; }
+            public byte Data { get; set; }
         }
 
         public void Write(Subtitle subtitle, string fileName)
@@ -208,13 +275,14 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
             var magazine = PageNumber / 100 % 8;
             var pageBcd = Teletext.DecToBec(PageNumber) & 0xff;
             var paragraphs = subtitle.Paragraphs;
+            var colorMap = new TeletextColorMap();
 
             for (var i = 0; i < paragraphs.Count; i++)
             {
                 var p = paragraphs[i];
                 var show = new TeletextPacket { Milliseconds = ToMilliseconds(p.StartTime.TotalMilliseconds) };
                 show.DataUnits.Add(GetPageHeaderDataUnit(magazine, pageBcd, show.DataUnits.Count, erasePage: true));
-                show.DataUnits.AddRange(GetTextDataUnits(p, magazine, show.DataUnits.Count));
+                show.DataUnits.AddRange(GetTextDataUnits(p, magazine, show.DataUnits.Count, colorMap));
                 show.DataUnits.Add(GetPageHeaderDataUnit(magazine, FillerPageBcd, show.DataUnits.Count, erasePage: false));
                 packets.Add(show);
 
@@ -268,7 +336,7 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
             return GetDataUnit(magazine, 0, data, unitIndex, alreadyEncoded: true);
         }
 
-        private static List<byte[]> GetTextDataUnits(Paragraph paragraph, int magazine, int firstUnitIndex)
+        private static List<byte[]> GetTextDataUnits(Paragraph paragraph, int magazine, int firstUnitIndex, TeletextColorMap colorMap)
         {
             var result = new List<byte[]>();
             var text = paragraph.Text ?? string.Empty;
@@ -285,18 +353,129 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
             }
 
             var rows = GetRowNumbers(lines.Count, paragraph.MarginV, topAligned, out var doubleHeight);
+            var enhancements = new List<Enhancement>();
+            var rowData = new List<byte[]>();
             for (var i = 0; i < lines.Count; i++)
             {
-                result.Add(GetDataUnit(magazine, rows[i], GetRow(lines[i], alignment, doubleHeight),
-                    firstUnitIndex + i, alreadyEncoded: false));
+                rowData.Add(GetRow(lines[i], alignment, doubleHeight, rows[i], enhancements, colorMap));
+            }
+
+            // ETS 300 706, chapter 9.4.2: the colour map rides in a packet X/28/0, transmitted
+            // with every page so a decoder joining anywhere has it. Once any subtitle has put a
+            // colour in a redefinable entry, every later page carries the map - entries are only
+            // ever added, so a page is never sent ahead of an entry it uses.
+            if (colorMap.NeedsColorMapPacket)
+            {
+                result.Add(GetDataUnit(magazine, ColorMapPacketNumber, colorMap.GetColorMapPacketData(),
+                    firstUnitIndex + result.Count, alreadyEncoded: true));
+            }
+
+            // ETS 300 706, annex B.2.2: packets with Y = 26 are transmitted before the rows they
+            // change, so a decoder has the enhancement in hand when the row arrives.
+            foreach (var enhancementPacket in GetEnhancementPackets(enhancements))
+            {
+                result.Add(GetDataUnit(magazine, EnhancementPacketNumber, enhancementPacket,
+                    firstUnitIndex + result.Count, alreadyEncoded: true));
+            }
+
+            for (var i = 0; i < rowData.Count; i++)
+            {
+                result.Add(GetDataUnit(magazine, rows[i], rowData[i], firstUnitIndex + result.Count,
+                    alreadyEncoded: false));
             }
 
             return result;
         }
 
         /// <summary>
-        /// Bottom aligned rows counted upwards, or the top of the screen for {\an7}-{\an9}. A
-        /// double height row occupies the row below it too, hence the gap of two.
+        /// Packs the triplets of a page into X/26 packets: every row starts with a "set active
+        /// position" triplet, then one triplet per character, and the rest of the packet is
+        /// filled with termination markers.
+        /// </summary>
+        private static List<byte[]> GetEnhancementPackets(List<Enhancement> enhancements)
+        {
+            if (enhancements.Count == 0)
+            {
+                return new List<byte[]>();
+            }
+
+            var triplets = new List<List<int>> { new List<int>() };
+            foreach (var row in enhancements.GroupBy(e => e.Row).OrderBy(g => g.Key))
+            {
+                var ordered = row.OrderBy(e => e.Column).ToList();
+                var index = 0;
+                while (index < ordered.Count)
+                {
+                    // The active position only holds within one packet, so a row that is split
+                    // over two packets has to set it again - and a set active position as the
+                    // last triplet of a packet would say nothing.
+                    var current = triplets[triplets.Count - 1];
+                    if (TripletsPerPacket - current.Count < 2)
+                    {
+                        if (triplets.Count == MaxEnhancementPackets)
+                        {
+                            // Nothing is lost that a reader could have shown anyway: the row keeps
+                            // the plain stand-in these triplets would have overwritten.
+                            return GetEnhancementPacketBytes(triplets);
+                        }
+
+                        current = new List<int>();
+                        triplets.Add(current);
+                    }
+
+                    var count = Math.Min(ordered.Count - index, TripletsPerPacket - current.Count - 1);
+                    current.Add(GetTriplet(RowAddressGroupStart + row.Key, SetActivePositionMode, ordered[index].Column));
+                    for (var i = 0; i < count; i++)
+                    {
+                        var enhancement = ordered[index + i];
+                        current.Add(GetTriplet(enhancement.Column, enhancement.Mode, enhancement.Data));
+                    }
+
+                    index += count;
+                }
+            }
+
+            return GetEnhancementPacketBytes(triplets);
+        }
+
+        private static List<byte[]> GetEnhancementPacketBytes(List<List<int>> triplets)
+        {
+            var packets = new List<byte[]>();
+            for (var i = 0; i < triplets.Count; i++)
+            {
+                var data = new byte[ColumnCount];
+                data[0] = TeletextHamming.Hamming84Encode(i); // designation code
+
+                for (var t = 0; t < TripletsPerPacket; t++)
+                {
+                    var value = t < triplets[i].Count
+                        ? triplets[i][t]
+                        : GetTriplet(TerminationAddress, TerminationMode, TerminationData);
+                    var encoded = TeletextHamming.Hamming2418Encode(value);
+                    data[1 + t * 3] = (byte)encoded;
+                    data[2 + t * 3] = (byte)(encoded >> 8);
+                    data[3 + t * 3] = (byte)(encoded >> 16);
+                }
+
+                packets.Add(data);
+            }
+
+            return packets;
+        }
+
+        /// <summary>
+        /// ETS 300 706, chapter 12.3.2: an X/26 triplet is an address, a mode and a data field.
+        /// </summary>
+        private static int GetTriplet(int address, int mode, int data)
+        {
+            return (address & 0x3f) | ((mode & 0x1f) << 6) | ((data & 0x7f) << 11);
+        }
+
+        /// <summary>
+        /// The row of each line, counted down from the row the block starts on - MarginV when the
+        /// subtitle carries one, otherwise bottom anchored on <see cref="DefaultBottomRow"/>. Or
+        /// the top of the screen for {\an7}-{\an9}. A double height row occupies the row below it
+        /// too, hence the gap of two.
         /// </summary>
         private static List<int> GetRowNumbers(int lineCount, string marginV, bool topAligned, out bool doubleHeight)
         {
@@ -319,21 +498,52 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
                 rows.Clear();
             }
 
-            var bottom = IsTeletextRow(marginV) ? int.Parse(marginV, CultureInfo.InvariantCulture) : DefaultBottomRow;
             var spacing = 2;
-            if (bottom - (lineCount - 1) * spacing < 1)
+            var start = GetStartRow(lineCount, marginV, spacing);
+            if (start < 1)
             {
                 // Too many lines to fit at double height - fall back to single height rows.
                 spacing = 1;
                 doubleHeight = false;
+                start = GetStartRow(lineCount, marginV, spacing);
             }
+
+            // More lines than the page has rows even at single height - keep every row on the page
+            // rather than emitting one that no decoder can address.
+            start = Math.Max(1, start);
 
             for (var i = 0; i < lineCount; i++)
             {
-                rows.Add(Math.Max(1, bottom - (lineCount - 1 - i) * spacing));
+                rows.Add(Math.Min(LastRow, start + i * spacing));
             }
 
             return rows;
+        }
+
+        /// <summary>
+        /// The row the *first* line goes on. MarginV is the EBU STL vertical position: the row the
+        /// line starts on, with the rest of the block below it - the same meaning Ebu.Save,
+        /// TeletextRowHelper (the alignment picker and the TT column) and SubtitlePositionToAssa
+        /// (the video preview) all use. Reading it as the bottom row instead put every multi-line
+        /// subtitle two rows too high and one row out of step with the preview.
+        /// Without a MarginV the block is bottom anchored so its last row lands on
+        /// <see cref="DefaultBottomRow"/>.
+        /// </summary>
+        private static int GetStartRow(int lineCount, string marginV, int spacing)
+        {
+            var start = IsTeletextRow(marginV)
+                ? int.Parse(marginV, CultureInfo.InvariantCulture)
+                : DefaultBottomRow - (lineCount - 1) * spacing;
+
+            // The text may have been re-wrapped since the row was set, so a start row that no
+            // longer leaves room for every line would push the tail off the page - the same clamp
+            // Ebu.Save applies to the STL vertical position.
+            if (start + (lineCount - 1) * spacing > LastRow)
+            {
+                start = LastRow - (lineCount - 1) * spacing;
+            }
+
+            return start;
         }
 
         private static bool IsTeletextRow(string marginV)
@@ -386,11 +596,11 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
         /// the double height and start box attributes, the text itself and the end box markers,
         /// padded to the wanted alignment.
         /// </summary>
-        private static byte[] GetRow(string line, Alignment alignment, bool doubleHeight)
+        private static byte[] GetRow(string line, Alignment alignment, bool doubleHeight, int row, List<Enhancement> enhancements, TeletextColorMap colorMap)
         {
             var lead = new List<byte>();
-            var body = new List<byte>();
-            AppendText(line, lead, body);
+            var body = new List<Cell>();
+            AppendText(line, lead, body, colorMap);
 
             var attributes = doubleHeight ? new List<byte> { DoubleHeight, StartBox, StartBox } : new List<byte> { StartBox, StartBox };
             var maxBody = ColumnCount - lead.Count - attributes.Count;
@@ -418,7 +628,38 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
             cells.AddRange(Enumerable.Repeat(Space, leftPad));
             cells.AddRange(lead);
             cells.AddRange(attributes);
-            cells.AddRange(body);
+
+            // Now that the padding is known, the cells that need an X/26 triplet know their column.
+            var bodyStart = cells.Count;
+            for (var i = 0; i < body.Count; i++)
+            {
+                cells.Add(body[i].Value);
+
+                // The foreground colour triplet goes first at its column, so that a G2 character
+                // at the same cell (which only touches the text plane) cannot be affected.
+                if (body[i].ColorEntry >= 0)
+                {
+                    enhancements.Add(new Enhancement
+                    {
+                        Row = row,
+                        Column = bodyStart + i,
+                        Mode = ForegroundColorMode,
+                        Data = (byte)body[i].ColorEntry
+                    });
+                }
+
+                if (body[i].Mode != 0)
+                {
+                    enhancements.Add(new Enhancement
+                    {
+                        Row = row,
+                        Column = bodyStart + i,
+                        Mode = body[i].Mode,
+                        Data = body[i].Data
+                    });
+                }
+            }
+
             for (var i = 0; i < endBoxCount; i++)
             {
                 cells.Add(EndBox);
@@ -437,8 +678,13 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
         /// shows a spacing attribute as a space, so a leading color is free of charge there) and
         /// the boxed cells, where every further color change costs one cell.
         /// </summary>
-        private static void AppendText(string line, List<byte> lead, List<byte> body)
+        private static void AppendText(string line, List<byte> lead, List<Cell> body, TeletextColorMap colorMap)
         {
+            // A colour that needs a colour map entry is painted by an X/26 triplet on the first
+            // character cell that follows - on the spacing attribute's own cell the Level 1
+            // attribute would win, and a spacing attribute in the lead has no body column at all.
+            var pendingColorEntry = -1;
+
             var i = 0;
             while (i < line.Length)
             {
@@ -450,16 +696,17 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
                         var tag = line.Substring(i, end - i + 1);
                         if (tag.StartsWith("<font", StringComparison.OrdinalIgnoreCase))
                         {
-                            var color = GetTeletextColor(tag);
-                            if (color.HasValue)
+                            if (TryParseColor(tag, out var rgb12))
                             {
+                                var resolved = colorMap.Resolve(rgb12);
+                                pendingColorEntry = resolved.Entry;
                                 if (body.Count == 0 && lead.Count == 0)
                                 {
-                                    lead.Add(color.Value);
+                                    lead.Add(resolved.SpacingAttribute);
                                 }
                                 else
                                 {
-                                    body.Add(color.Value);
+                                    body.Add(new Cell(resolved.SpacingAttribute));
                                 }
                             }
 
@@ -469,10 +716,12 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
 
                         if (tag.Equals("</font>", StringComparison.OrdinalIgnoreCase))
                         {
+                            pendingColorEntry = -1;
+
                             // Back to the start-of-row default, but only when text follows.
                             if (body.Count > 0 && end + 1 < line.Length)
                             {
-                                body.Add(AlphaWhite);
+                                body.Add(new Cell(AlphaWhite));
                             }
 
                             i = end + 1;
@@ -481,9 +730,17 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
                     }
                 }
 
-                foreach (var c in GetTeletextCharacters(line[i]))
+                foreach (var cell in GetTeletextCells(line[i]))
                 {
-                    body.Add(c);
+                    if (pendingColorEntry >= 0)
+                    {
+                        body.Add(new Cell(cell.Value, cell.Mode, cell.Data, pendingColorEntry));
+                        pendingColorEntry = -1;
+                    }
+                    else
+                    {
+                        body.Add(cell);
+                    }
                 }
 
                 i++;
@@ -491,14 +748,66 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
         }
 
         /// <summary>
-        /// Teletext rows hold seven bit G0 characters, so anything else is folded to its base
-        /// letter ("é" to "e") and whatever is left is replaced by a question mark.
+        /// Where a character has no seven bit G0 code but the row can still show it through an
+        /// X/26 triplet, this is what stays in the row itself - all a Level 1.0 decoder, which
+        /// ignores the enhancement, has to go on. "#" for the music note is what broadcasters
+        /// send; ZDF page 777 does exactly that.
         /// </summary>
-        private static IEnumerable<byte> GetTeletextCharacters(char c)
+        private static readonly Dictionary<char, char> Level1Fallbacks = new Dictionary<char, char>
         {
-            if (c >= 0x20 && c < 0x7f)
+            { '♪', '#' }, { '€', 'E' }, { '©', 'C' }, { '®', 'R' }, { '™', 'T' },
+            { '‘', '\'' }, { '’', '\'' }, { '“', '"' }, { '”', '"' },
+            { '¡', '!' }, { '¿', '?' }, { '―', '-' }, { '_', '-' }, { '°', 'o' }, { '×', 'x' },
+            { 'Æ', 'A' }, { 'æ', 'a' }, { 'Ø', 'O' }, { 'ø', 'o' }, { 'Œ', 'O' }, { 'œ', 'o' },
+            { 'ß', 's' }, { 'Ł', 'L' }, { 'ł', 'l' }, { 'Þ', 'P' }, { 'þ', 'p' },
+            { 'Đ', 'D' }, { 'đ', 'd' }, { 'ð', 'd' }, { 'Ħ', 'H' }, { 'ħ', 'h' }, { 'ı', 'i' },
+            { 'Ĳ', 'I' }, { 'ĳ', 'i' }, { 'Ŧ', 'T' }, { 'ŧ', 't' }, { 'Ŋ', 'N' }, { 'ŋ', 'n' },
+            { 'ª', 'a' }, { 'º', 'o' }, { 'µ', 'u' }, { 'Ω', 'O' }, { 'α', 'a' }
+        };
+
+        /// <summary>
+        /// Characters that neither set has a code for: the printable ASCII the Latin G0 set gives
+        /// to the national options instead, and the typography a subtitle is full of.
+        /// </summary>
+        private static readonly Dictionary<char, string> Substitutes = new Dictionary<char, string>
+        {
+            { '[', "(" }, { ']', ")" }, { '{', "(" }, { '}', ")" },
+            { '\\', "/" }, { '|', "/" }, { '`', "'" }, { '~', "-" },
+            { '—', "-" }, { '–', "-" }, { '‒', "-" }, { '−', "-" }, { '‐', "-" },
+            { '…', "..." }, { ' ', " " }, { '′', "'" }, { '″', "\"" },
+            { '„', "\"" }, { '‚', "'" }, { '‹', "<" }, { '›', ">" }
+        };
+
+        /// <summary>
+        /// Turns one character into the cells that carry it: its G0 code where the row can hold
+        /// it, otherwise a stand-in plus the X/26 triplet that overwrites the cell with the G2
+        /// character or the accented letter. What is left over is folded to its base letters
+        /// ("ǽ" to "ae"), and only then replaced by a question mark.
+        /// </summary>
+        private static IEnumerable<Cell> GetTeletextCells(char c)
+        {
+            if (TeletextTables.TryGetLatinG0Code(c, out var code))
             {
-                yield return (byte)c;
+                yield return new Cell(code);
+                yield break;
+            }
+
+            if (TeletextTables.TryGetG2Replacement(c, out var replacement))
+            {
+                yield return new Cell(GetLevel1Fallback(c, replacement), replacement.Mode, replacement.Data);
+                yield break;
+            }
+
+            if (Substitutes.TryGetValue(c, out var substitute))
+            {
+                foreach (var s in substitute)
+                {
+                    if (TeletextTables.TryGetLatinG0Code(s, out var substituteCode))
+                    {
+                        yield return new Cell(substituteCode);
+                    }
+                }
+
                 yield break;
             }
 
@@ -506,47 +815,69 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
             var any = false;
             foreach (var n in normalized)
             {
-                if (n >= 0x20 && n < 0x7f)
+                if (TeletextTables.TryGetLatinG0Code(n, out var folded))
                 {
                     any = true;
-                    yield return (byte)n;
+                    yield return new Cell(folded);
                 }
             }
 
             if (!any)
             {
-                yield return (byte)'?';
+                yield return new Cell((byte)'?');
             }
         }
 
-        private static byte? GetTeletextColor(string fontTag)
+        private static byte GetLevel1Fallback(char c, TeletextTables.G2Replacement replacement)
         {
+            // A diacritical mark is put on a plain letter, which is a fine stand-in by itself.
+            if (replacement.Mode != TeletextTables.G2Mode)
+            {
+                return replacement.Data;
+            }
+
+            if (Level1Fallbacks.TryGetValue(c, out var fallback) &&
+                TeletextTables.TryGetLatinG0Code(fallback, out var code))
+            {
+                return code;
+            }
+
+            return Space;
+        }
+
+        /// <summary>
+        /// The colour of a font tag at the resolution the teletext colour map has: four bits per
+        /// component, red in the high nibble.
+        /// </summary>
+        private static bool TryParseColor(string fontTag, out int rgb12)
+        {
+            rgb12 = 0;
             var colorStart = fontTag.IndexOf("color=", StringComparison.OrdinalIgnoreCase);
             if (colorStart < 0)
             {
-                return null;
+                return false;
             }
 
             var color = fontTag.Substring(colorStart + "color=".Length).TrimStart().TrimEnd('>', '/', ' ');
             color = color.Trim('"', '\'').Trim().Trim('#').ToLowerInvariant();
             if (color.Length == 0)
             {
-                return null;
+                return false;
             }
 
             switch (color)
             {
-                case "black": return 0x00;
-                case "red": return 0x01;
+                case "black": rgb12 = 0x000; return true;
+                case "red": rgb12 = 0xf00; return true;
                 case "lime":
-                case "green": return 0x02;
-                case "yellow": return 0x03;
-                case "blue": return 0x04;
+                case "green": rgb12 = 0x0f0; return true;
+                case "yellow": rgb12 = 0xff0; return true;
+                case "blue": rgb12 = 0x00f; return true;
                 case "magenta":
-                case "fuchsia": return 0x05;
+                case "fuchsia": rgb12 = 0xf0f; return true;
                 case "cyan":
-                case "aqua": return 0x06;
-                case "white": return 0x07;
+                case "aqua": rgb12 = 0x0ff; return true;
+                case "white": rgb12 = 0xfff; return true;
             }
 
             if (color.Length == 6 &&
@@ -554,12 +885,13 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream
                 int.TryParse(color.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g) &&
                 int.TryParse(color.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
             {
-                // Teletext only has the eight combinations of full red, green and blue.
-                var code = (r >= 128 ? 1 : 0) | (g >= 128 ? 2 : 0) | (b >= 128 ? 4 : 0);
-                return (byte)code;
+                // Round each component to the four bits the map holds - 0x11 steps, so #ff8822
+                // becomes 0xf82 and reads back as exactly #ff8822.
+                rgb12 = TeletextColorMap.QuantizeRgb(r, g, b);
+                return true;
             }
 
-            return null;
+            return false;
         }
 
         private static byte[] GetStuffingDataUnit()

@@ -114,7 +114,14 @@ public class LanguageGeneral
     public string ColorBlue { get; set; }
     public string ColorCyan { get; set; }
     public string ColorDotDotDot { get; set; }
+    public string ColorGray { get; set; }
     public string ColorGreen { get; set; }
+    public string ColorHalfBlue { get; set; }
+    public string ColorHalfCyan { get; set; }
+    public string ColorHalfGreen { get; set; }
+    public string ColorHalfMagenta { get; set; }
+    public string ColorHalfRed { get; set; }
+    public string ColorHalfYellow { get; set; }
     public string ColorMagenta { get; set; }
     public string ColorRed { get; set; }
     public string ColorWhite { get; set; }
@@ -541,6 +548,7 @@ public class LanguageGeneral
     public string SetStartAndKeepDuration { get; set; }
     public string SetStartAndOffsetTheRest { get; set; }
     public string SetUpLikeSubtitleEdit4 { get; set; }
+    public string ImageBackgroundColorDotDotDot { get; set; }
     public string SetVideoOffset { get; set; }
     public string Settings { get; set; }
     public string Shadow { get; set; }
@@ -554,6 +562,7 @@ public class LanguageGeneral
     public string ShowCpsColumn { get; set; }
     public string ShowDurationColumn { get; set; }
     public string ShowGapColumn { get; set; }
+    public string ShowForcedColumn { get; set; } = string.Empty;
     public string ShowStartColumn { get; set; }
     public string ShowHideColumn { get; set; }
     public string ShowHistory { get; set; }
@@ -647,6 +656,10 @@ public class LanguageGeneral
     public string ToggleCasing { get; set; }
     public string ToggleDirection { get; set; }
     public string ToggleForced { get; set; }
+    public string MarkedXLinesAsForced { get; set; } = string.Empty;
+    public string UnmarkedXLinesAsForced { get; set; } = string.Empty;
+    public string NoForcedLinesFound { get; set; } = string.Empty;
+    public string SaveForcedLinesAs { get; set; } = string.Empty;
     public string ToggleShotChangesAtVideoPosition { get; set; }
     public string Toolbar { get; set; }
     public string Tools { get; set; }
@@ -911,7 +924,14 @@ public class LanguageGeneral
         ColorBlue = "Blue";
         ColorCyan = "Cyan";
         ColorDotDotDot = "Color...";
+        ColorGray = "Gray";
         ColorGreen = "Green";
+        ColorHalfBlue = "Half blue";
+        ColorHalfCyan = "Half cyan";
+        ColorHalfGreen = "Half green";
+        ColorHalfMagenta = "Half magenta";
+        ColorHalfRed = "Half red";
+        ColorHalfYellow = "Half yellow";
         ColorMagenta = "Magenta";
         ColorRed = "Red";
         ColorWhite = "White";
@@ -1338,6 +1358,7 @@ public class LanguageGeneral
         SetStartAndKeepDuration = "Set start and keep duration";
         SetStartAndOffsetTheRest = "Set start and offset the rest";
         SetUpLikeSubtitleEdit4 = "Set up like Subtitle Edit 4 (theme, shortcuts, replace rules)";
+        ImageBackgroundColorDotDotDot = "Image background color...";
         SetVideoOffset = "Set video offset";
         Settings = "Settings";
         Shadow = "Shadow";
@@ -1351,6 +1372,7 @@ public class LanguageGeneral
         ShowCpsColumn = "Show \"Chars/sec\" column";
         ShowDurationColumn = "Show \"Duration\" column";
         ShowGapColumn = "Show \"Gap\" column";
+        ShowForcedColumn = "Show \"Forced\" column";
         ShowStartColumn = "Show \"Start\" column";
         ShowHideColumn = "Show \"Hide\" column";
         ShowHistory = "Show history";
@@ -1436,6 +1458,10 @@ public class LanguageGeneral
         ToggleCasing = "Toggle casing";
         ToggleDirection = "Toggle direction";
         ToggleForced = "Toggle forced";
+        MarkedXLinesAsForced = "Marked {0} line(s) as forced";
+        UnmarkedXLinesAsForced = "Unmarked {0} line(s) as forced";
+        NoForcedLinesFound = "No forced lines found";
+        SaveForcedLinesAs = "Save forced lines as...";
         ToggleShotChangesAtVideoPosition = "Toggle shot changes at video position";
         Toolbar = "Toolbar";
         Tools = "Tools";

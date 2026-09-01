@@ -266,6 +266,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _showFullscreenButton;
     [ObservableProperty] private bool _fullscreenHideControls;
     [ObservableProperty] private bool _autoOpenVideoFile;
+    [ObservableProperty] private bool _mpvAudioKeepOpen;
 
     [ObservableProperty] private bool _waveformDrawGridLines;
     [ObservableProperty] private bool _waveformFocusOnMouseOver;
@@ -391,6 +392,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _textBoxColorTags;
     [ObservableProperty] private bool _textBoxLiveSpellCheck;
     [ObservableProperty] private bool _subtitleGridLiveSpellCheck;
+    [ObservableProperty] private bool _subtitleGridCenterText;
     [ObservableProperty] private bool _textBoxCenterText;
     [ObservableProperty] private bool _showButtonHints;
     [ObservableProperty] private bool _gridCompactMode;
@@ -909,6 +911,7 @@ public partial class SettingsViewModel : ObservableObject
         SubtitleGridTextSingleLineSeparator = appearance.SubtitleGridTextSingleLineSeparator;
         SubtitleGridFormatting = MapGridFormattingToText(appearance.SubtitleGridFormattingType);
         SubtitleGridLiveSpellCheck = appearance.SubtitleGridLiveSpellCheck;
+        SubtitleGridCenterText = appearance.SubtitleGridCenterText;
         SubtitleTextBoxAndGridFontName = appearance.SubtitleTextBoxAndGridFontName;
         TextBoxFontSize = appearance.SubtitleTextBoxFontSize;
         TextBoxFontBold = appearance.SubtitleTextBoxFontBold;
@@ -1069,6 +1072,7 @@ public partial class SettingsViewModel : ObservableObject
         ShowFullscreenButton = video.ShowFullscreenButton;
         FullscreenHideControls = video.FullscreenHideControls;
         AutoOpenVideoFile = video.AutoOpen;
+        MpvAudioKeepOpen = video.MpvAudioKeepOpen;
 
         MpvPreviewFontName = video.MpvPreviewFontName;
         MpvPreviewFontSize = video.MpvPreviewFontSize;
@@ -1773,6 +1777,7 @@ public partial class SettingsViewModel : ObservableObject
         appearance.SubtitleGridTextSingleLineSeparator = SubtitleGridTextSingleLineSeparator;
         appearance.SubtitleGridFormattingType = MapGridFormattingToCode(SubtitleGridFormatting);
         appearance.SubtitleGridLiveSpellCheck = SubtitleGridLiveSpellCheck;
+        appearance.SubtitleGridCenterText = SubtitleGridCenterText;
         appearance.SubtitleTextBoxAndGridFontName = string.IsNullOrEmpty(SubtitleTextBoxAndGridFontName) ? new Label().FontFamily.Name : SubtitleTextBoxAndGridFontName;
         appearance.SubtitleTextBoxFontSize = TextBoxFontSize;
         appearance.SubtitleTextBoxFontBold = TextBoxFontBold;
@@ -1910,6 +1915,7 @@ public partial class SettingsViewModel : ObservableObject
         video.ShowFullscreenButton = ShowFullscreenButton;
         video.FullscreenHideControls = FullscreenHideControls;
         video.AutoOpen = AutoOpenVideoFile;
+        video.MpvAudioKeepOpen = MpvAudioKeepOpen;
 
         video.MpvPreviewFontName = MpvPreviewFontName;
         video.MpvPreviewFontSize = MpvPreviewFontSize;

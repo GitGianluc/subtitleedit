@@ -54,6 +54,7 @@ public class LanguageSettings
     public string SubtitleGridTextDisplayWrap { get; set; }
     public string SubtitleGridTextDisplayEllipsis { get; set; }
     public string SubtitleGridLiveSpellCheck { get; set; }
+    public string SubtitleGridCenterText { get; set; }
     public string SubtitleGridShowFormatting { get; set; }
     public string ShowUpDownStartTime { get; set; }
     public string ShowUpDownEndTime { get; set; }
@@ -201,6 +202,7 @@ public class LanguageSettings
     public string ShowFullscreenButton { get; set; }
     public string FullscreenHideControls { get; set; }
     public string AutoOpenVideoFile { get; set; }
+    public string MpvAudioKeepOpen { get; set; }
     public string DownloadMpv { get; set; }
     public string DownloadVlc { get; set; }
     public string AllowSingleLetterShortcutsInTextbox { get; set; }
@@ -392,6 +394,7 @@ public class LanguageSettings
         SubtitleGridTextDisplayWrap = "Wrap to fit window";
         SubtitleGridTextDisplayEllipsis = "Single line with ellipsis";
         SubtitleGridLiveSpellCheck = "Live spell check in subtitle grid";
+        SubtitleGridCenterText = "Center text in subtitle grid";
         SubtitleGridShowFormatting = "Show formatted (HTML/ASSA) text in subtitle grid";
         ShowUpDownStartTime = "Show up/down control for \"Show\"";
         ShowUpDownEndTime = "Show up/down control for \"Hide\"";
@@ -534,6 +537,7 @@ public class LanguageSettings
         ShowFullscreenButton = "Show full-screen button";
         FullscreenHideControls = "Hide video controls in full-screen";
         AutoOpenVideoFile = "Auto-open video file when opening subtitle";
+        MpvAudioKeepOpen = "Keep the audio device open while paused (mpv)";
         DownloadMpv = "Download mpv";
         DownloadVlc = "Download VLC";
         AllowSingleLetterShortcutsInTextbox = "Allow single-letter shortcuts in text box";

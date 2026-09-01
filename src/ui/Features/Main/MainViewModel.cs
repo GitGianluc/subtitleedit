@@ -202,6 +202,7 @@ using System.Xml.Linq;
 using Nikse.SubtitleEdit.UiLogic.SpellCheck;
 using Nikse.SubtitleEdit.UiLogic.Media;
 using Nikse.SubtitleEdit.UiLogic.Common;
+using Nikse.SubtitleEdit.UiLogic.Translate;
 
 namespace Nikse.SubtitleEdit.Features.Main;
 
@@ -326,6 +327,7 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _showColumnWpm;
     [ObservableProperty] private bool _showColumnPixelWidth;
     [ObservableProperty] private bool _showColumnLayer;
+    [ObservableProperty] private bool _showColumnForced;
     [ObservableProperty] private bool _showUpDownStartTime;
     [ObservableProperty] private bool _showUpDownEndTime;
     [ObservableProperty] private bool _showUpDownDuration;
@@ -371,20 +373,29 @@ public partial class MainViewModel :
     /// teletext dialog, the "TT" column and the alignment preview are all gated on this.
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsTeletextColumnVisible))]
-    [NotifyPropertyChangedFor(nameof(IsTeletextPreviewActive))]
     private bool _isFormatEbu;
 
     /// <summary>
-    /// The "TT" column and the alignment preview only mean anything for EBU STL, but the user's
-    /// choice has to survive switching to another format and back - unlike ShowColumnLayer, which
-    /// is cleared outright, these gate the view while <see cref="ShowColumnTeletext"/> and
-    /// <see cref="TeletextAlignmentPreview"/> keep the remembered setting.
+    /// True while the toolbar format is one of the teletext formats - EBU STL or DVB teletext
+    /// (.dvbttx). They share the teletext machinery: the 1-23 row in MarginV, the alignment
+    /// picker, the TT column, the 40-column line length and the boxed preview.
     /// </summary>
-    public bool IsTeletextColumnVisible => ShowColumnTeletext && IsFormatEbu;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTeletextColumnVisible))]
+    [NotifyPropertyChangedFor(nameof(IsTeletextPreviewActive))]
+    private bool _isFormatTeletext;
+
+    /// <summary>
+    /// The "TT" column and the alignment preview only mean anything for the teletext formats, but
+    /// the user's choice has to survive switching to another format and back - unlike
+    /// ShowColumnLayer, which is cleared outright, these gate the view while
+    /// <see cref="ShowColumnTeletext"/> and <see cref="TeletextAlignmentPreview"/> keep the
+    /// remembered setting.
+    /// </summary>
+    public bool IsTeletextColumnVisible => ShowColumnTeletext && IsFormatTeletext;
 
     /// <inheritdoc cref="IsTeletextColumnVisible"/>
-    public bool IsTeletextPreviewActive => TeletextAlignmentPreview && IsFormatEbu;
+    public bool IsTeletextPreviewActive => TeletextAlignmentPreview && IsFormatTeletext;
 
     /// <summary>
     /// Header of the grid's actor/voice toggle in the column context menu - the column itself is
@@ -631,6 +642,15 @@ public partial class MainViewModel :
     private long _lastKeyPressedMs;
     private bool _loading;
     private bool _opening;
+    // Transient dedupe for repeated open requests of the same file. macOS delivers a second
+    // file-activation event when the user opens an already-opening file from Finder again;
+    // for a multi-track Matroska the (async) track picker then opens a second, pixel-identical
+    // picker exactly on top of the first. _openingFileName covers the in-flight SubtitleOpen
+    // call and _pickMatroskaTrackFileName covers the posted track picker, which outlives
+    // SubtitleOpen. Both are cleared when their operation finishes - deliberately opening the
+    // same file again afterwards (e.g. to pick another track) works as always.
+    private string? _openingFileName;
+    private string? _pickMatroskaTrackFileName;
     private PointerEventArgs? _lastTextEditorPointerArgs;
     private string? _textBoxLookUpWord;
     private PointerEventArgs? _lastSubtitleGridPointerArgs;
@@ -995,6 +1015,7 @@ public partial class MainViewModel :
         ShowColumnWpm = Se.Settings.General.ShowColumnWpm;
         ShowColumnPixelWidth = Se.Settings.General.ShowColumnPixelWidth;
         ShowColumnLayer = Se.Settings.General.ShowColumnLayer;
+        ShowColumnForced = Se.Settings.General.ShowColumnForced;
         ShowUpDownStartTime = Se.Settings.Appearance.ShowUpDownStartTime;
         ShowUpDownEndTime = Se.Settings.Appearance.ShowUpDownEndTime;
         ShowUpDownDuration = Se.Settings.Appearance.ShowUpDownDuration;
@@ -3968,6 +3989,11 @@ public partial class MainViewModel :
             await ShowEbuOptionsDialog();
         }
 
+        if (format is DvbTeletext)
+        {
+            await ShowDvbTeletextOptionsDialog();
+        }
+
         _shortcutManager.ClearKeys();
     }
 
@@ -4768,6 +4794,43 @@ public partial class MainViewModel :
         // sit there unseen until the next keystroke.
         _mpvPreviewDirty = true;
 
+        return true;
+    }
+
+    /// <summary>
+    /// Asks for the DVB teletext save options (page number, language) and stores them on the
+    /// subtitle header, the way the EBU options dialog stores the GSI block. Returns false when
+    /// the user cancels.
+    /// </summary>
+    private async Task<bool> ShowDvbTeletextOptionsDialog()
+    {
+        var currentPage = Se.Settings.File.ExportDvbTeletextPageNumber;
+        var currentLanguage = Se.Settings.File.ExportDvbTeletextLanguageCode;
+        if (DvbTeletext.TryParseHeader(_subtitle.Header, out var headerPage, out var headerLanguage))
+        {
+            currentPage = headerPage;
+            currentLanguage = headerLanguage;
+        }
+        else if (EbuTt.TryGetTeletextPageAndLanguage(_subtitle.Header, out var ebuTtPage, out var ebuTtLanguage))
+        {
+            // An EBU-TT document from a .dvbttx source carries the page and language in its metadata.
+            currentPage = ebuTtPage;
+            if (!string.IsNullOrEmpty(ebuTtLanguage))
+            {
+                currentLanguage = ebuTtLanguage;
+            }
+        }
+
+        var result = await ShowDialogAsync<ExportDvbTeletextWindow, ExportDvbTeletextViewModel>(vm =>
+            vm.Initialize(currentPage, currentLanguage));
+        if (!result.OkPressed)
+        {
+            return false;
+        }
+
+        Se.Settings.File.ExportDvbTeletextPageNumber = result.PageNumber;
+        Se.Settings.File.ExportDvbTeletextLanguageCode = result.LanguageCode;
+        _subtitle.Header = DvbTeletext.CreateHeader(result.PageNumber, result.LanguageCode);
         return true;
     }
 
@@ -7903,7 +7966,7 @@ public partial class MainViewModel :
         }
 
         var result = await ShowDialogAsync<SplitBreakLongLinesWindow, SplitBreakLongLinesViewModel>(
-            vm => { vm.Initialize(Subtitles.ToList(), IsFormatEbu); });
+            vm => { vm.Initialize(Subtitles.ToList(), IsFormatTeletext); });
 
         if (result.OkPressed && result.AllSubtitlesFixed.Count > 0)
         {
@@ -8413,17 +8476,31 @@ public partial class MainViewModel :
     /// while the activation is delivered, whereas the OS handing the foreground over because
     /// another application's window went away does not. Where the buttons cannot be sampled the
     /// cursor resting over the window has to do - knowing that the closing application may have
-    /// merely exposed the tool window under the cursor. The Avalonia press event only covers the
-    /// client area and arrives after the activation, so the decision still waits a beat for it.
+    /// merely exposed the tool window under the cursor.
     ///
-    /// The one case this cannot tell apart from the OS handing over the foreground is the user
-    /// Alt+Tabbing straight back to a tool window (they are separate entries in the task
-    /// switcher): that lands in the main window instead. The tool windows stay visible on top
-    /// either way, so the cost is keyboard focus - which is where it belongs for everything but
-    /// the waveform's own shortcuts.
+    /// Only the buttons can be sampled at activation time; every other signal arrives after it,
+    /// so the whole verdict is deferred a beat and then reached in one place. That beat is also
+    /// what keeps churn out of the decision: the evidence is read only while this window is still
+    /// the one in front, so a bounce leaves the claim exactly as it found it.
+    ///
+    /// Alt+Tab is keyboard-aimed - no button down, cursor anywhere - so the pointer rules read
+    /// it as an OS handover and "corrected" it: the tool window flickered into the foreground
+    /// and lost it a beat later, until a real click re-claimed it (#14354). The tool windows are
+    /// separate entries in the task switcher, so this is a gesture users actually make.
+    ///
+    /// What settles it is the foreground history rather than the gesture: the OS only has to pick
+    /// a new foreground window when the old one went away, so a previous foreground window that is
+    /// still alive and on screen means the user moved on deliberately, and one that was destroyed,
+    /// hidden, or minimized is the handover to correct. That covers every way of aiming at the
+    /// window - Alt+Tab, the taskbar button, Alt+Esc, Win+Tab - without any of them having to
+    /// announce itself, and it is why the first cut's reliance on the switcher's own
+    /// EVENT_SYSTEM_SWITCHSTART was not enough: Windows 11's XAML switcher was not seen raising it
+    /// (beta 31 feedback on #14354). See ForegroundWindowTracker.
     /// </summary>
     private void WatchUndockedForegroundSteal(Window undockedWindow)
     {
+        ForegroundWindowTracker.EnsureStarted();
+
         undockedWindow.AddHandler(
             InputElement.PointerPressedEvent,
             (_, _) => _undockedWindowPointerPressed = true,
@@ -8437,36 +8514,45 @@ public partial class MainViewModel :
                 return; // the user was already working in a tool window - leave it in front
             }
 
-            if (IsUndockedActivationAimedAtToolWindow(
-                    CursorPositionHelper.IsAnyPointerButtonDown(),
-                    undockedWindow.IsPointerOver))
-            {
-                _foregroundBelongsToMainWindow = false; // the user moved to the tool window
-                return;
-            }
-
+            // Sampled now, decided a beat later. The physical buttons are only down while the
+            // activation is being delivered, but every other piece of evidence arrives after it:
+            // Avalonia's press event (which is what a touch shows up as), and both WinEvents -
+            // the switcher's and the foreground history's callback are queued behind the very
+            // activation they describe.
+            var pointerButtonDown = CursorPositionHelper.IsAnyPointerButtonDown();
+            var pointerOverToolWindow = undockedWindow.IsPointerOver;
             _undockedWindowPointerPressed = false;
 
             DispatcherTimer.RunOnce(() =>
             {
-                if (_undockedWindowPointerPressed)
+                if (!_foregroundBelongsToMainWindow || Window is not { } mainWindow)
                 {
-                    // A press the button sampling missed (e.g. touch) - the user aimed here.
-                    _foregroundBelongsToMainWindow = false;
                     return;
                 }
 
-                // Re-checked because the beat is long enough for the state to move: the user may
-                // have clicked into the main window, or the foreground may have bounced
-                // to the other tool window - whose own Activated handler owns the decision then.
-                if (!_foregroundBelongsToMainWindow ||
-                    Window is not { } mainWindow ||
-                    !ShouldHandForegroundBackToMainWindow(
+                // Nothing is read - and above all nothing is decided - unless this window really
+                // is the one left in front. The beat is long enough for the state to move: the
+                // user may have clicked into the main window, the foreground may have bounced to
+                // the other tool window (whose own Activated handler owns the decision then), or
+                // this may be topmost churn while another application takes over. The claim has
+                // to survive all of those untouched, or a single churn activation disarms the
+                // correction for the whole round (#14168 beta 26).
+                if (!ShouldHandForegroundBackToMainWindow(
                         undockedWindow.IsActive,
                         mainWindow.IsActive,
                         mainWindow.WindowState == WindowState.Minimized,
                         WindowService.IsModalDialogOpen))
                 {
+                    return;
+                }
+
+                if (IsUndockedActivationAimedAtToolWindow(
+                        _undockedWindowPointerPressed ? true : pointerButtonDown,
+                        pointerOverToolWindow,
+                        ForegroundWindowTracker.TaskSwitchJustCommitted(),
+                        ForegroundWindowTracker.PreviousForegroundWindowStillUsable()))
+                {
+                    _foregroundBelongsToMainWindow = false; // the user moved to the tool window
                     return;
                 }
 
@@ -8482,8 +8568,34 @@ public partial class MainViewModel :
     /// </summary>
     internal static bool IsUndockedActivationAimedAtToolWindow(
         bool? pointerButtonDown,
-        bool pointerOverToolWindow)
+        bool pointerOverToolWindow,
+        bool taskSwitchJustCommitted,
+        bool? previousForegroundWindowStillUsable)
     {
+        // Picking the tool window in the task switcher (Alt+Tab) is aiming by keyboard - the
+        // pointer rules below would misread it as an OS handover (#14354).
+        if (taskSwitchJustCommitted)
+        {
+            return true;
+        }
+
+        // A button physically down while the activation is delivered is a click on this window,
+        // and the strongest evidence there is.
+        if (pointerButtonDown == true)
+        {
+            return true;
+        }
+
+        // What became of the window that held the foreground before this one. The OS only has to
+        // hand the foreground on when the old holder went away, so a previous window that is still
+        // there means the user aimed somewhere - however they aimed - and one that is gone, hidden,
+        // or minimized is the handover this watcher corrects. Null is "not known" (off Windows, no
+        // hook, or the history has not caught up yet), which falls through to the pointer rules.
+        if (previousForegroundWindowStillUsable.HasValue)
+        {
+            return previousForegroundWindowStillUsable.Value;
+        }
+
         // The button state is authoritative when it can be sampled: the cursor merely resting
         // over the tool window is NOT aiming - closing another application's window exposes the
         // tool window under a cursor that never moved (Windows even synthesizes the mouse-move
@@ -11978,11 +12090,6 @@ public partial class MainViewModel :
     [RelayCommand]
     private async Task SaveSelectedLinesAs()
     {
-        if (Window == null)
-        {
-            return;
-        }
-
         var selectedItems = new HashSet<SubtitleLineViewModel>(SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>());
         var ordered = Subtitles.Where(s => selectedItems.Contains(s)).ToList();
         if (ordered.Count == 0)
@@ -11990,18 +12097,39 @@ public partial class MainViewModel :
             return;
         }
 
+        await SaveLinesAs(ordered, string.Empty);
+    }
+
+    /// <summary>
+    /// Writes a subset of the grid to a file of its own, leaving the open subtitle and its file
+    /// name alone. <paramref name="fileNameSuffix"/> is appended to the suggested file name.
+    /// </summary>
+    private async Task SaveLinesAs(List<SubtitleLineViewModel> lines, string fileNameSuffix)
+    {
+        if (Window == null || lines.Count == 0)
+        {
+            return;
+        }
+
         var subtitle = new Subtitle();
-        foreach (var line in ordered)
+        foreach (var line in lines)
         {
             subtitle.Paragraphs.Add(line.ToParagraph(SelectedSubtitleFormat));
         }
 
         subtitle.Renumber();
 
+        // Untitled: GetNewFileName is empty and a bare ".forced" would be a poor suggestion.
+        var suggestedFileName = GetNewFileName();
+        if (suggestedFileName.Length > 0)
+        {
+            suggestedFileName += fileNameSuffix;
+        }
+
         var fileName = await _fileHelper.PickSaveSubtitleFile(
             Window,
             SelectedSubtitleFormat,
-            GetNewFileName(),
+            suggestedFileName,
             Se.Language.General.SaveFileAsTitle);
 
         _shortcutManager.ClearKeys();
@@ -12445,7 +12573,7 @@ public partial class MainViewModel :
             }
         }
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         if (result.ListPressed)
         {
@@ -12471,9 +12599,72 @@ public partial class MainViewModel :
             }
         }
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         _shortcutManager.ClearKeys();
+    }
+
+    /// <summary>
+    /// Marks or unmarks the selected lines as forced narrative (#14322). Mixed selections are
+    /// marked rather than cleared, so pressing the shortcut over a block always ends with the
+    /// whole block marked; pressing it again clears it.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleForcedSelectedLines()
+    {
+        var selectedItems = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().ToList();
+        if (selectedItems.Count == 0)
+        {
+            _shortcutManager.ClearKeys();
+            return;
+        }
+
+        var forced = !selectedItems.All(p => p.Forced);
+        foreach (var item in selectedItems)
+        {
+            item.Forced = forced;
+        }
+
+        SaveSubtitleMarks();
+
+        ShowStatus(forced
+            ? string.Format(Se.Language.General.MarkedXLinesAsForced, selectedItems.Count)
+            : string.Format(Se.Language.General.UnmarkedXLinesAsForced, selectedItems.Count));
+
+        _shortcutManager.ClearKeys();
+    }
+
+    /// <summary>
+    /// Set when a row's forced mark changes without going through the toggle command - undo and
+    /// redo restore it straight onto the row, and the sidecar has to follow. The 400 ms tick
+    /// flushes it, so a restored batch costs one write rather than one per line.
+    /// </summary>
+    private bool _subtitleMarksDirty;
+
+    private void SaveSubtitleMarks()
+    {
+        _subtitleMarksDirty = false;
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+    }
+
+    /// <summary>
+    /// SE 4 has no equivalent: writes the lines marked as forced narrative to a file of their
+    /// own, leaving the open subtitle untouched - the deliverable many clients ask for next to
+    /// the full subtitle (#14322).
+    /// </summary>
+    [RelayCommand]
+    private async Task SaveForcedLinesAs()
+    {
+        var forced = Subtitles.Where(p => p.Forced && !p.IsReferenceOnly).ToList();
+        if (forced.Count == 0)
+        {
+            ShowStatus(Se.Language.General.NoForcedLinesFound);
+            _shortcutManager.ClearKeys();
+            return;
+        }
+
+        // Not localized: it becomes part of a file name.
+        await SaveLinesAs(forced, ".forced");
     }
 
     [RelayCommand]
@@ -12498,7 +12689,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<BookmarksListWindow, BookmarksListViewModel>(vm => { vm.Initialize(Subtitles.Where(p => p.Bookmark != null).ToList()); });
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         if (result.GoToPressed && result.SelectedSubtitle != null)
         {
@@ -12515,7 +12706,7 @@ public partial class MainViewModel :
             item.Bookmark = null;
         }
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         _shortcutManager.ClearKeys();
     }
@@ -12560,7 +12751,7 @@ public partial class MainViewModel :
             item.Bookmark = null;
         }
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         _shortcutManager.ClearKeys();
     }
@@ -13077,6 +13268,14 @@ public partial class MainViewModel :
     {
         Se.Settings.General.ShowColumnPixelWidth = !Se.Settings.General.ShowColumnPixelWidth;
         ShowColumnPixelWidth = Se.Settings.General.ShowColumnPixelWidth;
+        AutoFitColumns();
+    }
+
+    [RelayCommand]
+    private void ToggleShowColumnForced()
+    {
+        Se.Settings.General.ShowColumnForced = !Se.Settings.General.ShowColumnForced;
+        ShowColumnForced = Se.Settings.General.ShowColumnForced;
         AutoFitColumns();
     }
 
@@ -13964,9 +14163,9 @@ public partial class MainViewModel :
             return;
         }
 
-        // EBU STL places subtitles on a teletext line rather than an ASSA anchor, so the same
-        // menu item opens the teletext dialog for that format.
-        if (IsFormatEbu)
+        // The teletext formats (EBU STL, DVB teletext) place subtitles on a teletext line rather
+        // than an ASSA anchor, so the same menu item opens the teletext dialog for them.
+        if (IsFormatTeletext)
         {
             await ShowTeletextAlignmentPicker(selected);
             return;
@@ -14253,7 +14452,7 @@ public partial class MainViewModel :
             return;
         }
 
-        if (IsFormatEbu)
+        if (IsFormatTeletext)
         {
             await ShowTeletextColorPicker(selectedItems);
             return;
@@ -14278,11 +14477,14 @@ public partial class MainViewModel :
     /// EBU STL open subtitles can only carry the eight teletext colors, and default
     /// white without a color code differs from explicit white (37 vs 36 usable
     /// characters), so the full RGB picker is replaced by a constrained palette.
+    /// DVB teletext gets the Level 2.5 additions on top: the half intensity CLUT 1
+    /// colors and a free color choice via a redefinable colour map entry.
     /// </summary>
     private async Task ShowTeletextColorPicker(List<SubtitleLineViewModel> selectedItems)
     {
+        var isLevel25 = SelectedSubtitleFormat is DvbTeletext;
         var result = await ShowDialogAsync<PickTeletextColorWindow, PickTeletextColorViewModel>(
-            vm => vm.Initialize(selectedItems[0].Text));
+            vm => vm.Initialize(selectedItems[0].Text, isLevel25));
         if (!result.OkPressed)
         {
             return;
@@ -14291,6 +14493,25 @@ public partial class MainViewModel :
         if (result.NoColorPressed)
         {
             _colorService.RemoveColorTags(selectedItems, GetUpdateSubtitle(), SelectedSubtitleFormat);
+            _updateAudioVisualizer = true;
+            return;
+        }
+
+        if (result.CustomPressed)
+        {
+            var customResult = await ShowDialogAsync<ColorPickerWindow, ColorPickerViewModel>(
+                vm => vm.Initialize(Se.Settings.Tools.LastColorPickerColor.FromHexToColor()));
+            if (!customResult.OkPressed)
+            {
+                return;
+            }
+
+            if (ColorTextBoxIfSelected(customResult.SelectedColor))
+            {
+                return;
+            }
+
+            _colorService.SetColor(selectedItems, customResult.SelectedColor, GetUpdateSubtitle(), SelectedSubtitleFormat);
             _updateAudioVisualizer = true;
             return;
         }
@@ -16772,7 +16993,7 @@ public partial class MainViewModel :
         }
 
         var result = await ShowDialogAsync<SplitBreakLongLinesWindow, SplitBreakLongLinesViewModel>(
-            vm => { vm.Initialize(selectedInOrder, IsFormatEbu); });
+            vm => { vm.Initialize(selectedInOrder, IsFormatTeletext); });
 
         if (!result.OkPressed || result.AllSubtitlesFixed.Count == 0)
         {
@@ -17419,7 +17640,16 @@ public partial class MainViewModel :
                 return;
             }
 
-            ActivateWindow(TopLevel.GetTopLevel(AudioVisualizer) as Window);
+            var window = TopLevel.GetTopLevel(AudioVisualizer) as Window;
+            if (window != null && !ReferenceEquals(window, Window))
+            {
+                // SE itself is sending the user to the undocked waveform window - no pointer
+                // button is down, so without this the foreground-steal watcher would read the
+                // activation as an OS handover and bounce it straight back (#14354).
+                _foregroundBelongsToMainWindow = false;
+            }
+
+            ActivateWindow(window);
             AudioVisualizer.Focus();
         });
     }
@@ -20544,6 +20774,40 @@ public partial class MainViewModel :
     }
 
 
+    // True when two paths refer to the same file: normalized full paths compared
+    // case-insensitively (the macOS file system default), with a final-component symlink
+    // resolved so a link and its target compare equal. A false negative only skips the
+    // duplicate-open dedupe, so best effort is enough here.
+    private static bool IsSameFile(string? a, string? b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(ResolveSymlink(Path.GetFullPath(a)), ResolveSymlink(Path.GetFullPath(b)),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string ResolveSymlink(string fullPath)
+    {
+        try
+        {
+            return new FileInfo(fullPath).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fullPath;
+        }
+        catch
+        {
+            return fullPath;
+        }
+    }
+
     /// <summary>
     /// OpenSubtitle - open subtitle file, video file is optional.
     /// </summary>
@@ -20556,6 +20820,16 @@ public partial class MainViewModel :
         int desiredAudioTrackId = -1)
     {
         if (string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        // A duplicate request for a file that is still opening, or whose Matroska track picker
+        // is open, would run the whole open a second time (and stack a second track picker on
+        // top of the first) - macOS re-delivers the file-activation event when the user opens
+        // the same file from Finder again. Only in-flight state is checked, so re-opening a
+        // finished file stays possible.
+        if (IsSameFile(fileName, _openingFileName) || IsSameFile(fileName, _pickMatroskaTrackFileName))
         {
             return;
         }
@@ -20594,6 +20868,7 @@ public partial class MainViewModel :
         try
         {
             _opening = true;
+            _openingFileName = fileName;
 
             if (FileUtil.IsMatroskaFileFast(fileName) && FileUtil.IsMatroskaFile(fileName))
             {
@@ -21184,6 +21459,7 @@ public partial class MainViewModel :
             _undoRedoManager.Do(MakeUndoRedoObject(string.Format(Se.Language.General.SubtitleLoadedX, fileName)));
             _undoRedoManager.StartChangeDetection();
             _opening = false;
+            _openingFileName = null;
 
             SetupLiveSpellCheck();
         }
@@ -21459,11 +21735,22 @@ public partial class MainViewModel :
     private void LoadBookmarks()
     {
         var sub = GetUpdateSubtitle();
-        new BookmarkPersistence(sub, _subtitleFileName).Load();
+        new SubtitleMarksPersistence(sub, _subtitleFileName).Load();
         for (var i = 0; i < Subtitles.Count && i < sub.Paragraphs.Count; i++)
         {
             Subtitles[i].Bookmark = sub.Paragraphs[i].Bookmark;
+
+            // Union, not assignment: a format that carries the forced flag itself (BDN xml)
+            // has already set it on the row, and the sidecar only ever adds marks.
+            if (sub.Paragraphs[i].Forced)
+            {
+                Subtitles[i].Forced = true;
+            }
         }
+
+        // Applying what was just read is not an edit - without this, opening a file with forced
+        // marks rewrote its sidecar on the next tick.
+        _subtitleMarksDirty = false;
     }
 
     /// <summary>
@@ -21667,6 +21954,7 @@ public partial class MainViewModel :
             return true;
         }
 
+        var pageNumber = pages.First().Key;
         var paragraphs = pages.First().Value;
         if (pages.Count > 1)
         {
@@ -21677,16 +21965,24 @@ public partial class MainViewModel :
             }
 
             paragraphs = result.SelectedTrack.Teletext;
+            pageNumber = result.SelectedTrack.TrackNumber;
         }
 
+        // DVB teletext is a first class format: the toolbar shows it and a plain save writes the
+        // .dvbttx back - the page number and language ride on the header like an STL's GSI block.
+        var dvbTeletextFormat = SubtitleFormats.FirstOrDefault(p => p is DvbTeletext);
+
         VideoCloseFile();
-        ResetSubtitle();
+        ResetSubtitle(dvbTeletextFormat);
         _subtitle = new Subtitle(paragraphs);
         _subtitle.Renumber();
+        _subtitle.Header = DvbTeletext.CreateHeader(pageNumber, parser.LanguageCode);
         ReplaceSubtitles(_subtitle.Paragraphs.Select(p => new SubtitleLineViewModel(p, SelectedSubtitleFormat)));
         SelectAndScrollToRow(0);
-        _subtitleFileName = Utilities.GetPathAndFileNameWithoutExtension(fileName) + SelectedSubtitleFormat.Extension;
-        _converted = true;
+        _subtitleFileName = fileName;
+        _lastOpenSaveFormat = SelectedSubtitleFormat;
+        _changeSubtitleHash = GetFastHash();
+        ShowStatus(string.Format(Se.Language.General.SubtitleLoadedX, fileName));
 
         return true;
     }
@@ -21980,10 +22276,23 @@ public partial class MainViewModel :
 
         if (subtitleList.Count > 1)
         {
+            // Set before the picker is posted and cleared when its dialog closes: the picker
+            // outlives SubtitleOpen (and its in-flight guard), so without this a duplicate open
+            // request for the same file stacks a second, pixel-identical picker on top of it.
+            _pickMatroskaTrackFileName = fileName;
             Dispatcher.UIThread.Post(async void () =>
             {
-                var result =
-                    await ShowDialogAsync<PickMatroskaTrackWindow, PickMatroskaTrackViewModel>(vm => { vm.Initialize(matroska, subtitleList, fileName); });
+                PickMatroskaTrackViewModel result;
+                try
+                {
+                    result =
+                        await ShowDialogAsync<PickMatroskaTrackWindow, PickMatroskaTrackViewModel>(vm => { vm.Initialize(matroska, subtitleList, fileName); });
+                }
+                finally
+                {
+                    _pickMatroskaTrackFileName = null;
+                }
+
                 if (result.OkPressed && result.SelectedMatroskaTrack != null)
                 {
                     if (await LoadMatroskaSubtitle(result.SelectedMatroskaTrack, matroska, fileName, skipLoadVideo,
@@ -22860,7 +23169,7 @@ public partial class MainViewModel :
         _changeSubtitleHash = GetFastHash();
         _lastOpenSaveFormat = SelectedSubtitleFormat;
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         return true;
     }
@@ -22884,6 +23193,13 @@ public partial class MainViewModel :
         // dialog's OK, also reachable via File > "EBU STL properties...") saving is silent
         // again, and the auto-save timer must never pop a modal dialog.
         if (binaryFormat is Ebu && !isAutoSave && !Ebu.IsStlHeader(_subtitle.Header) && !await ShowEbuOptionsDialog())
+        {
+            return false;
+        }
+
+        // Same pattern for DVB teletext: ask for page number and language on the first manual
+        // save, then the header carries them and saving is silent.
+        if (binaryFormat is DvbTeletext && !isAutoSave && !DvbTeletext.IsDvbTeletextHeader(_subtitle.Header) && !await ShowDvbTeletextOptionsDialog())
         {
             return false;
         }
@@ -22925,7 +23241,7 @@ public partial class MainViewModel :
         _changeSubtitleHash = GetFastHash();
         _lastOpenSaveFormat = SelectedSubtitleFormat;
 
-        new BookmarkPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
+        new SubtitleMarksPersistence(GetUpdateSubtitle(), _subtitleFileName).Save();
 
         return true;
     }
@@ -24977,6 +25293,8 @@ public partial class MainViewModel :
                 // too - otherwise bookmarking alone records no snapshot and the bookmark gets
                 // baked into the next unrelated edit's entry, where one undo removes both.
                 hash = hash * 23 + (p.Bookmark?.GetHashCode() ?? 0);
+                // Same reasoning for the forced-narrative mark (#14322).
+                hash = hash * 23 + (p.Forced ? 1 : 0);
             }
 
             return hash;
@@ -28092,6 +28410,10 @@ public partial class MainViewModel :
                 _referenceMappingDirty = true;
             }
         }
+        else if (e.PropertyName is nameof(SubtitleLineViewModel.Forced))
+        {
+            _subtitleMarksDirty = true;
+        }
         else if (e.PropertyName is nameof(SubtitleLineViewModel.Text)
             or nameof(SubtitleLineViewModel.EndTime)
             or nameof(SubtitleLineViewModel.MarginV))
@@ -28872,6 +29194,11 @@ public partial class MainViewModel :
             UpdateGaps();
             AutoSaveTick(mainHash, originalHash);
 
+            if (_subtitleMarksDirty)
+            {
+                SaveSubtitleMarks();
+            }
+
             TryRefreshVideoPreview();
         };
         _slowTimer.Start();
@@ -29207,13 +29534,15 @@ public partial class MainViewModel :
         _teletextLineCountSubtitleId = subtitle.Id;
         _teletextLineCountLastSeen = newLineCount;
 
-        if (!IsFormatEbu || !isSameRow)
+        if (!IsFormatTeletext || !isSameRow)
         {
             return;
         }
 
+        // The dvbttx writer always uses double height rows; for EBU STL it is a save option.
+        var useDoubleHeight = !IsFormatEbu || Configuration.Settings.SubtitleSettings.EbuStlTeletextUseDoubleHeight;
         var newRow = TeletextRowHelper.GetAdjustedBottomRow(subtitle.MarginV, oldLineCount, newLineCount,
-            Configuration.Settings.SubtitleSettings.EbuStlTeletextUseDoubleHeight);
+            useDoubleHeight);
         if (newRow.HasValue)
         {
             subtitle.MarginV = newRow.Value.ToString(CultureInfo.InvariantCulture);
@@ -30319,12 +30648,13 @@ public partial class MainViewModel :
         IsFormatAssaOrSsa = SelectedSubtitleFormat is AdvancedSubStationAlpha or SubStationAlpha;
         IsFormatWebVtt = SelectedSubtitleFormat is WebVTT or WebVTTFileWithLineNumber;
         IsFormatEbu = SelectedSubtitleFormat is Ebu;
+        IsFormatTeletext = SelectedSubtitleFormat is Ebu or DvbTeletext;
 
-        // A teletext page is narrower than the general line-length limit, so for EBU STL an
-        // over-wide row counts as a text error (red Text cell, error list, next-error).
-        if (SubtitleLineViewModel.UseTeletextLineLength != IsFormatEbu)
+        // A teletext page is narrower than the general line-length limit, so for the teletext
+        // formats an over-wide row counts as a text error (red Text cell, error list, next-error).
+        if (SubtitleLineViewModel.UseTeletextLineLength != IsFormatTeletext)
         {
-            SubtitleLineViewModel.UseTeletextLineLength = IsFormatEbu;
+            SubtitleLineViewModel.UseTeletextLineLength = IsFormatTeletext;
             foreach (var row in Subtitles)
             {
                 row.RefreshAfterSettingsChanged();
@@ -30452,7 +30782,7 @@ public partial class MainViewModel :
         if (e.AddedItems.Count == 1)
         {
             var format = e.AddedItems[0] as SubtitleFormat;
-            if (format is TimedTextImsc11 or ItunesTimedText or TimedText10 or TimedTextImscRosetta or TmpegEncXml or DCinemaSmpte2007 or DCinemaSmpte2010 or DCinemaSmpte2014 or DCinemaInterop or WebVTT or WebVTTFileWithLineNumber or Ebu)
+            if (format is TimedTextImsc11 or ItunesTimedText or TimedText10 or TimedTextImscRosetta or TmpegEncXml or DCinemaSmpte2007 or DCinemaSmpte2010 or DCinemaSmpte2014 or DCinemaInterop or WebVTT or WebVTTFileWithLineNumber or Ebu or DvbTeletext)
             {
                 IsFilePropertiesVisible = true;
                 FilePropertiesText = string.Format(Se.Language.Main.XPropertiesDotDotDot, format.Name);
