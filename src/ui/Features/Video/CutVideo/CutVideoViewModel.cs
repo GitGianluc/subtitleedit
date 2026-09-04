@@ -940,6 +940,22 @@ public partial class CutVideoViewModel : ObservableObject
             {
                 keyEventArgs.Handled = true;
                 rc.Execute(null);
+                return;
+            }
+
+            // The main window's default vertical zoom binding is Shift+Add/Subtract, which only the
+            // numeric keypad produces. Let the main-row plus and minus keys (OemPlus/OemMinus on
+            // every layout, a laptop or a Spanish keyboard has no other) zoom too, as the sync
+            // dialogs do (#14419 comment).
+            if (keyEventArgs.Key == Key.OemPlus && keyEventArgs.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                keyEventArgs.Handled = true;
+                WaveformVerticalZoomIn();
+            }
+            else if (keyEventArgs.Key == Key.OemMinus && keyEventArgs.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                keyEventArgs.Handled = true;
+                WaveformVerticalZoomOut();
             }
         }
     }
@@ -1209,6 +1225,8 @@ public partial class CutVideoViewModel : ObservableObject
             mainShortCuts.FirstOrDefault(p => p.Action == mainVm.PlayNextCommand),
             mainShortCuts.FirstOrDefault(p => p.Action == mainVm.TogglePlayPauseCommand),
             mainShortCuts.FirstOrDefault(p => p.Action == mainVm.TogglePlayPause2Command),
+            mainShortCuts.FirstOrDefault(p => p.Action == mainVm.WaveformVerticalZoomInCommand),
+            mainShortCuts.FirstOrDefault(p => p.Action == mainVm.WaveformVerticalZoomOutCommand),
         };
 
         foreach (var sc in shortcuts.Where(p => p != null))
@@ -1274,6 +1292,16 @@ public partial class CutVideoViewModel : ObservableObject
             return TogglePlayPauseCommand;
         }
 
+        if (action == mainVm.WaveformVerticalZoomInCommand)
+        {
+            return WaveformVerticalZoomInCommand;
+        }
+
+        if (action == mainVm.WaveformVerticalZoomOutCommand)
+        {
+            return WaveformVerticalZoomOutCommand;
+        }
+
         return null;
     }
 
@@ -1334,6 +1362,32 @@ public partial class CutVideoViewModel : ObservableObject
         SelectAndScrollToRow(idx + 1);
 
         _updateAudioVisualizer = true;
+    }
+
+    /// <summary>
+    /// Mirrors the main window's waveform vertical zoom (Shift +/-): scales the waveform's
+    /// amplitude in place, so zooming in for readability does not shrink the video (#14419 comment).
+    /// </summary>
+    [RelayCommand]
+    private void WaveformVerticalZoomIn()
+    {
+        if (AudioVisualizer == null)
+        {
+            return;
+        }
+
+        AudioVisualizer.VerticalZoomFactor = Math.Max(Math.Min(AudioVisualizer.VerticalZoomFactor - 0.1, AudioVisualizer.MaxZoomFactor), AudioVisualizer.MinZoomFactor);
+    }
+
+    [RelayCommand]
+    private void WaveformVerticalZoomOut()
+    {
+        if (AudioVisualizer == null)
+        {
+            return;
+        }
+
+        AudioVisualizer.VerticalZoomFactor = Math.Max(Math.Min(AudioVisualizer.VerticalZoomFactor + 0.1, AudioVisualizer.MaxZoomFactor), AudioVisualizer.MinZoomFactor);
     }
 
     [RelayCommand]

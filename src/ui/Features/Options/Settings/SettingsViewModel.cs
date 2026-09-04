@@ -150,6 +150,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string? _selectedFavoriteSubtitleFormat;
 
     [ObservableProperty] private bool _webVttUseXTimestampMap;
+    [ObservableProperty] private bool _assaAutoSetResolution;
+    [ObservableProperty] private bool _assaAutoSetResolutionPrompt;
 
     [ObservableProperty] private ObservableCollection<PickLanguageDisplay> _favoriteLanguages;
     [ObservableProperty] private PickLanguageDisplay? _selectedFavoriteLanguage;
@@ -266,7 +268,6 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _showFullscreenButton;
     [ObservableProperty] private bool _fullscreenHideControls;
     [ObservableProperty] private bool _autoOpenVideoFile;
-    [ObservableProperty] private bool _mpvAudioKeepOpen;
 
     [ObservableProperty] private bool _waveformDrawGridLines;
     [ObservableProperty] private bool _waveformFocusOnMouseOver;
@@ -325,6 +326,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private decimal _waveformSnapToShotChangeStartMaxSeconds;
     [ObservableProperty] private decimal _waveformSnapToShotChangeEndMaxSeconds;
     [ObservableProperty] private decimal _waveformSnapToShotChangeSameShotEndMaxSeconds;
+    [ObservableProperty] private int _waveformGuessStartOffsetMs;
+    [ObservableProperty] private int _waveformGuessEndOffsetMs;
     [ObservableProperty] private bool _waveformShotChangesAutoGenerate;
     [ObservableProperty] private bool _waveformAllowOverlap;
     [ObservableProperty] private bool _waveformSetVideoPositionOnMoveStartEnd;
@@ -816,6 +819,8 @@ public partial class SettingsViewModel : ObservableObject
         }
 
         WebVttUseXTimestampMap = Se.Settings.Formats.WebVttUseXTimestampMap;
+        AssaAutoSetResolution = Se.Settings.Assa.AutoSetResolution;
+        AssaAutoSetResolutionPrompt = Se.Settings.Assa.AutoSetResolutionPrompt;
 
         // Clear unconditionally, the way FavoriteLanguages does below: LoadSettings runs again
         // after importing a settings file, so with the Clear() inside the guard an import that
@@ -1028,6 +1033,8 @@ public partial class SettingsViewModel : ObservableObject
         WaveformSnapToShotChangeStartMaxSeconds = (decimal)Se.Settings.Waveform.SnapToShotChangeStartMaxSeconds;
         WaveformSnapToShotChangeEndMaxSeconds = (decimal)Se.Settings.Waveform.SnapToShotChangeEndMaxSeconds;
         WaveformSnapToShotChangeSameShotEndMaxSeconds = (decimal)Se.Settings.Waveform.SnapToShotChangeSameShotEndMaxSeconds;
+        WaveformGuessStartOffsetMs = Se.Settings.Waveform.GuessStartOffsetMs;
+        WaveformGuessEndOffsetMs = Se.Settings.Waveform.GuessEndOffsetMs;
         WaveformShotChangesAutoGenerate = Se.Settings.Waveform.ShotChangesAutoGenerate;
         WaveformAllowOverlap = Se.Settings.Waveform.AllowOverlap;
         WaveformSetVideoPositionOnMoveStartEnd = Se.Settings.Waveform.SetVideoPositionOnMoveStartEnd;
@@ -1072,7 +1079,6 @@ public partial class SettingsViewModel : ObservableObject
         ShowFullscreenButton = video.ShowFullscreenButton;
         FullscreenHideControls = video.FullscreenHideControls;
         AutoOpenVideoFile = video.AutoOpen;
-        MpvAudioKeepOpen = video.MpvAudioKeepOpen;
 
         MpvPreviewFontName = video.MpvPreviewFontName;
         MpvPreviewFontSize = video.MpvPreviewFontSize;
@@ -1696,6 +1702,8 @@ public partial class SettingsViewModel : ObservableObject
         general.DefaultSaveAsFormat = SelectedSaveSubtitleFormat;
 
         Se.Settings.Formats.WebVttUseXTimestampMap = WebVttUseXTimestampMap;
+        Se.Settings.Assa.AutoSetResolution = AssaAutoSetResolution;
+        Se.Settings.Assa.AutoSetResolutionPrompt = AssaAutoSetResolutionPrompt;
 
         var sbFavorites = new StringBuilder();
         foreach (var format in FavoriteSubtitleFormats)
@@ -1878,6 +1886,8 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Waveform.SnapToShotChangeStartMaxSeconds = (double)WaveformSnapToShotChangeStartMaxSeconds;
         Se.Settings.Waveform.SnapToShotChangeEndMaxSeconds = (double)WaveformSnapToShotChangeEndMaxSeconds;
         Se.Settings.Waveform.SnapToShotChangeSameShotEndMaxSeconds = (double)WaveformSnapToShotChangeSameShotEndMaxSeconds;
+        Se.Settings.Waveform.GuessStartOffsetMs = WaveformGuessStartOffsetMs;
+        Se.Settings.Waveform.GuessEndOffsetMs = WaveformGuessEndOffsetMs;
         Se.Settings.Waveform.ShotChangesAutoGenerate = WaveformShotChangesAutoGenerate;
         Se.Settings.Waveform.AllowOverlap = WaveformAllowOverlap;
         Se.Settings.Waveform.SetVideoPositionOnMoveStartEnd = WaveformSetVideoPositionOnMoveStartEnd;
@@ -1915,7 +1925,6 @@ public partial class SettingsViewModel : ObservableObject
         video.ShowFullscreenButton = ShowFullscreenButton;
         video.FullscreenHideControls = FullscreenHideControls;
         video.AutoOpen = AutoOpenVideoFile;
-        video.MpvAudioKeepOpen = MpvAudioKeepOpen;
 
         video.MpvPreviewFontName = MpvPreviewFontName;
         video.MpvPreviewFontSize = MpvPreviewFontSize;
@@ -2646,6 +2655,7 @@ public partial class SettingsViewModel : ObservableObject
             if (result.ResetRecentFiles)
             {
                 Se.Settings.File.RecentFiles = new List<RecentFile>();
+                Se.Settings.Video.RecentFiles = new List<string>();
             }
 
             if (result.ResetWindowPositionAndSize)

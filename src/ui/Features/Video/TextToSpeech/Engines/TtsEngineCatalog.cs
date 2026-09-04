@@ -74,6 +74,12 @@ public static class TtsEngineCatalog
             // engines; clones from a CAM++ speaker embedding so no reference transcript is needed.
             new DotsTtsCrispAsr(),
 
+            // Confucius4-TTS (CrispASR) — NetEase Youdao's two-stage GPT-2/flow-matching model,
+            // 22.05 kHz, 14 languages, Apache-2.0. Zero-shot cloning is mandatory (no default
+            // voice exists); clones from w2v-BERT + CAM++ conditioning so no reference
+            // transcript is needed.
+            new Confucius4TtsCrispAsr(),
+
             // CosyVoice3 (CrispASR) sits immediately after IndexTtsCrispAsr to keep the CrispASR
             // engines grouped visually in the engine combo.
             new CosyVoice3CrispAsr(),
@@ -87,6 +93,17 @@ public static class TtsEngineCatalog
             // control and speaking-rate control, with a per-request reference voice so the
             // server is not restarted when the voice changes.
             new IndexTts25AudioCpp(),
+
+            // Higgs Audio v3 (audio.cpp) — Boson AI's 4B model, cloning across 100+ languages,
+            // the broadest coverage of any engine here. Shares the audio.cpp runtime install
+            // with IndexTTS 2.5, so it is grouped right after it. Weights are research /
+            // non-commercial licensed (first-run accept window, like IndexTTS 2.5's).
+            new HiggsTtsAudioCpp(),
+
+            // Fish Audio S2 Pro (audio.cpp) — cloning from a 10-30 s reference across 80+
+            // languages with inline prosody/emotion control. Same shared runtime; weights are
+            // under the Fish Audio Research License (first-run accept window).
+            new FishTtsAudioCpp(),
 
             // F5-TTS (CrispASR) hidden: CrispASR 0.6.12 has no GPU backend for f5-tts, so
             // synthesis runs the fixed 32-step Euler ODE through a 22-layer DiT + Vocos on

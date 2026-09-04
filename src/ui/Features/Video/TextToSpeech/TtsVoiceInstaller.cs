@@ -166,7 +166,7 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that MOSS-TTS (CrispASR) runs on is installed.
-    /// The moss-tts backend ships in CrispASR v0.8.13 and newer (SE pins v0.8.30).
+    /// The moss-tts backend ships in CrispASR v0.8.13 and newer (SE pins v0.8.32).
     /// </summary>
     public static Task<bool> EnsureCrispAsrForMossTts(Window? window, IWindowService windowService, bool forceRedownload)
         => EnsureCrispAsrAsync(window, windowService, forceRedownload,
@@ -176,7 +176,7 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that dots.tts (CrispASR) runs on is installed.
-    /// The dots-tts backend ships in CrispASR v0.8.25 and newer (SE pins v0.8.30); the version
+    /// The dots-tts backend ships in CrispASR v0.8.25 and newer (SE pins v0.8.32); the version
     /// note names that floor because older builds have no dots-tts backend at all and abort on
     /// the unknown --backend value.
     /// </summary>
@@ -187,6 +187,18 @@ public static class TtsVoiceInstaller
             minVersionNote: "v0.8.25 or newer");
 
     /// <summary>
+    /// Ensures the CrispASR runtime that Confucius4-TTS (CrispASR) runs on is installed.
+    /// The confucius4-tts backend ships in CrispASR v0.8.30 and newer; the version note names
+    /// that floor because older builds have no confucius4-tts backend at all and abort on the
+    /// unknown --backend value.
+    /// </summary>
+    public static Task<bool> EnsureCrispAsrForConfucius4Tts(Window? window, IWindowService windowService, bool forceRedownload)
+        => EnsureCrispAsrAsync(window, windowService, forceRedownload,
+            engineDisplayName: "Confucius4-TTS (CrispASR)",
+            extraCapabilityCheck: null,
+            minVersionNote: "v0.8.30 or newer");
+
+    /// <summary>
     /// Shared CrispASR install/update flow used by all TTS engines that sit on the
     /// CrispASR runtime. Prompts refer to <paramref name="engineDisplayName"/> so users
     /// see the right engine name. <paramref name="extraCapabilityCheck"/> lets the caller
@@ -195,19 +207,21 @@ public static class TtsVoiceInstaller
     /// even when CrispASR itself looks up to date.
     /// </summary>
     /// <summary>
-    /// Ensures the audio.cpp runtime that IndexTTS 2.5 runs on is installed. Unlike the
-    /// CrispASR engines, these binaries are built by SubtitleEdit itself (upstream ships
-    /// Windows-only prebuilts), and the archive is per backend: Metal on Apple Silicon, and
-    /// CPU / Vulkan / CUDA on Windows and Linux x64.
+    /// Ensures the shared audio.cpp runtime is installed — the same binaries back IndexTTS
+    /// 2.5, Higgs Audio v3 and Fish Audio S2 Pro, so whichever engine asks first downloads
+    /// for all of them. Unlike the CrispASR engines, these binaries are built by SubtitleEdit
+    /// itself (upstream ships Windows-only prebuilts), and the archive is per backend: Metal
+    /// on Apple Silicon, and CPU / Vulkan / CUDA on Windows and Linux x64.
     /// </summary>
-    public static async Task<bool> EnsureAudioCppForIndexTts25(Window? window, IWindowService windowService, bool forceRedownload)
+    /// <param name="engineDisplayName">The engine that asked, for the prompts ("IndexTTS 2.5").</param>
+    public static async Task<bool> EnsureAudioCppRuntime(Window? window, IWindowService windowService, bool forceRedownload, string engineDisplayName)
     {
         if (window == null)
         {
             return false;
         }
 
-        var isInstalled = File.Exists(IndexTts25AudioCpp.GetServerExecutable());
+        var isInstalled = File.Exists(AudioCppRuntime.GetServerExecutable());
         if (!forceRedownload && isInstalled)
         {
             return true;
@@ -220,8 +234,8 @@ public static class TtsVoiceInstaller
             {
                 await MessageBox.Show(
                     window,
-                    "IndexTTS 2.5",
-                    $"{Environment.NewLine}IndexTTS 2.5 (audio.cpp) requires an Apple Silicon Mac.",
+                    engineDisplayName,
+                    $"{Environment.NewLine}\"{engineDisplayName}\" (audio.cpp) requires an Apple Silicon Mac.",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return false;
@@ -230,7 +244,7 @@ public static class TtsVoiceInstaller
             var answer = await MessageBox.Show(
                 window,
                 "Download audio.cpp?",
-                $"{Environment.NewLine}\"IndexTTS 2.5\" runs through the audio.cpp runtime. Download and install now?",
+                $"{Environment.NewLine}\"{engineDisplayName}\" runs through the audio.cpp runtime. Download and install now?",
                 MessageBoxButtons.YesNoCancel,
                 MessageBoxIcon.Question);
 
@@ -247,8 +261,8 @@ public static class TtsVoiceInstaller
             {
                 await MessageBox.Show(
                     window,
-                    "IndexTTS 2.5",
-                    $"{Environment.NewLine}IndexTTS 2.5 (audio.cpp) is only built for x86-64 on Windows and Linux.",
+                    engineDisplayName,
+                    $"{Environment.NewLine}\"{engineDisplayName}\" (audio.cpp) is only built for x86-64 on Windows and Linux.",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return false;
@@ -257,7 +271,7 @@ public static class TtsVoiceInstaller
             var variantAnswer = await MessageBox.Show(
                 window,
                 "Download audio.cpp?",
-                $"{Environment.NewLine}\"IndexTTS 2.5\" runs through the audio.cpp runtime. Select a build to download:",
+                $"{Environment.NewLine}\"{engineDisplayName}\" runs through the audio.cpp runtime. Select a build to download:",
                 MessageBoxButtons.Cancel,
                 MessageBoxIcon.Question,
                 "CPU",
@@ -301,7 +315,7 @@ public static class TtsVoiceInstaller
         var dlResult = await windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(
             window, vm => vm.StartDownloadIndexTts25AudioCppEngine(backend));
 
-        if (!dlResult.OkPressed || !File.Exists(IndexTts25AudioCpp.GetServerExecutable()))
+        if (!dlResult.OkPressed || !File.Exists(AudioCppRuntime.GetServerExecutable()))
         {
             return false;
         }

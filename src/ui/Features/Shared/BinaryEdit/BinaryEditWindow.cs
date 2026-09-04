@@ -218,8 +218,23 @@ public class BinaryEditWindow : Window
                         },
                         new MenuItem
                         {
+                            Header = Se.Language.File.Export.TitleExportDCinemaInteropPng,
+                            Command = vm.ExportDCinemaInteropPngCommand,
+                        },
+                        new MenuItem
+                        {
+                            Header = Se.Language.File.Export.TitleExportDCinemaSmpte2014Png,
+                            Command = vm.ExportDCinemaSmpte2014PngCommand,
+                        },
+                        new MenuItem
+                        {
                             Header = Se.Language.File.Export.TitleExportDostPng,
                             Command = vm.ExportDostPngCommand,
+                        },
+                        new MenuItem
+                        {
+                            Header = Se.Language.File.Export.TitleExportDvdSup,
+                            Command = vm.ExportDvdSupCommand,
                         },
                         new MenuItem
                         {
@@ -382,6 +397,14 @@ public class BinaryEditWindow : Window
                     Header = l.CloseVideoFile,
                     Command = vm.CloseVideoCommand,
                 },
+                new Separator(),
+                new MenuItem
+                {
+                    // Where the main window has it too (its Video menu).
+                    Header = l.GenerateBurnIn,
+                    Command = vm.GenerateBurnInCommand,
+                },
+                new Separator(),
                 new MenuItem
                 {
                     Header = l.ToggleSelectSubtitleWhilePlayingCurrentlyOn,

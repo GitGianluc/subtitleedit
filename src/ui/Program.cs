@@ -33,6 +33,21 @@ namespace Nikse.SubtitleEdit
         public static string? PendingVideoToOpen { get; set; }
         public static bool FileOpenedViaActivation { get; set; }
 
+        // Set once the first editor window has made its startup file decision - after the
+        // activation grace delay in MainViewModel.OnLoaded. Until then a macOS File
+        // activation belongs to that window (routed via PendingFileToOpen); afterwards it
+        // means "opened while running" and gets a window of its own. lifetime.MainWindow
+        // cannot serve as this test: it is assigned before Start() pumps the run loop that
+        // delivers activations, so it is already non-null when a cold-launch Finder
+        // double-click's activation arrives - which used to send the file to a second
+        // window while the primary one started up empty.
+        public static bool StartupFileDecisionDone { get; set; }
+
+        // Distinguishes a genuine double-click on the Dock icon from the single-click
+        // activation AppKit sends on every Dock click - see the Reopen handling below.
+        private static long _lastReopenActivationTicks = long.MinValue / 2;
+        private const long DoubleClickIntervalMs = 500;
+
         [STAThread]
         public static void Main(string[] args)
         {
@@ -235,6 +250,10 @@ namespace Nikse.SubtitleEdit
                 // Setup main window (Batch Convert standalone if requested via CLI)
                 if (HasBatchConvertUiArg(args))
                 {
+                    // No editor window will run OnLoaded to consume PendingFileToOpen, so
+                    // route any macOS File activation straight to a new editor window.
+                    StartupFileDecisionDone = true;
+
                     SetupBatchConvertOnlyWindow(lifetime);
 
                     // Force-terminate the process once the window closes. Under
@@ -421,6 +440,28 @@ namespace Nikse.SubtitleEdit
 
                 activatable.Activated += (sender, e) =>
                 {
+                    // Clicking the Dock icon while SE is already running delivers a Reopen
+                    // activation on every click, not just a double-click - AppKit uses the same
+                    // callback for "bring the running app to the front" as it does for "the user
+                    // wants a new window" (e.g. Finder, TextEdit). A single click must keep doing
+                    // the former (the OS already brings existing windows forward on its own); only
+                    // a second click landing within the standard double-click window counts as the
+                    // latter, matching every other platform's "open" gesture (a second Windows
+                    // process, a fresh Linux launch) handing the user a new, empty window.
+                    if (e is ActivatedEventArgs reopenArgs && reopenArgs.Kind == ActivationKind.Reopen)
+                    {
+                        var now = Environment.TickCount64;
+                        var isDoubleClick = now - _lastReopenActivationTicks <= DoubleClickIntervalMs;
+                        _lastReopenActivationTicks = now;
+
+                        if (isDoubleClick && lifetime.MainWindow != null)
+                        {
+                            Dispatcher.UIThread.Post(Nikse.SubtitleEdit.Features.Main.Layout.MainWindowFactory.OpenNewWindow);
+                        }
+
+                        return;
+                    }
+
                     if (e is not FileActivatedEventArgs args || args.Kind != ActivationKind.File)
                     {
                         return;
@@ -432,19 +473,26 @@ namespace Nikse.SubtitleEdit
                         if (System.IO.File.Exists(filePath))
                         {
                             FileOpenedViaActivation = true;
-                            var mainView = lifetime.MainWindow == null
-                                ? null
-                                : UiTheme.GetUnscaledContent(lifetime.MainWindow) as MainView;
-                            if (mainView != null)
+                            if (!StartupFileDecisionDone)
                             {
-                                Dispatcher.UIThread.Post(async () =>
-                                {
-                                    await mainView.OpenFile(filePath);
-                                });
+                                // Still starting up - the primary window's startup file
+                                // decision (MainViewModel.OnLoaded) has not run its
+                                // activation grace delay yet, so it will load this file
+                                // itself instead of leaving its window empty.
+                                PendingFileToOpen = filePath;
                             }
                             else
                             {
-                                PendingFileToOpen = filePath;
+                                // Already running: macOS delivers this when a file is opened
+                                // from Finder while SE is running, or dropped on the Dock
+                                // icon. Open it in a new window instead of hijacking whichever
+                                // window happens to be lifetime.MainWindow - matches Windows,
+                                // where each Finder/Explorer open is a separate process and
+                                // never touches existing windows.
+                                Dispatcher.UIThread.Post(async () =>
+                                {
+                                    await Nikse.SubtitleEdit.Features.Main.Layout.MainWindowFactory.OpenNewWindowWithFile(filePath);
+                                });
                             }
 
                             break;

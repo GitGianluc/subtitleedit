@@ -46,6 +46,20 @@ Additional formatting options:
 
 - **Fetch first word from next subtitle** — Move the first word of the next line to the current line
 - **Move last word to next subtitle** — Move the last word to the next subtitle line
+- **Move first word to previous subtitle** — Move the first word to the previous subtitle line
+- **Move last word from first line down (current subtitle)** — Move the last word of line 1 to line 2
+- **Move first word from next line up (current subtitle)** — Move the first word of line 2 to line 1
+
+When an editable original is shown, these act on whichever text box has focus: the original with the cursor in the original text box, otherwise the translation.
+
+## Context Menu
+
+Besides cut/copy/paste, split and the formatting items above, the text box right-click menu has:
+
+- **Casing** — Toggle casing, Selection to UPPERCASE, Selection to lowercase, Selection to Sentence case, and Change casing... for the selected lines
+- **Insert Unicode symbol** — insert one of the configured symbols
+- **Google it** (with a selection) and **Search via** — the custom search slots set up in Options → Shortcuts
+- **AI assistant** — see below
 
 ## AI Assistant
 

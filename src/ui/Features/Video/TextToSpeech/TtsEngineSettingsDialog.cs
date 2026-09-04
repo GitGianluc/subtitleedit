@@ -2,10 +2,12 @@
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ChatterboxTtsSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.CosyVoice3CrispAsrSettings;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Confucius4TtsCrispAsrSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.DotsTtsCrispAsrSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ElevenLabsSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.F5TtsCrispAsrSettings;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.AudioCppTtsSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.IndexTts25AudioCppSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.IndexTtsCrispAsrSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.KokoroTtsSettings;
@@ -40,8 +42,11 @@ public static class TtsEngineSettingsDialog
         Qwen3TtsCrispAsr or
         VibeVoiceCrispAsr or
         IndexTts25AudioCpp or
+        HiggsTtsAudioCpp or
+        FishTtsAudioCpp or
         IndexTtsCrispAsr or
         DotsTtsCrispAsr or
+        Confucius4TtsCrispAsr or
         CosyVoice3CrispAsr or
         PocketTtsCrispAsr or
         F5TtsCrispAsr or
@@ -75,6 +80,14 @@ public static class TtsEngineSettingsDialog
         {
             await windowService.ShowDialogAsync<IndexTts25AudioCppSettingsWindow, IndexTts25AudioCppSettingsViewModel>(window, vm => vm.Initialize());
         }
+        else if (engine is HiggsTtsAudioCpp)
+        {
+            await windowService.ShowDialogAsync<AudioCppTtsSettingsWindow, AudioCppTtsSettingsViewModel>(window, vm => vm.Initialize(AudioCppTtsSettingsAdapters.Higgs));
+        }
+        else if (engine is FishTtsAudioCpp)
+        {
+            await windowService.ShowDialogAsync<AudioCppTtsSettingsWindow, AudioCppTtsSettingsViewModel>(window, vm => vm.Initialize(AudioCppTtsSettingsAdapters.Fish));
+        }
         else if (engine is IndexTtsCrispAsr)
         {
             await windowService.ShowDialogAsync<IndexTtsCrispAsrSettingsWindow, IndexTtsCrispAsrSettingsViewModel>(window, vm => vm.Initialize());
@@ -82,6 +95,10 @@ public static class TtsEngineSettingsDialog
         else if (engine is DotsTtsCrispAsr)
         {
             await windowService.ShowDialogAsync<DotsTtsCrispAsrSettingsWindow, DotsTtsCrispAsrSettingsViewModel>(window, vm => vm.Initialize());
+        }
+        else if (engine is Confucius4TtsCrispAsr)
+        {
+            await windowService.ShowDialogAsync<Confucius4TtsCrispAsrSettingsWindow, Confucius4TtsCrispAsrSettingsViewModel>(window, vm => vm.Initialize());
         }
         else if (engine is CosyVoice3CrispAsr)
         {

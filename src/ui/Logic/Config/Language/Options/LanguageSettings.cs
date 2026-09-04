@@ -138,6 +138,8 @@ public class LanguageSettings
     public string WaveformSnapToShotChangeStartMaxSeconds { get; set; }
     public string WaveformSnapToShotChangeEndMaxSeconds { get; set; }
     public string WaveformSnapToShotChangeSameShotEndMaxSeconds { get; set; }
+    public string WaveformGuessStartOffsetMs { get; set; }
+    public string WaveformGuessEndOffsetMs { get; set; }
     public string WaveformShotChangesAutoGenerate { get; set; }
     public string WaveformTextFontSize { get; set; }
     public string WaveformTextFontBold { get; set; }
@@ -197,12 +199,13 @@ public class LanguageSettings
     public string FavoriteSubtitleFormats { get; set; }
     public string FavoriteLanguages { get; set; }
     public string WebVttUseXTimestampMap { get; set; }
+    public string AssaAutoSetResolution { get; set; }
+    public string AssaAutoSetResolutionPrompt { get; set; }
 
     public string ShowStopButton { get; set; }
     public string ShowFullscreenButton { get; set; }
     public string FullscreenHideControls { get; set; }
     public string AutoOpenVideoFile { get; set; }
-    public string MpvAudioKeepOpen { get; set; }
     public string DownloadMpv { get; set; }
     public string DownloadVlc { get; set; }
     public string AllowSingleLetterShortcutsInTextbox { get; set; }
@@ -479,6 +482,8 @@ public class LanguageSettings
         WaveformSnapToShotChangeStartMaxSeconds = "Snap to nearest shot change: max start distance (seconds)";
         WaveformSnapToShotChangeEndMaxSeconds = "Snap to nearest shot change: max end distance (seconds)";
         WaveformSnapToShotChangeSameShotEndMaxSeconds = "Snap to nearest shot change: max end distance when start and end share a cut (seconds)";
+        WaveformGuessStartOffsetMs = "Guess start time from waveform: place start earlier by (ms)";
+        WaveformGuessEndOffsetMs = "Guess end time from waveform: place end later by (ms)";
         WaveformShotChangesAutoGenerate = "Shot changes auto-generate";
         WaveformTextFontSize = "Waveform text font size";
         WaveformTextFontBold = "Waveform text font bold";
@@ -537,7 +542,6 @@ public class LanguageSettings
         ShowFullscreenButton = "Show full-screen button";
         FullscreenHideControls = "Hide video controls in full-screen";
         AutoOpenVideoFile = "Auto-open video file when opening subtitle";
-        MpvAudioKeepOpen = "Keep the audio device open while paused (mpv)";
         DownloadMpv = "Download mpv";
         DownloadVlc = "Download VLC";
         AllowSingleLetterShortcutsInTextbox = "Allow single-letter shortcuts in text box";
@@ -550,6 +554,8 @@ public class LanguageSettings
         DefaultSaveAsFormat = "Default \"Save as\" format";
         FavoriteSubtitleFormats = "Favorite subtitle formats";
         WebVttUseXTimestampMap = "WebVTT: use X-TIMESTAMP-MAP (offset time codes on load)";
+        AssaAutoSetResolution = "ASSA: set resolution (PlayResX/PlayResY) from the video when a video is opened";
+        AssaAutoSetResolutionPrompt = "ASSA: ask before changing the resolution to match the video (otherwise resample automatically)";
         FavoriteLanguages = "Favorite languages";
         FilesAndLogs = "Files and logs";
         ShowErrorLogFile = "Show error log file";

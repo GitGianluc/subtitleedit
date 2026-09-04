@@ -49,6 +49,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -353,9 +354,22 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             Se.Settings.Video.TextToSpeech.DotsTtsCrispAsrModel = SelectedModel ?? DotsTtsCrispAsr.DefaultModelKey;
         }
+        else if (SelectedEngine is Confucius4TtsCrispAsr)
+        {
+            Se.Settings.Video.TextToSpeech.Confucius4TtsCrispAsrModel = SelectedModel ?? Confucius4TtsCrispAsr.DefaultModelKey;
+            Se.Settings.Video.TextToSpeech.Confucius4TtsCrispAsrLanguage = SelectedLanguage?.Name ?? string.Empty;
+        }
         else if (SelectedEngine is IndexTts25AudioCpp)
         {
             Se.Settings.Video.TextToSpeech.IndexTts25AudioCppModel = SelectedModel ?? IndexTts25AudioCpp.DefaultModelKey;
+        }
+        else if (SelectedEngine is HiggsTtsAudioCpp)
+        {
+            Se.Settings.Video.TextToSpeech.HiggsTtsAudioCppModel = SelectedModel ?? HiggsTtsAudioCpp.DefaultModelKey;
+        }
+        else if (SelectedEngine is FishTtsAudioCpp)
+        {
+            Se.Settings.Video.TextToSpeech.FishTtsAudioCppModel = SelectedModel ?? FishTtsAudioCpp.DefaultModelKey;
         }
         else if (SelectedEngine is CosyVoice3CrispAsr)
         {
@@ -394,6 +408,10 @@ public partial class TextToSpeechViewModel : ObservableObject
             {
                 Se.Settings.Video.TextToSpeech.ChatterboxCrispAsrLanguage = SelectedLanguage?.Name ?? string.Empty;
             }
+        }
+        else if (SelectedEngine is ZonosTtsCrispAsr)
+        {
+            Se.Settings.Video.TextToSpeech.ZonosTtsCrispAsrLanguage = SelectedLanguage?.Name ?? string.Empty;
         }
         else if (SelectedEngine is KokoroTtsCpp)
         {
@@ -1050,9 +1068,11 @@ public partial class TextToSpeechViewModel : ObservableObject
     {
         OmniVoiceCrispAsr => Se.Settings.Video.TextToSpeech.OmniVoiceCrispAsrLanguage,
         MossTtsCrispAsr => Se.Settings.Video.TextToSpeech.MossTtsCrispAsrLanguage,
+        Confucius4TtsCrispAsr => Se.Settings.Video.TextToSpeech.Confucius4TtsCrispAsrLanguage,
         CosyVoice3CrispAsr => Se.Settings.Video.TextToSpeech.CosyVoice3CrispAsrLanguage,
         Qwen3TtsCrispAsr => Se.Settings.Video.TextToSpeech.Qwen3TtsCrispAsrLanguage,
         ChatterboxTtsCpp => Se.Settings.Video.TextToSpeech.ChatterboxCrispAsrLanguage,
+        ZonosTtsCrispAsr => Se.Settings.Video.TextToSpeech.ZonosTtsCrispAsrLanguage,
         ElevenLabs => Se.Settings.Video.TextToSpeech.ElevenLabsLanguage,
         _ => null,
     };
@@ -1303,9 +1323,21 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             DotsTtsCrispAsr.StopServer();
         }
+        if (keepAlive is not Confucius4TtsCrispAsr)
+        {
+            Confucius4TtsCrispAsr.StopServer();
+        }
         if (keepAlive is not IndexTts25AudioCpp)
         {
             IndexTts25AudioCpp.StopServer();
+        }
+        if (keepAlive is not HiggsTtsAudioCpp)
+        {
+            HiggsTtsAudioCpp.StopServer();
+        }
+        if (keepAlive is not FishTtsAudioCpp)
+        {
+            FishTtsAudioCpp.StopServer();
         }
         if (keepAlive is not CosyVoice3CrispAsr)
         {
@@ -1594,8 +1626,17 @@ public partial class TextToSpeechViewModel : ObservableObject
             case DotsTtsCrispAsr:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadDotsTtsCrispAsrModels(DotsTtsCrispAsr.ResolveModelKey(SelectedModel)));
                 break;
+            case Confucius4TtsCrispAsr:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadConfucius4TtsCrispAsrModels(Confucius4TtsCrispAsr.ResolveModelKey(SelectedModel)));
+                break;
             case IndexTts25AudioCpp:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadIndexTts25AudioCppModels(IndexTts25AudioCpp.ResolveModelKey(SelectedModel)));
+                break;
+            case HiggsTtsAudioCpp:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadHiggsTtsAudioCppModels(HiggsTtsAudioCpp.ResolveModelKey(SelectedModel)));
+                break;
+            case FishTtsAudioCpp:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadFishTtsAudioCppModels(FishTtsAudioCpp.ResolveModelKey(SelectedModel)));
                 break;
             case CosyVoice3CrispAsr:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadCosyVoice3CrispAsrModels(CosyVoice3CrispAsr.ResolveModelKey(SelectedModel)));
@@ -1673,7 +1714,16 @@ public partial class TextToSpeechViewModel : ObservableObject
             DotsTtsCrispAsr => DotsTtsCrispAsr.AreModelsInstalled(modelKey)
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
+            Confucius4TtsCrispAsr => Confucius4TtsCrispAsr.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
             IndexTts25AudioCpp => IndexTts25AudioCpp.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
+            HiggsTtsAudioCpp => HiggsTtsAudioCpp.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
+            FishTtsAudioCpp => FishTtsAudioCpp.AreModelsInstalled(modelKey)
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
             CosyVoice3CrispAsr => CosyVoice3CrispAsr.AreModelsInstalled(modelKey)
@@ -3400,9 +3450,15 @@ public partial class TextToSpeechViewModel : ObservableObject
                 // same policy as the generation step. Cancellation still aborts the run.
                 try
                 {
+                    // Silence is judged relative to this clip's own peak: a fixed -40 dBFS trimmed
+                    // the soft final consonant off quiet voice-clone output, cutting the last word
+                    // of the line (#14480). Null (unreadable file) falls back to the old threshold.
+                    var peakDbfs = await TtsSilenceThreshold.MeasurePeakDbfsAsync(item.CurrentFileName, cancellationToken, segmentOperationTimeout);
+                    Se.WriteToolsLog($"TTS FixSpeed: segment {index + 1} peak {FormatDb(peakDbfs)} - silence threshold {TtsSilenceThreshold.DbLiteral(peakDbfs)}");
+
                     // Step 1: Trim silence from start and end
                     var outputFileName1 = Path.Combine(Path.GetDirectoryName(item.CurrentFileName)!, Guid.NewGuid() + ".wav");
-                    var trimProcess = FfmpegGenerator.TrimSilenceStartAndEnd(item.CurrentFileName, outputFileName1);
+                    var trimProcess = FfmpegGenerator.TrimSilenceStartAndEnd(item.CurrentFileName, outputFileName1, TtsSilenceThreshold.Amplitude(peakDbfs));
                     await trimProcess.StartAndWaitAsync(cancellationToken, segmentOperationTimeout);
 
                     var currentFile = outputFileName1;
@@ -3413,7 +3469,7 @@ public partial class TextToSpeechViewModel : ObservableObject
                     if (doVad)
                     {
                         var vadOutput = Path.Combine(Path.GetDirectoryName(item.CurrentFileName)!, $"vad_{Guid.NewGuid()}.wav");
-                        var vadProcess = FfmpegGenerator.CompressInternalSilence(currentFile, vadOutput, vadMaxSilence);
+                        var vadProcess = FfmpegGenerator.CompressInternalSilence(currentFile, vadOutput, vadMaxSilence, TtsSilenceThreshold.DbLiteral(peakDbfs));
                         await vadProcess.StartAndWaitAsync(cancellationToken, segmentOperationTimeout);
 
                         if (File.Exists(vadOutput) && new FileInfo(vadOutput).Length > 0)
@@ -3767,6 +3823,11 @@ public partial class TextToSpeechViewModel : ObservableObject
     // The compact cloud-engine descriptions ("pay/fast/good") read like debug output - expand
     // them into words; free-form descriptions (the CrispASR engines) are shown as-is. The
     // source strings are hardcoded English in the engines, so this map matches that.
+    private static string FormatDb(double? dbfs)
+    {
+        return dbfs == null ? "(unknown)" : dbfs.Value.ToString("0.0", CultureInfo.InvariantCulture) + " dBFS";
+    }
+
     // Middle-truncates a file name so the tail (and thus the extension) stays visible.
     private static string CapFileName(string fileName, int maxLength)
     {
@@ -3956,11 +4017,17 @@ public partial class TextToSpeechViewModel : ObservableObject
                                          ?? Languages.FirstOrDefault(),
                     MossTtsCrispAsr => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.MossTtsCrispAsrLanguage)
                                        ?? Languages.FirstOrDefault(),
+                    Confucius4TtsCrispAsr => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.Confucius4TtsCrispAsrLanguage)
+                                             ?? Languages.FirstOrDefault(),
                     CosyVoice3CrispAsr => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.CosyVoice3CrispAsrLanguage)
                                           ?? Languages.FirstOrDefault(),
                     Qwen3TtsCrispAsr => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.Qwen3TtsCrispAsrLanguage)
                                         ?? Languages.FirstOrDefault(),
                     ChatterboxTtsCpp => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.ChatterboxCrispAsrLanguage)
+                                        ?? Languages.FirstOrDefault(),
+                    // Zonos leads with English (US) rather than "Auto" (the backend cannot
+                    // detect a language), so the first-entry fallback is the backend default.
+                    ZonosTtsCrispAsr => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.ZonosTtsCrispAsrLanguage)
                                         ?? Languages.FirstOrDefault(),
                     _ => Languages.FirstOrDefault(),
                 };
@@ -4085,9 +4152,39 @@ public partial class TextToSpeechViewModel : ObservableObject
                 IsEngineSettingsVisible = true;
                 IsModelDownloadVisible = true;
             }
+            else if (SelectedEngine is Confucius4TtsCrispAsr)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.Confucius4TtsCrispAsrModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+                IsEngineSettingsVisible = true;
+                IsModelDownloadVisible = true;
+            }
             else if (SelectedEngine is IndexTts25AudioCpp)
             {
                 SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.IndexTts25AudioCppModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+                IsEngineSettingsVisible = true;
+                IsModelDownloadVisible = true;
+            }
+            else if (SelectedEngine is HiggsTtsAudioCpp)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.HiggsTtsAudioCppModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+                IsEngineSettingsVisible = true;
+                IsModelDownloadVisible = true;
+            }
+            else if (SelectedEngine is FishTtsAudioCpp)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.FishTtsAudioCppModel);
                 if (string.IsNullOrEmpty(SelectedModel))
                 {
                     SelectedModel = Models.FirstOrDefault();

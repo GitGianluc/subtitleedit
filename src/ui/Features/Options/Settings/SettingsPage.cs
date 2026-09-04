@@ -402,6 +402,9 @@ public class SettingsPage : UserControl
             new SettingsItem(Se.Language.Options.Settings.FavoriteSubtitleFormats, () => MakeFavoritesGrid(_vm)),
             new SettingsItem(Se.Language.Options.Settings.FavoriteLanguages, () => MakeLanguageFavoritesGrid(_vm)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WebVttUseXTimestampMap, nameof(_vm.WebVttUseXTimestampMap)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.AssaAutoSetResolution, nameof(_vm.AssaAutoSetResolution)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.AssaAutoSetResolutionPrompt, nameof(_vm.AssaAutoSetResolutionPrompt),
+                new Binding(nameof(_vm.AssaAutoSetResolution)) { Source = _vm }),
         ]));
 
         sections.Add(new SettingsSection(Se.Language.General.SyntaxColoring, IconNames.Palette, "#d966a0",
@@ -447,7 +450,6 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowFullscreenButton, nameof(_vm.ShowFullscreenButton)),
             MakeCheckboxSetting(Se.Language.Options.Settings.FullscreenHideControls, nameof(_vm.FullscreenHideControls)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoOpenVideoFile, nameof(_vm.AutoOpenVideoFile)),
-            MakeCheckboxSetting(Se.Language.Options.Settings.MpvAudioKeepOpen, nameof(_vm.MpvAudioKeepOpen)),
             new SettingsItem(!_vm.IsLibMpvDownloadVisible, Se.Language.Options.Settings.DownloadMpv, () => new StackPanel
             {
                 Children =
@@ -571,6 +573,10 @@ public class SettingsPage : UserControl
                 0, 10, 120, _vm, nameof(_vm.WaveformSnapToShotChangeEndMaxSeconds), defaultValue: 1.5m)),
             new SettingsItem(Se.Language.Options.Settings.WaveformSnapToShotChangeSameShotEndMaxSeconds, () => UiUtil.MakeNumericUpDownOneDecimal(
                 0, 10, 120, _vm, nameof(_vm.WaveformSnapToShotChangeSameShotEndMaxSeconds), defaultValue: 0.5m)),
+            new SettingsItem(Se.Language.Options.Settings.WaveformGuessStartOffsetMs, () => UiUtil.MakeNumericUpDownInt(
+                0, 1000, 0, 120, _vm, nameof(_vm.WaveformGuessStartOffsetMs))),
+            new SettingsItem(Se.Language.Options.Settings.WaveformGuessEndOffsetMs, () => UiUtil.MakeNumericUpDownInt(
+                0, 1000, 0, 120, _vm, nameof(_vm.WaveformGuessEndOffsetMs))),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformShotChangesAutoGenerate, nameof(_vm.WaveformShotChangesAutoGenerate)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformFocusOnMouseOver, nameof(_vm.WaveformFocusOnMouseOver)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformFocusTextboxAfterInsertNew, nameof(_vm.WaveformFocusTextboxAfterInsertNew)),
