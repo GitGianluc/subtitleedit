@@ -53,6 +53,8 @@ public class MainView : ViewBase
         if (hostWindow != null)
         {
             _vm.Window = hostWindow;
+            // A user-assigned Alt+Space shortcut beats the Windows system menu (#14536).
+            UiUtil.SetWindowSystemMenuOverride(hostWindow, _vm.HasAltSpaceShortcut);
             _vm.Window.Closing += _vm.OnClosing;
             _vm.Window.Deactivated += _vm.OnWindowDeactivated;
             _vm.Window.Activated += _vm.OnWindowActivated;
@@ -60,6 +62,7 @@ public class MainView : ViewBase
             {
                 _vm.OnLoaded();
             };
+            _vm.Window.Closed += (_, _) => _vm.StopBackgroundWork();
 
             // Clipboard-manager compatibility (Ditto, CopyQ, ClipClip, ...) - see the
             // hook for what it intercepts and why (#13822).

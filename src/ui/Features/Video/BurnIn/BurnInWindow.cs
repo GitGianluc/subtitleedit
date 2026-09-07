@@ -54,30 +54,15 @@ public class BurnInWindow : Window
 
         // The left column (subtitle + video settings + target size) is taller than the middle
         // column's cut/preview/audio/video-info rows. Keeping all three boxes in one packed
-        // panel preserves the v5.1.0 look (no gaps), and the preview row's MinHeight below
-        // guarantees the panel fits in rows 0-3 - so it can never overflow into the
-        // progress-bar row (which used to draw the bar through the "File size in MB" field)
-        // - and the preview box never gets shorter than its label + player, so the player
-        // cannot spill over the audio settings box.
+        // panel preserves the v5.1.0 look (no gaps); the settings grid has a single star row, so
+        // the panel can never overflow into the progress-bar row (which used to draw the bar
+        // through the "File size in MB" field). The player has a fixed height, so the preview
+        // box hugs it and cannot spill over the audio settings box.
         var leftPanel = new StackPanel
         {
             Orientation = Orientation.Vertical,
             VerticalAlignment = VerticalAlignment.Top,
             Children = { subtitleSettingsView, videoSettingsView, targetFileSizeView },
-        };
-
-        // Rows 0-3 hold the panel at any size the window can normally reach, but not when the
-        // window ends up shorter than its own content minimum - which happens on screens too
-        // short for the dialog, where UiUtil lowers the minimum to keep the window on the working
-        // area. A StackPanel draws its overflow straight through whatever is below it, so the
-        // last box ("File size in MB") ended up under the progress bar (issue #13904). The scroll
-        // viewer keeps that overflow inside the cell and still reachable; it measures exactly like
-        // the panel, so at every normal size the layout is unchanged and no scroll bar appears.
-        var leftPanelScroller = new ScrollViewer
-        {
-            Content = leftPanel,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
         var buttonGenerate = new SplitButton
@@ -121,16 +106,36 @@ public class BurnInWindow : Window
         var previewColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) };
         var batchColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) };
 
-        var grid = new Grid
+        // The middle column has its own grid: the left panel must not span rows of a grid with
+        // a star row, since a spanning child's whole height is pushed into the star row, making
+        // the grid (and the window) as tall as the auto rows PLUS the left panel.
+        var middleColumn = new Grid
         {
             RowDefinitions =
             {
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // cut
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 400 }, // preview + batch list (never smaller than the preview box needs)
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // preview (sized by the fixed-height player)
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // audio
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // video info + target file size
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // progress bar
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // buttons
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // video info
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }, // filler: takes the extra height so the preview box hugs the player
+            },
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+            },
+            Width = double.NaN,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        middleColumn.Add(cutView, 0, 0);
+        middleColumn.Add(previewView, 1, 0);
+        middleColumn.Add(audioSettingsView, 2, 0);
+        middleColumn.Add(videoInfoView, 3, 0);
+
+        var settingsGrid = new Grid
+        {
+            RowDefinitions =
+            {
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
             },
             ColumnDefinitions =
             {
@@ -138,19 +143,61 @@ public class BurnInWindow : Window
                 previewColumn, // cut/preview/audio settings
                 batchColumn, // batch mode
             },
+            Width = double.NaN,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+
+        settingsGrid.Add(leftPanel, 0, 0);
+        settingsGrid.Add(middleColumn, 0, 1);
+        settingsGrid.Add(batchView, 0, 2);
+
+        // The settings area is taller than what a small or scaled screen can show (a maximized
+        // window on a 1366x768 laptop leaves about 700 DIPs; the preview row alone needs 400).
+        // UiUtil lowers the window minimum to the working area, so the rows below the fold - the
+        // "Generate" button row above all - were simply clipped off and unreachable (issues
+        // #13904, #14360). Scrolling the settings area, with the progress bar and the buttons
+        // kept outside the scroll viewer, keeps every control reachable on any screen.
+        //
+        // A ScrollViewer measures its content with unbounded height, which would turn the star
+        // preview row into an auto row and stop the preview from growing with the window. Pinning
+        // the content's MinHeight to the viewport height restores the fill: when the window is
+        // tall enough the grid fills it exactly like before (no scroll bar), and only when the
+        // viewport is shorter than the content minimum does the area scroll.
+        var settingsScroller = new ScrollViewer
+        {
+            Content = settingsGrid,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        settingsScroller.SizeChanged += (_, e) =>
+        {
+            var viewportHeight = Math.Max(0, e.NewSize.Height);
+            if (Math.Abs(settingsGrid.MinHeight - viewportHeight) > 0.5)
+            {
+                settingsGrid.MinHeight = viewportHeight;
+            }
+        };
+
+        var grid = new Grid
+        {
+            RowDefinitions =
+            {
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }, // settings + preview (scrolls when the window is too short)
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // progress bar
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // buttons
+            },
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+            },
             Margin = UiUtil.MakeWindowMargin(),
             Width = double.NaN,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
 
-        grid.Add(leftPanelScroller, 0, 0, 4, 1);  // rows 0-3 (cut + preview + audio + video info)
-        grid.Add(cutView, 0, 1);
-        grid.Add(previewView, 1, 1);
-        grid.Add(audioSettingsView, 2, 1);
-        grid.Add(videoInfoView, 3, 1);
-        grid.Add(batchView, 0, 2, 4, 1);
-        grid.Add(progressView, 4, 0, 1, 3);
-        grid.Add(buttonPanel, 5, 0, 1, 3);
+        grid.Add(settingsScroller, 0, 0);
+        grid.Add(progressView, 1, 0);
+        grid.Add(buttonPanel, 2, 0);
 
         Content = grid;
 
@@ -179,11 +226,11 @@ public class BurnInWindow : Window
             else
             {
                 player.Width = double.NaN;
-                player.Height = double.NaN;
-                player.MinWidth = 480;
-                player.MinHeight = 270;
+                player.Height = SinglePlayerHeight;
+                player.MinWidth = 400;
+                player.MinHeight = 0;
                 player.HorizontalAlignment = HorizontalAlignment.Stretch;
-                player.VerticalAlignment = VerticalAlignment.Stretch;
+                player.VerticalAlignment = VerticalAlignment.Top;
             }
         }
 
@@ -778,6 +825,8 @@ public class BurnInWindow : Window
         return UiUtil.MakeBorderForControl(grid).WithMarginBottom(5).WithMarginRight(5);
     }
 
+    private const double SinglePlayerHeight = 360;
+
     private static Border MakePreviewView(BurnInViewModel vm)
     {
 
@@ -789,17 +838,21 @@ public class BurnInWindow : Window
         vm.VideoPlayerControl = InitVideoPlayer.MakeVideoPlayer();
         vm.VideoPlayerControl.FullScreenIsVisible = true;
         vm.VideoPlayerControl.FullScreenCommand = vm.PreviewFullScreenCommand;
-        vm.VideoPlayerControl.MinWidth = 480;
-        vm.VideoPlayerControl.MinHeight = 270;
+        // Fixed height, stretched width: a stretching player made the preview box taller than
+        // the settings column (forcing the window to scroll), and a capped-but-centred one left
+        // empty bands above and below the video.
+        vm.VideoPlayerControl.MinWidth = 400;
+        vm.VideoPlayerControl.MinHeight = 0;
+        vm.VideoPlayerControl.Height = SinglePlayerHeight;
         vm.VideoPlayerControl.HorizontalAlignment = HorizontalAlignment.Stretch;
-        vm.VideoPlayerControl.VerticalAlignment = VerticalAlignment.Stretch;
+        vm.VideoPlayerControl.VerticalAlignment = VerticalAlignment.Top;
 
         var grid = new Grid
         {
             RowDefinitions =
             {
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }, // video player grows
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // video player (fixed height)
             },
             ColumnDefinitions =
             {

@@ -1,4 +1,4 @@
-using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ModelLicense;
+﻿using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ModelLicense;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Voices;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Download;
@@ -140,6 +140,7 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
     // Only the model and the backend are baked into the running server — voice is per request.
     private static string? _serverModelKey;
     private static string? _serverBackend;
+    private static string? _serverExeStamp;
     private static bool _processExitHooked;
     private static readonly StringBuilder _serverLog = new();
 
@@ -419,6 +420,11 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
             options["reference_text"] = referenceText;
         }
 
+        // The clone ends the way the reference ends (see CloneReferenceTail), so condition on a
+        // copy whose tail is trimmed, faded and padded with silence. Falls back to the file as is.
+        var referencePath = await CloneReferenceTail.PrepareAsync(indexVoice.FilePath, Name, cancellationToken);
+        var referencePrepared = !string.Equals(referencePath, indexVoice.FilePath, StringComparison.Ordinal);
+
         var payload = new Dictionary<string, object>
         {
             ["model"] = ServerModelId,
@@ -427,7 +433,7 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
             ["voice_ref"] = new Dictionary<string, object>
             {
                 ["type"] = "path",
-                ["path"] = indexVoice.FilePath,
+                ["path"] = referencePath,
             },
         };
 
@@ -437,73 +443,102 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
         }
 
         var body = JsonSerializer.Serialize(payload);
-        using var content = new StringContent(body, Encoding.UTF8, "application/json");
-        Se.WriteToolsLog($"Higgs Audio v3 (audio.cpp): POST {ServerBaseUrl}/v1/audio/speech (voice={indexVoice}, textLen={text.Length})");
+        Se.WriteToolsLog($"Higgs Audio v3 (audio.cpp): POST {ServerBaseUrl}/v1/audio/speech (voice={indexVoice}, textLen={text.Length}, preparedReference={referencePrepared})");
 
-        HttpResponseMessage response;
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            response = await HttpClient.PostAsync($"{ServerBaseUrl}/v1/audio/speech", content, cancellationToken);
-        }
-        catch (HttpRequestException ex)
-        {
-            var serverLog = SnapshotServerLog();
-            var launchCommand = _serverLaunchCommand;
-            var died = _serverProcess?.HasExited == true;
-            if (died)
+            // HttpClient disposes the request content with the request, so a retry needs a new one.
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            HttpResponseMessage response;
+            try
             {
-                StopServerInternal();
+                response = await HttpClient.PostAsync($"{ServerBaseUrl}/v1/audio/speech", content, cancellationToken);
             }
-
-            var failMsg = $"Higgs Audio v3 (audio.cpp) request failed — Voice: {indexVoice}, Text: {text}, "
-                + $"RequestJson: {body}, ServerExited: {died}, ServerLog: {serverLog}"
-                + LaunchCmdSuffix(launchCommand);
-            Se.LogError(ex, failMsg);
-            Se.WriteToolsLog(failMsg);
-
-            throw new InvalidOperationException(
-                (died
-                    ? "Higgs Audio v3 (audio.cpp) — the audiocpp_server process crashed during synthesis."
-                    : "Higgs Audio v3 (audio.cpp) request failed — the connection to audiocpp_server was dropped.")
-                + (string.IsNullOrEmpty(serverLog) ? string.Empty : $"{Environment.NewLine}Server log:{Environment.NewLine}{serverLog}")
-                + LaunchCmdSuffix(launchCommand),
-                ex);
-        }
-
-        using (response)
-        {
-            if (!response.IsSuccessStatusCode)
+            catch (HttpRequestException ex)
             {
-                var errorBody = await SafeReadErrorAsync(response, cancellationToken);
                 var serverLog = SnapshotServerLog();
                 var launchCommand = _serverLaunchCommand;
-                var errMsg = $"Higgs Audio v3 (audio.cpp) server error {(int)response.StatusCode} {response.StatusCode} — "
-                    + $"Voice: {indexVoice}, Text: {text}, RequestJson: {body}, "
-                    + $"ResponseBody: {errorBody}, ServerLog: {serverLog}"
+                var died = _serverProcess?.HasExited == true;
+                if (died)
+                {
+                    StopServerInternal();
+                }
+
+                var failMsg = $"Higgs Audio v3 (audio.cpp) request failed — Voice: {indexVoice}, Text: {text}, "
+                    + $"RequestJson: {body}, ServerExited: {died}, ServerLog: {serverLog}"
                     + LaunchCmdSuffix(launchCommand);
-                Se.LogError(errMsg);
-                Se.WriteToolsLog(errMsg);
+                Se.LogError(ex, failMsg);
+                Se.WriteToolsLog(failMsg);
+
                 throw new InvalidOperationException(
-                    $"Higgs Audio v3 (audio.cpp) synthesis failed ({(int)response.StatusCode}): {errorBody}"
+                    (died
+                        ? "Higgs Audio v3 (audio.cpp) — the audiocpp_server process crashed during synthesis."
+                        : "Higgs Audio v3 (audio.cpp) request failed — the connection to audiocpp_server was dropped.")
                     + (string.IsNullOrEmpty(serverLog) ? string.Empty : $"{Environment.NewLine}Server log:{Environment.NewLine}{serverLog}")
-                    + LaunchCmdSuffix(launchCommand));
+                    + LaunchCmdSuffix(launchCommand),
+                    ex);
             }
 
-            await using var fileStream = File.Create(outputFileName);
-            await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await contentStream.CopyToAsync(fileStream, cancellationToken);
+            using (response)
+            {
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await SafeReadErrorAsync(response, cancellationToken);
+                    if (attempt < MaxSynthesisAttempts && IsRunawayGenerationError(errorBody))
+                    {
+                        // The model never emitted its end-of-audio token and ran to max_tokens - a
+                        // rare sampling accident (1 in ~370 requests measured), not a property of
+                        // the line. No seed is sent, so a retry samples afresh and normally succeeds.
+                        Se.WriteToolsLog($"Higgs Audio v3 (audio.cpp): generation ran to max_tokens without an end-of-audio token (attempt {attempt} of {MaxSynthesisAttempts}) — retrying. Voice: {indexVoice}, Text: {text}");
+                        continue;
+                    }
+
+                    var serverLog = SnapshotServerLog();
+                    var launchCommand = _serverLaunchCommand;
+                    var errMsg = $"Higgs Audio v3 (audio.cpp) server error {(int)response.StatusCode} {response.StatusCode} — "
+                        + $"Voice: {indexVoice}, Text: {text}, RequestJson: {body}, "
+                        + $"ResponseBody: {errorBody}, ServerLog: {serverLog}"
+                        + LaunchCmdSuffix(launchCommand);
+                    Se.LogError(errMsg);
+                    Se.WriteToolsLog(errMsg);
+                    throw new InvalidOperationException(
+                        $"Higgs Audio v3 (audio.cpp) synthesis failed ({(int)response.StatusCode}): {errorBody}"
+                        + (string.IsNullOrEmpty(serverLog) ? string.Empty : $"{Environment.NewLine}Server log:{Environment.NewLine}{serverLog}")
+                        + LaunchCmdSuffix(launchCommand));
+                }
+
+                await using var fileStream = File.Create(outputFileName);
+                await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                await contentStream.CopyToAsync(fileStream, cancellationToken);
+            }
+
+            break;
         }
 
         return new TtsResult(outputFileName, text);
     }
 
+    /// <summary>One retry for a runaway generation; a second failure is reported.</summary>
+    private const int MaxSynthesisAttempts = 2;
+
+    /// <summary>
+    /// audio.cpp's "Higgs TTS generation reached max_tokens before EOC": the sampler never drew
+    /// the end-of-audio token. Matched loosely so a rewording upstream still counts.
+    /// </summary>
+    internal static bool IsRunawayGenerationError(string? errorBody) =>
+        !string.IsNullOrEmpty(errorBody)
+        && errorBody.Contains("max_tokens", StringComparison.OrdinalIgnoreCase)
+        && errorBody.Contains("EOC", StringComparison.Ordinal);
+
     private static async Task EnsureServerRunningAsync(string modelKey, CancellationToken ct)
     {
         var backend = AudioCppRuntime.GetBackend();
+        var exeStamp = AudioCppRuntime.GetServerExecutableStamp();
 
         if (_serverProcess is { HasExited: false } && _serverPort != 0
             && string.Equals(_serverModelKey, modelKey, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(_serverBackend, backend, StringComparison.OrdinalIgnoreCase))
+            && string.Equals(_serverBackend, backend, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_serverExeStamp, exeStamp, StringComparison.Ordinal))
         {
             return;
         }
@@ -513,7 +548,8 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
         {
             if (_serverProcess is { HasExited: false } && _serverPort != 0
                 && string.Equals(_serverModelKey, modelKey, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(_serverBackend, backend, StringComparison.OrdinalIgnoreCase))
+                && string.Equals(_serverBackend, backend, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(_serverExeStamp, exeStamp, StringComparison.Ordinal))
             {
                 return;
             }
@@ -584,6 +620,7 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
             _serverPort = port;
             _serverModelKey = modelKey;
             _serverBackend = backend;
+            _serverExeStamp = AudioCppRuntime.GetServerExecutableStamp();
             HookProcessExitOnce();
 
             // The config uses lazy_load, so /health answers within a second or two — the 4.7 GB
@@ -604,6 +641,7 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
                     _serverLaunchCommand = null;
                     _serverModelKey = null;
                     _serverBackend = null;
+                    _serverExeStamp = null;
                     throw new InvalidOperationException(
                         $"audiocpp_server exited during startup (code {exitCode}). "
                         + AudioCppRuntime.DescribeStartupExit(exitCode, backend)
@@ -772,6 +810,7 @@ public class HiggsTtsAudioCpp : ITtsEngine, IPerLineCloneEngine
         _serverLaunchCommand = null;
         _serverModelKey = null;
         _serverBackend = null;
+        _serverExeStamp = null;
         if (p == null)
         {
             return;

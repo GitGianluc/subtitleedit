@@ -371,6 +371,11 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             Se.Settings.Video.TextToSpeech.FishTtsAudioCppModel = SelectedModel ?? FishTtsAudioCpp.DefaultModelKey;
         }
+        else if (SelectedEngine is FireRedTts3AudioCpp)
+        {
+            Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppModel = SelectedModel ?? FireRedTts3AudioCpp.DefaultModelKey;
+            Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppLanguage = SelectedLanguage?.Name ?? string.Empty;
+        }
         else if (SelectedEngine is CosyVoice3CrispAsr)
         {
             Se.Settings.Video.TextToSpeech.CosyVoice3CrispAsrModel = SelectedModel ?? CosyVoice3CrispAsr.DefaultModelKey;
@@ -1073,6 +1078,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         Qwen3TtsCrispAsr => Se.Settings.Video.TextToSpeech.Qwen3TtsCrispAsrLanguage,
         ChatterboxTtsCpp => Se.Settings.Video.TextToSpeech.ChatterboxCrispAsrLanguage,
         ZonosTtsCrispAsr => Se.Settings.Video.TextToSpeech.ZonosTtsCrispAsrLanguage,
+        FireRedTts3AudioCpp => Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppLanguage,
         ElevenLabs => Se.Settings.Video.TextToSpeech.ElevenLabsLanguage,
         _ => null,
     };
@@ -1338,6 +1344,10 @@ public partial class TextToSpeechViewModel : ObservableObject
         if (keepAlive is not FishTtsAudioCpp)
         {
             FishTtsAudioCpp.StopServer();
+        }
+        if (keepAlive is not FireRedTts3AudioCpp)
+        {
+            FireRedTts3AudioCpp.StopServer();
         }
         if (keepAlive is not CosyVoice3CrispAsr)
         {
@@ -1638,6 +1648,9 @@ public partial class TextToSpeechViewModel : ObservableObject
             case FishTtsAudioCpp:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadFishTtsAudioCppModels(FishTtsAudioCpp.ResolveModelKey(SelectedModel)));
                 break;
+            case FireRedTts3AudioCpp:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadFireRedTts3AudioCppModels(FireRedTts3AudioCpp.ResolveModelKey(SelectedModel)));
+                break;
             case CosyVoice3CrispAsr:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadCosyVoice3CrispAsrModels(CosyVoice3CrispAsr.ResolveModelKey(SelectedModel)));
                 break;
@@ -1724,6 +1737,9 @@ public partial class TextToSpeechViewModel : ObservableObject
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
             FishTtsAudioCpp => FishTtsAudioCpp.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
+            FireRedTts3AudioCpp => FireRedTts3AudioCpp.AreModelsInstalled(modelKey)
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
             CosyVoice3CrispAsr => CosyVoice3CrispAsr.AreModelsInstalled(modelKey)
@@ -3263,21 +3279,24 @@ public partial class TextToSpeechViewModel : ObservableObject
     }
 
     /// <summary>
-    /// What the video says during <paramref name="paragraph"/> - the reference clip's transcript.
+    /// What the video says during <paramref name="paragraph"/> - the reference clip's transcript -
+    /// or null when that is not known.
     /// </summary>
     /// <remarks>
     /// The source-language line when a subtitle in the video's own language is loaded next to the
     /// translation, matched by start time rather than by index so a translation with merged or
-    /// split lines still lines up. Without an original loaded the line's own text is the best
-    /// guess left; that is right when dubbing a subtitle in the video's language, and merely
-    /// unhelpful (not harmful) when the text has already been translated.
+    /// split lines still lines up. Without an original loaded the answer is null, NOT the line's
+    /// own text: the cloning engines put that transcript in the same prompt as the text to speak,
+    /// and when the "transcript" is the translation of what the clip says, they are told the clip
+    /// already contains the target text - and Fish Audio S2 Pro then replays the clip (the
+    /// original-language audio) instead of speaking the line (#14480). A missing transcript
+    /// merely costs some clone fidelity on the engines that use it; a wrong one costs the dub.
     /// </remarks>
-    private string GetSpokenTextInVideo(Paragraph paragraph)
+    private string? GetSpokenTextInVideo(Paragraph paragraph)
     {
-        var fallback = HtmlUtil.RemoveHtmlTags(paragraph.Text ?? string.Empty, alsoSsaTags: true);
         if (_originalSubtitle == null || _originalSubtitle.Paragraphs.Count == 0)
         {
-            return Utilities.UnbreakLine(fallback);
+            return null;
         }
 
         // Exact start time is the normal case (a translation keeps the original's timings); the
@@ -3296,11 +3315,11 @@ public partial class TextToSpeechViewModel : ObservableObject
 
         if (Math.Abs(best.StartTime.TotalMilliseconds - paragraph.StartTime.TotalMilliseconds) > 500)
         {
-            return Utilities.UnbreakLine(fallback);
+            return null;
         }
 
         var original = HtmlUtil.RemoveHtmlTags(best.Text ?? string.Empty, alsoSsaTags: true);
-        return Utilities.UnbreakLine(string.IsNullOrWhiteSpace(original) ? fallback : original);
+        return string.IsNullOrWhiteSpace(original) ? null : Utilities.UnbreakLine(original);
     }
 
     /// <summary>
@@ -4029,6 +4048,10 @@ public partial class TextToSpeechViewModel : ObservableObject
                     // detect a language), so the first-entry fallback is the backend default.
                     ZonosTtsCrispAsr => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.ZonosTtsCrispAsrLanguage)
                                         ?? Languages.FirstOrDefault(),
+                    // FireRedTTS3 leads with English too: no detection, and audio.cpp's own
+                    // fallback for an unset tag is Chinese.
+                    FireRedTts3AudioCpp => Languages.FirstOrDefault(l => l.Name == Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppLanguage)
+                                           ?? Languages.FirstOrDefault(),
                     _ => Languages.FirstOrDefault(),
                 };
             }
@@ -4185,6 +4208,16 @@ public partial class TextToSpeechViewModel : ObservableObject
             else if (SelectedEngine is FishTtsAudioCpp)
             {
                 SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.FishTtsAudioCppModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+                IsEngineSettingsVisible = true;
+                IsModelDownloadVisible = true;
+            }
+            else if (SelectedEngine is FireRedTts3AudioCpp)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppModel);
                 if (string.IsNullOrEmpty(SelectedModel))
                 {
                     SelectedModel = Models.FirstOrDefault();

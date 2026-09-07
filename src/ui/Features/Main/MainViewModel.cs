@@ -596,7 +596,6 @@ public partial class MainViewModel :
 
     VideoPlayerUndockedViewModel? _videoPlayerUndockedViewModel;
     AudioVisualizerUndockedViewModel? _audioVisualizerUndockedViewModel;
-    bool _suppressUndockedTopmost;
     bool _foregroundBelongsToMainWindow;
     bool _undockedWindowPointerPressed;
     FindViewModel? _findViewModel;
@@ -678,9 +677,9 @@ public partial class MainViewModel :
     private bool _reapplyingReadOnlyReference;
     private bool _waveformBufferNoLayers;
     private HashSet<int>? _waveformBufferVisibleLayers;
-    private DispatcherTimer _positionTimer = new();
+    private UiTickPump _positionTimer = new(TimeSpan.FromMilliseconds(50)); // posted ticks, not a DispatcherTimer - see UiTickPump
     private DispatcherTimer _slowTimer = new();
-    private DispatcherTimer _cursorTimer = new(); // ~60 fps; drives only the waveform/video playhead cursor
+    private UiTickPump? _cursorTimer; // ~60 fps; drives only the waveform/video playhead cursor (a posted tick, not a DispatcherTimer - see UiTickPump)
 
     // Playhead interpolation state. When mpv resumes after a paused seek its time-pos stalls
     // for ~one audio-buffer interval (~200 ms) and then resyncs forward, which makes the
@@ -1752,12 +1751,76 @@ public partial class MainViewModel :
     // is held frozen at the pause spot, which would stall the first ~100 ms of playback.
     // Every play request in the app funnels through here (PlayVideo, the play half of
     // TogglePlayPause, and the player control's own PlayPauseRequested wiring), so this is also
-    // where the play-start gate is armed.
+    // where the play-start gate is armed and where a resume is redirected to the visible cursor.
     internal void CancelPausePlayheadFreeze()
     {
         CancelFrameStepPlayBlip(); // playback the user started must not be stopped by a stale blip
+        AlignPausedPlayerWithCursor();
         _pauseRequested = false;
         _playStartGate.PlayRequested(Stopwatch.GetTimestamp());
+    }
+
+    /// <summary>
+    /// Moves a paused mpv onto the drawn waveform cursor, so the next play starts from what is
+    /// on screen. While paused the cursor deliberately holds the spot where the user paused,
+    /// while mpv settles a wind-down further on - #12740 keeps that residual off the cursor,
+    /// and it grew from sub-visible back to up to ~0.2 s when the audio buffer returned to
+    /// mpv's default for #14523. Left alone, play resumed from mpv's settled spot: the audio
+    /// started past the cursor and the on-play resync yanked the cursor forward to meet it.
+    /// Called from the pause-settle branch of <see cref="UpdatePlayheadEstimate"/> - aligning
+    /// while paused gives mpv the whole pause to re-prime, so play stays a hot, instant
+    /// unpause (seeking at play time instead started the audio output starved: a brief
+    /// stutter, then a forward hop when the clock recovered) - and again from every play path
+    /// via <see cref="CancelPausePlayheadFreeze"/> as a fallback for a play pressed before the
+    /// settle ran. Seek-then-play paths (play line, play next, grid click-to-play...) pin the
+    /// playhead to their own target first; the pin guard leaves those untouched.
+    /// </summary>
+    private void AlignPausedPlayerWithCursor()
+    {
+        if (!_playheadValid || _playheadSeekTarget.HasValue)
+        {
+            return;
+        }
+
+        var vp = GetVideoPlayerControl();
+        if (vp == null || string.IsNullOrEmpty(_videoFileName))
+        {
+            return;
+        }
+
+        if (vp.VideoPlayer.IsPlaying)
+        {
+            return; // already running (or a blip/pause is mid-flight) - nothing settled to reconcile
+        }
+
+        var rawPosition = vp.VideoPlayer.Position;
+        if (IsSmpteTimingEnabled)
+        {
+            rawPosition = rawPosition * 1000.0 / 1001.0;
+        }
+
+        var residualSeconds = Math.Abs(_playheadEstimateSeconds - rawPosition);
+        if (residualSeconds <= PlayheadResyncOnPlayThresholdSeconds ||
+            residualSeconds >= PlayheadResyncThresholdSeconds)
+        {
+            // Below: within a frame - not worth a seek (the on-play resync leaves such a
+            // residual alone too). Above: the paused branch snaps a discontinuity this big to
+            // mpv's position within a tick, so the estimate is not what is standing on screen -
+            // this also shields any unpinned foreign seek still in flight from being undone.
+            return;
+        }
+
+        // Pin so the cursor cannot follow Position's contortions across the resume: mpv's
+        // paused-value cache makes it read as the seek target while paused, flip back to the
+        // stale settled clock the instant the unpause clears the cache, and land on the target
+        // only when the seek completes - and the paused branch would follow each flip as "a
+        // seek while paused" (the double jump on every resume). The pin's arrival is gated on
+        // the player's seek-restart signal, so none of those intermediate readings can release
+        // it early. The pin also makes a second pass through this funnel a no-op
+        // (TogglePlayPause funnels twice: the view model command and the control's
+        // PlayPauseRequested wiring).
+        vp.SeekTo(_playheadEstimateSeconds);
+        PinPlayheadTo(_playheadEstimateSeconds);
     }
 
     // The player's Stop button pauses and seeks to 0; freeze the cursor immediately and pin it to
@@ -5090,6 +5153,41 @@ public partial class MainViewModel :
         }
     }
 
+    /// <summary>
+    /// Runs the plain text importer pre-filled with <paramref name="fileName"/> and, like
+    /// SubtitleOpen does for real subtitles, pairs it with a matching media file next to it
+    /// (unsynced lyrics next to their .flac/.mp3, issue #14605).
+    /// </summary>
+    private async Task ImportPlainTextFromFile(string fileName, bool skipLoadVideo)
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var result = await ShowDialogAsync<ImportPlainTextWindow, ImportPlainTextViewModel>(vm => vm.Initialize(_subtitle, _videoFileName, fileName));
+        if (!result.OkPressed || result.Subtitles.Count == 0)
+        {
+            return;
+        }
+
+        _subtitleFileName = string.Empty;
+        ResetSubtitle();
+        foreach (var item in result.Subtitles)
+        {
+            Subtitles.Add(item);
+        }
+
+        Renumber();
+        _updateAudioVisualizer = true;
+
+        if (!skipLoadVideo && string.IsNullOrEmpty(_videoFileName) &&
+            FindVideoFileName.TryFindVideoFileName(fileName, out var videoFileName))
+        {
+            await VideoOpenFile(videoFileName);
+        }
+    }
+
     [RelayCommand]
     private async Task ImportCsvXlsxCustomColumns()
     {
@@ -5577,48 +5675,90 @@ public partial class MainViewModel :
     }
 
     /// <summary>
+    /// The volume threshold sweep of <see cref="WaveformGuessStart"/> and <see cref="WaveformGuessEnd"/>,
+    /// as percentages of the file's loudest peak, from the local noise floor <paramref name="lowPercent"/>
+    /// and the local peak <paramref name="highPercent"/> around the cue. The searches try each
+    /// threshold in turn and take the first boundary found, so the sweep must start above the
+    /// floor and below the speech.
+    /// <list type="bullet">
+    /// <item>Start (SE 4): a margin above the floor, bigger when the speech is loud. SE 4 capped
+    /// the margin at the local range only below 5%; quiet dialogue just above that got a sweep
+    /// starting above the speech itself, which then counted as silence and the cue snapped to a
+    /// spot right next to where it was (#14555). The cap now applies at every level.</item>
+    /// <item>End: SE 4 stopped at a fixed 14%, fine at normal levels but no sweep at all in a
+    /// file that is quiet overall, where the floor plus the margin is already above it (#14555).
+    /// The sweep now always spans at least 8 points - what 14 amounts to at normal levels.</item>
+    /// </list>
+    /// </summary>
+    private static (double Start, double End) GetGuessVolumeSweep(double lowPercent, double highPercent)
+    {
+        var add = highPercent > 40 ? 8.0 : 5.0;
+        add = Math.Min(add, highPercent - lowPercent - 0.3);
+        var start = lowPercent + add;
+        return (start, Math.Max(14, start + 8));
+    }
+
+    /// <summary>
     /// SE 4 parity ("guess start"): looks for the silence right before the speech that starts the
     /// selected line and moves the start cue there, snapping to a nearby shot change when there is
     /// one. Raising the volume threshold step by step finds the quietest boundary that still reads
-    /// as silence. Moving the start forward keeps the duration when that would otherwise break the
-    /// minimum duration/maximum CPS rules and there is room before the next line.
+    /// as silence. Moving the start forward stops at the minimum duration/maximum CPS floor, so
+    /// only the start ever moves (#14604; SE 4 shifted the whole line instead).
+    /// Every outcome is reported in the status bar (#14596): a silent no-op left "no silence found",
+    /// "already at the boundary" and "the shortcut never fired" indistinguishable (#14472, #14555).
     /// </summary>
     [RelayCommand]
     private void WaveformGuessStart()
     {
         var selected = SelectedSubtitle;
-        if (selected == null || AreTimeCodesLocked || AudioVisualizer?.WavePeaks == null)
+        if (selected == null)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartNoLineSelected);
+            return;
+        }
+
+        if (AreTimeCodesLocked)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartTimeCodesLocked);
+            return;
+        }
+
+        if (AudioVisualizer?.WavePeaks == null)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartNoWaveform);
             return;
         }
 
         var index = Subtitles.IndexOf(selected);
         if (index < 0)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessStartNoLineSelected);
             return;
         }
 
         const double silenceLengthInSeconds = 0.08;
         var startSeconds = selected.StartTime.TotalSeconds;
-        var lowPercent = AudioVisualizer.FindLowPercentage(startSeconds - 0.3, startSeconds + 0.1);
-        var highPercent = AudioVisualizer.FindHighPercentage(startSeconds - 0.3, startSeconds + 0.4);
-        var add = 5.0;
-        if (highPercent > 40)
-        {
-            add = 8;
-        }
-        else if (highPercent < 5)
-        {
-            add = highPercent - lowPercent - 0.3;
-        }
+        // The start may move back 1 s, or forward as far as the line's end allows (#14596): SE 4
+        // looked only 0.8 s ahead, so a start cue left more than that early never moved.
+        var minDisplayMs = Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
+        var reachSeconds = Math.Max(0.8, (selected.EndTime.TotalMilliseconds - minDisplayMs) / TimeCode.BaseUnit - startSeconds);
+        // The noise floor is read over the whole stretch the start can move back in (#14596): a
+        // cue that sits inside the speech has nothing but speech right around it, and a floor
+        // read there anchors the sweep so high that a soft syllable counts as the silence. The
+        // peak is read over the stretch ahead so the sweep starts above a noisy bed when the
+        // speech is loud.
+        var lowPercent = AudioVisualizer.FindLowPercentage(startSeconds - 1.0, startSeconds + 0.1);
+        var highPercent = AudioVisualizer.FindHighPercentage(startSeconds - 0.3, startSeconds + reachSeconds);
+        var sweep = GetGuessVolumeSweep(lowPercent, highPercent);
 
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var prev = GetPreviousWorkingRow(index);
-        var next = GetNextWorkingRow(index);
+        var alreadyAtBoundary = false;
+        var lastCandidateMs = double.NaN;
 
-        for (var startVolume = lowPercent + add; startVolume < 14; startVolume += 0.3)
+        for (var startVolume = sweep.Start; startVolume < sweep.End; startVolume += 0.3)
         {
-            var pos = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume, silenceLengthInSeconds, startSeconds);
+            var pos = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume, silenceLengthInSeconds, startSeconds, reachSeconds);
             if (pos < 0 || pos <= startSeconds - 1)
             {
                 continue;
@@ -5626,7 +5766,7 @@ public partial class MainViewModel :
 
             // A slightly higher threshold that still lands inside the same silence is the
             // better guess - it sits closer to the speech.
-            var pos2 = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume + 0.3, silenceLengthInSeconds, startSeconds);
+            var pos2 = AudioVisualizer.FindDataBelowThresholdBackForStart(startVolume + 0.3, silenceLengthInSeconds, startSeconds, reachSeconds);
             if (pos2 > pos && pos2 > startSeconds - 1)
             {
                 pos = pos2;
@@ -5640,7 +5780,9 @@ public partial class MainViewModel :
                 newStartMs = prev.EndTime.TotalMilliseconds + gapMs;
                 if (newStartMs >= selected.StartTime.TotalMilliseconds)
                 {
-                    break; // cannot move the start time
+                    // No threshold can help: anything earlier is clamped to the same spot.
+                    ShowStatus(string.Format(Se.Language.Main.Waveform.GuessStartNoRoomBeforePreviousLineX, selected.Number));
+                    return;
                 }
             }
 
@@ -5662,36 +5804,63 @@ public partial class MainViewModel :
                 }
             }
 
-            if (Math.Abs(selected.StartTime.TotalMilliseconds - newStartMs) < 10)
-            {
-                break; // difference too small
-            }
-
-            var durationMs = selected.EndTime.TotalMilliseconds - selected.StartTime.TotalMilliseconds;
-            var newEndMs = selected.EndTime.TotalMilliseconds;
             if (newStartMs > selected.StartTime.TotalMilliseconds)
             {
-                var newStart = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
-                var newCps = SubtitleTextInfoHelper.GetCharactersPerSecond(selected.Text, newStart, selected.EndTime);
-                if (newEndMs - newStartMs < Se.Settings.General.SubtitleMinimumDisplayMilliseconds ||
-                    newCps > Se.Settings.General.SubtitleMaximumCharactersPerSeconds)
+                // Shorten only as far as the minimum duration and maximum CPS allow, like guess
+                // end does. SE 4 moved the whole line instead (end along with the start) when the
+                // shortened line would break a rule, which on long text turned "guess start"
+                // into a shift of the line (#14604).
+                var endMs = selected.EndTime.TotalMilliseconds;
+                var maxStartMs = endMs - minDisplayMs;
+                var maxCps = Se.Settings.General.SubtitleMaximumCharactersPerSeconds;
+                if (maxCps > 0)
                 {
-                    // Shortening the line would break the rules, so move it instead - but only
-                    // when the next line is far enough away to take the whole duration.
-                    if (next == null || next.StartTime.TotalMilliseconds > newStartMs + durationMs + gapMs)
+                    var newStart = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
+                    var cps = SubtitleTextInfoHelper.GetCharactersPerSecond(selected.Text, newStart, selected.EndTime);
+                    if (cps > maxCps)
                     {
-                        newEndMs = newStartMs + durationMs;
+                        var characters = cps * (endMs - newStartMs) / TimeCode.BaseUnit;
+                        maxStartMs = Math.Min(maxStartMs, endMs - characters / maxCps * TimeCode.BaseUnit);
                     }
+                }
+
+                if (newStartMs > maxStartMs)
+                {
+                    newStartMs = Math.Max(maxStartMs, selected.StartTime.TotalMilliseconds);
                 }
             }
 
-            selected.SetTimes(
-                TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs),
-                TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newEndMs));
+            if (Math.Abs(selected.StartTime.TotalMilliseconds - newStartMs) < 10)
+            {
+                // The boundary at this threshold is where the cue already is. SE 4 stopped here,
+                // but on a noisy bed a low threshold is fooled by a single loud sample right next
+                // to the cue while a higher one sees through it to the real onset (#14596), so
+                // keep climbing; a cue that really is at the boundary ends with no change.
+                alreadyAtBoundary = true;
+                lastCandidateMs = newStartMs;
+                continue;
+            }
+
+            if (alreadyAtBoundary && !IsGuessJump(newStartMs, lastCandidateMs))
+            {
+                // A boundary that only creeps with the threshold is the soft edge of the speech
+                // the cue is already on; taking it would walk the cue into the speech a few ms
+                // per key press. Only a boundary that jumps clear is a silence seen through.
+                lastCandidateMs = newStartMs;
+                continue;
+            }
+
+            var movedMs = newStartMs - selected.StartTime.TotalMilliseconds;
+            selected.StartTime = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newStartMs);
 
             _updateAudioVisualizer = true;
-            break;
+            ShowStatus(string.Format(Se.Language.Main.Waveform.GuessStartMovedLineXByYMs, selected.Number, FormatSignedMs(movedMs)));
+            return;
         }
+
+        ShowStatus(string.Format(alreadyAtBoundary
+            ? Se.Language.Main.Waveform.GuessStartLineXAlreadyAtBoundary
+            : Se.Language.Main.Waveform.GuessStartNoSilenceFoundNearLineX, selected.Number));
     }
 
     /// <summary>
@@ -5705,14 +5874,28 @@ public partial class MainViewModel :
     private void WaveformGuessEnd()
     {
         var selected = SelectedSubtitle;
-        if (selected == null || AreTimeCodesLocked || AudioVisualizer?.WavePeaks == null)
+        if (selected == null)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndNoLineSelected);
+            return;
+        }
+
+        if (AreTimeCodesLocked)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndTimeCodesLocked);
+            return;
+        }
+
+        if (AudioVisualizer?.WavePeaks == null)
+        {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndNoWaveform);
             return;
         }
 
         var index = Subtitles.IndexOf(selected);
         if (index < 0)
         {
+            ShowStatus(Se.Language.Main.Waveform.GuessEndNoLineSelected);
             return;
         }
 
@@ -5720,26 +5903,26 @@ public partial class MainViewModel :
         var startMs = selected.StartTime.TotalMilliseconds;
         var endMs = selected.EndTime.TotalMilliseconds;
         var endSeconds = selected.EndTime.TotalSeconds;
+        // The end may move forward 1 s, or back as far as the line's start allows (#14596): the
+        // first version looked only 1 s back, so an end cue left hanging longer than that - the
+        // very cue "guess end" exists for - never moved.
+        var minDisplayMs = Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
+        var reachSeconds = Math.Max(1, endSeconds - (startMs + minDisplayMs) / TimeCode.BaseUnit);
         // The noise floor is read over the whole stretch the end can move in: a cue that cuts the
-        // speech short has nothing but speech right around it.
+        // speech short has nothing but speech right around it. The peak is read over the stretch
+        // back so the sweep starts above a noisy bed when the speech is loud.
         var lowPercent = AudioVisualizer.FindLowPercentage(endSeconds - 0.3, endSeconds + 1.0);
-        var highPercent = AudioVisualizer.FindHighPercentage(endSeconds - 0.4, endSeconds + 0.3);
-        var add = 5.0;
-        if (highPercent > 40)
-        {
-            add = 8;
-        }
-        else if (highPercent < 5)
-        {
-            add = highPercent - lowPercent - 0.3;
-        }
+        var highPercent = AudioVisualizer.FindHighPercentage(endSeconds - reachSeconds, endSeconds + 0.3);
+        var sweep = GetGuessVolumeSweep(lowPercent, highPercent);
 
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var next = GetNextWorkingRow(index);
+        var alreadyAtBoundary = false;
+        var lastCandidateMs = double.NaN;
 
-        for (var volume = lowPercent + add; volume < 14; volume += 0.3)
+        for (var volume = sweep.Start; volume < sweep.End; volume += 0.3)
         {
-            var pos = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume, silenceLengthInSeconds, endSeconds);
+            var pos = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume, silenceLengthInSeconds, endSeconds, reachSeconds);
             if (pos < 0 || pos >= endSeconds + 1)
             {
                 continue;
@@ -5747,7 +5930,7 @@ public partial class MainViewModel :
 
             // A slightly higher threshold that still lands inside the same silence is the
             // better guess - it sits closer to the speech.
-            var pos2 = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume + 0.3, silenceLengthInSeconds, endSeconds);
+            var pos2 = AudioVisualizer.FindDataBelowThresholdForwardForEnd(volume + 0.3, silenceLengthInSeconds, endSeconds, reachSeconds);
             if (pos2 >= 0 && pos2 < pos && pos2 * TimeCode.BaseUnit > startMs)
             {
                 pos = pos2;
@@ -5759,7 +5942,9 @@ public partial class MainViewModel :
                 newEndMs = next.StartTime.TotalMilliseconds - gapMs;
                 if (newEndMs <= endMs)
                 {
-                    break; // cannot move the end time
+                    // No threshold can help: anything later is clamped to the same spot.
+                    ShowStatus(string.Format(Se.Language.Main.Waveform.GuessEndNoRoomBeforeNextLineX, selected.Number));
+                    return;
                 }
             }
 
@@ -5785,7 +5970,7 @@ public partial class MainViewModel :
             if (newEndMs < endMs)
             {
                 // Shorten only as far as the minimum duration and maximum CPS allow.
-                var minEndMs = startMs + Se.Settings.General.SubtitleMinimumDisplayMilliseconds;
+                var minEndMs = startMs + minDisplayMs;
                 var maxCps = Se.Settings.General.SubtitleMaximumCharactersPerSeconds;
                 if (maxCps > 0)
                 {
@@ -5806,13 +5991,47 @@ public partial class MainViewModel :
 
             if (newEndMs <= startMs || Math.Abs(endMs - newEndMs) < 10)
             {
-                break; // nothing sensible to do / difference too small
+                // See WaveformGuessStart: keep climbing past a boundary that matches the cue.
+                alreadyAtBoundary = true;
+                lastCandidateMs = newEndMs;
+                continue;
+            }
+
+            if (alreadyAtBoundary && !IsGuessJump(newEndMs, lastCandidateMs))
+            {
+                lastCandidateMs = newEndMs;
+                continue;
             }
 
             selected.EndTime = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(newEndMs);
             _updateAudioVisualizer = true;
-            break;
+            ShowStatus(string.Format(Se.Language.Main.Waveform.GuessEndMovedLineXByYMs, selected.Number, FormatSignedMs(newEndMs - endMs)));
+            return;
         }
+
+        ShowStatus(string.Format(alreadyAtBoundary
+            ? Se.Language.Main.Waveform.GuessEndLineXAlreadyAtBoundary
+            : Se.Language.Main.Waveform.GuessEndNoSilenceFoundNearLineX, selected.Number));
+    }
+
+    /// <summary>
+    /// Whether a guess start/end boundary found at one threshold is a different silence from the
+    /// one found at the threshold below, rather than the same edge shifted a sample or two by the
+    /// higher threshold. Waveform peaks are 10 ms apart; a speech onset steeper than a tenth of
+    /// a percent of full scale per sample moves less than 25 ms per 0.3-point step.
+    /// </summary>
+    private static bool IsGuessJump(double candidateMs, double lastCandidateMs)
+    {
+        return Math.Abs(candidateMs - lastCandidateMs) >= 25;
+    }
+
+    /// <summary>
+    /// "+170" / "-180" for the guess start/end status texts: later is positive.
+    /// </summary>
+    private static string FormatSignedMs(double ms)
+    {
+        var rounded = (long)Math.Round(ms);
+        return rounded > 0 ? "+" + rounded.ToString(CultureInfo.InvariantCulture) : rounded.ToString(CultureInfo.InvariantCulture);
     }
 
     [RelayCommand]
@@ -8766,7 +8985,7 @@ public partial class MainViewModel :
                 // SE loses focus to another app. Mirrors the Find/Replace helper from #11243.
                 // The two undocked windows are still independent in Alt+Tab — KeepTopmost… is
                 // just a Z-order knob, not an ownership change.
-                WindowService.KeepTopmostWhileOwnerActive(window, Window!, () => _suppressUndockedTopmost);
+                WindowService.KeepTopmostWhileOwnerActive(window, Window!, () => WindowService.IsUndockedTopmostSuspended);
                 WatchUndockedForegroundSteal(window);
             });
 
@@ -8775,7 +8994,7 @@ public partial class MainViewModel :
                 _audioVisualizerUndockedViewModel = vm;
                 vm.Initialize(AudioVisualizer, this);
                 ReloadAudioVisualizer();
-                WindowService.KeepTopmostWhileOwnerActive(window, Window!, () => _suppressUndockedTopmost);
+                WindowService.KeepTopmostWhileOwnerActive(window, Window!, () => WindowService.IsUndockedTopmostSuspended);
                 WatchUndockedForegroundSteal(window);
             });
 
@@ -9024,19 +9243,19 @@ public partial class MainViewModel :
     /// </summary>
     internal void SetUndockedWindowsTopmost(bool topmost)
     {
-        // Remembered (and consulted by the KeepTopmostWhileOwnerActive registrations) so the
-        // helper's activation handler cannot re-assert Topmost while a menu or dialog is still
-        // open: opening a cascaded submenu (or a modal dialog) churns window activation, and the
-        // re-asserted Topmost put the tool windows back over the popup (#13187 follow-up) - and
-        // on Windows the SetWindowPos churn could steal OS activation from a just-opened modal
-        // dialog, leaving it drawn on top but inactive (#13325).
-        _suppressUndockedTopmost = !topmost;
-
+        // The KeepTopmostWhileOwnerActive registrations consult WindowService.IsUndockedTopmostSuspended
+        // live, so the helper's activation handler cannot re-assert Topmost while a menu or dialog
+        // is still open: opening a cascaded submenu (or a modal dialog) churns window activation,
+        // and the re-asserted Topmost put the tool windows back over the popup (#13187 follow-up) -
+        // and on Windows the SetWindowPos churn could steal OS activation from a just-opened modal
+        // dialog, leaving it drawn on top but inactive (#13325). Asking live rather than keeping a
+        // flag here is also what lets a leaked suspension heal instead of keeping the tool windows
+        // down for the session (#14622).
         foreach (var undockedWindow in new[] { _videoPlayerUndockedViewModel?.Window, _audioVisualizerUndockedViewModel?.Window })
         {
             if (undockedWindow != null)
             {
-                undockedWindow.Topmost = topmost && (Window?.IsActive == true || undockedWindow.IsActive);
+                WindowService.SetTopmost(undockedWindow, topmost && (Window?.IsActive == true || undockedWindow.IsActive), Window);
             }
         }
     }
@@ -9264,7 +9483,13 @@ public partial class MainViewModel :
                 }
             }
 
-            _subtitleFileName = Path.ChangeExtension(_videoFileName ?? "transcription", SelectedSubtitleFormat.Extension);
+            // The placeholder name is derived from the video, so honor the "Save as: append
+            // language code" setting right away - the title then matches what "Save as..."
+            // (and batch mode's "Add language code to file name") would produce (issue #14613).
+            var baseName = _videoFileName ?? "transcription";
+            var nameWithoutExtension = Path.Combine(Path.GetDirectoryName(baseName) ?? string.Empty, Path.GetFileNameWithoutExtension(baseName));
+            nameWithoutExtension = AppendLanguageCodeToFileName(nameWithoutExtension, _subtitle);
+            _subtitleFileName = nameWithoutExtension + SelectedSubtitleFormat.Extension;
             _converted = true;
 
             SetSubtitles(_subtitle);
@@ -12731,6 +12956,10 @@ public partial class MainViewModel :
         RebuildToolbar();
 
         MenuPlugins.IsVisible = Se.Settings.Appearance.ShowPluginsMenu;
+        if (OperatingSystem.IsMacOS())
+        {
+            Layout.InitNativeMacMenu.UpdatePluginsMenuVisibility(this);
+        }
 
         LockTimeCodes = Se.Settings.General.LockTimeCodes;
         IsWaveformToolbarVisible = Se.Settings.Waveform.ShowToolbar;
@@ -14060,31 +14289,49 @@ public partial class MainViewModel :
             return;
         }
 
-        // Determine direction from the first selected line: if any of its lines
-        // already start with a dash, toggle OFF for every selected line; else
-        // toggle ON. Matches SE 4 behaviour so a single hotkey flips the whole
-        // selection in one direction.
-        var firstLines = selectedItems[0].Text?.SplitToLines() ?? new List<string>();
-        var hasStartDash = firstLines.Any(l =>
-            HtmlUtil.RemoveHtmlTags(l, true).TrimStart().StartsWith('-'));
+        // Like SE 4: when one of the edit text boxes has focus only that column
+        // is toggled; with focus elsewhere (e.g. the grid) both columns follow.
+        var originalFocused = EditTextBoxOriginal.IsFocused;
+        var textFocused = EditTextBox.IsFocused;
+        var doText = !originalFocused;
+        var doOriginal = CanEditOriginal && !textFocused;
+        if (originalFocused && !CanEditOriginal)
+        {
+            doText = true;
+        }
 
         var dialogStyle = Enum.TryParse<DialogType>(Se.Settings.General.DialogStyle, out var ds)
             ? ds
             : DialogType.DashBothLinesWithSpace;
         var dialogHelper = new DialogSplitMerge { DialogStyle = dialogStyle, SkipLineEndingCheck = true };
 
-        foreach (var item in selectedItems)
+        // Each column decides its own direction (from the first selected line
+        // with text): if any of its lines already start with a dash, toggle OFF
+        // for every selected line; else toggle ON. Deciding once per column keeps
+        // a single hotkey flipping the whole selection in one direction and
+        // stops a dash-free column from forcing endless "add" on the other.
+        if (doText)
         {
-            item.Text = hasStartDash
-                ? RemoveDialogDashes(item.Text)
-                : AddDialogDashes(item.Text, dialogHelper);
-
-            // Keep the translation/original column in sync so the two views
-            // don't drift apart — matches what MergeManager.MergeSelectedLinesAsDialog
-            // already does for OriginalText.
-            if (CanEditOriginal && !string.IsNullOrEmpty(item.OriginalText))
+            var remove = HasStartDash(selectedItems.Select(i => i.Text));
+            foreach (var item in selectedItems)
             {
-                item.OriginalText = hasStartDash
+                item.Text = remove
+                    ? RemoveDialogDashes(item.Text)
+                    : AddDialogDashes(item.Text, dialogHelper);
+            }
+        }
+
+        if (doOriginal)
+        {
+            var remove = HasStartDash(selectedItems.Select(i => i.OriginalText));
+            foreach (var item in selectedItems)
+            {
+                if (string.IsNullOrEmpty(item.OriginalText))
+                {
+                    continue;
+                }
+
+                item.OriginalText = remove
                     ? RemoveDialogDashes(item.OriginalText)
                     : AddDialogDashes(item.OriginalText, dialogHelper);
             }
@@ -14093,7 +14340,20 @@ public partial class MainViewModel :
         _updateAudioVisualizer = true;
     }
 
-    private static string AddDialogDashes(string text, DialogSplitMerge dialogHelper)
+    private static bool HasStartDash(IEnumerable<string?> texts)
+    {
+        var first = texts.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+        if (first == null)
+        {
+            return false;
+        }
+
+        return first.SplitToLines().Any(l =>
+            HtmlUtil.RemoveHtmlTags(l, true).TrimStart().StartsWith('-') ||
+            HtmlUtil.RemoveHtmlTags(l, true).TrimStart().StartsWith('‐'));
+    }
+
+    internal static string AddDialogDashes(string text, DialogSplitMerge dialogHelper)
     {
         if (string.IsNullOrEmpty(text))
         {
@@ -14111,13 +14371,16 @@ public partial class MainViewModel :
         {
             var pre = string.Empty;
             var s = Utilities.SplitStartTags(line, ref pre);
+            // Strip whatever dashes are already there so repeated presses (or a
+            // half-dashed paragraph) never stack up "- - - ".
+            s = StripLeadingDashes(s);
             sb.Append(pre).Append("- ").AppendLine(s);
         }
 
         return dialogHelper.FixDashesAndSpaces(sb.ToString().Trim());
     }
 
-    private static string RemoveDialogDashes(string text)
+    internal static string RemoveDialogDashes(string text)
     {
         if (string.IsNullOrEmpty(text))
         {
@@ -14130,10 +14393,22 @@ public partial class MainViewModel :
         {
             var pre = string.Empty;
             var s = Utilities.SplitStartTags(line, ref pre);
-            sb.Append(pre).AppendLine(s.TrimStart('-', '‐').TrimStart());
+            sb.Append(pre).AppendLine(StripLeadingDashes(s));
         }
 
         return sb.ToString().Trim();
+    }
+
+    /// <summary>Removes every leading dash (and the spaces between them) from a line.</summary>
+    private static string StripLeadingDashes(string s)
+    {
+        s = s.TrimStart();
+        while (s.Length > 0 && (s[0] == '-' || s[0] == '‐' || s[0] == '–' || s[0] == '—'))
+        {
+            s = s.Substring(1).TrimStart();
+        }
+
+        return s;
     }
 
     [RelayCommand]
@@ -17026,6 +17301,9 @@ public partial class MainViewModel :
         }
 
         vp.VideoPlayer.Stop();
+        // Stop seeks to 0; pin the cursor there like the stop button does, and so the
+        // resume-from-cursor seek in PlayVideo can't pull playback back to the old spot.
+        PinPlayheadTo(0);
         PlayVideo(vp);
         _updateAudioVisualizer = true;
     }
@@ -20497,6 +20775,7 @@ public partial class MainViewModel :
         RunWithoutChangeDetection(() =>
         {
             var preIndex = SelectedSubtitleIndex ?? 0;
+            var preRowTop = GetSelectedRowViewportTop();
 
             var undoRedoObject = _undoRedoManager.Undo()!;
             if (undoRedoObject?.Subtitles == null)
@@ -20504,8 +20783,8 @@ public partial class MainViewModel :
                 return;
             }
 
-            RestoreUndoRedoState(undoRedoObject);
-            RestoreSelectionToPreviousIndex(preIndex);
+            RestoreUndoRedoState(undoRedoObject, scrollToSelected: false);
+            RestoreSelectionToPreviousIndex(preIndex, preRowTop);
             ShowUndoStatus();
         });
     }
@@ -20544,6 +20823,7 @@ public partial class MainViewModel :
         RunWithoutChangeDetection(() =>
         {
             var preIndex = SelectedSubtitleIndex ?? 0;
+            var preRowTop = GetSelectedRowViewportTop();
 
             var undoRedoObject = _undoRedoManager.Redo();
             if (undoRedoObject?.Subtitles == null)
@@ -20551,20 +20831,43 @@ public partial class MainViewModel :
                 return;
             }
 
-            RestoreUndoRedoState(undoRedoObject);
-            RestoreSelectionToPreviousIndex(preIndex);
+            RestoreUndoRedoState(undoRedoObject, scrollToSelected: false);
+            RestoreSelectionToPreviousIndex(preIndex, preRowTop);
             ShowRedoStatus();
         });
     }
 
-    private void RestoreSelectionToPreviousIndex(int preIndex)
+    /// <summary>
+    /// Where the current row sits in the grid's viewport, captured before undo/redo rebuild the
+    /// rows, so <see cref="RestoreSelectionToPreviousIndex"/> can put the restored row back at
+    /// the same height. Null when the row is off screen (or there is no grid yet).
+    /// </summary>
+    private double? GetSelectedRowViewportTop()
+    {
+        if (SubtitleGrid is not { } grid || SelectedSubtitle is not { } row)
+        {
+            return null;
+        }
+
+        return TableViewExtras.GetRowViewportTop(grid, row);
+    }
+
+    /// <summary>
+    /// Re-selects the row at <paramref name="preIndex"/> after undo/redo. With
+    /// <paramref name="preRowTop"/> given, the row is placed at that viewport height rather than
+    /// scrolled to the edge: the rebuild in <see cref="ReplaceSubtitles"/> detaches the
+    /// ItemsSource and so drops the scroll offset to 0, after which a plain ScrollIntoView parked
+    /// the current line at the top of the grid on every Undo - disorienting when the user was
+    /// working near the bottom of the view (#14517).
+    /// </summary>
+    private void RestoreSelectionToPreviousIndex(int preIndex, double? preRowTop = null)
     {
         if (Subtitles.Count == 0)
         {
             return;
         }
 
-        SelectAndScrollToRow(Math.Clamp(preIndex, 0, Subtitles.Count - 1));
+        SelectAndScrollToRow(Math.Clamp(preIndex, 0, Subtitles.Count - 1), null, keepRowViewportTop: preRowTop);
     }
 
     public UndoRedoItem MakeUndoRedoObject(string description)
@@ -20596,8 +20899,17 @@ public partial class MainViewModel :
         };
     }
 
-    private void RestoreUndoRedoState(UndoRedoItem undoRedoObject)
+    /// <param name="scrollToSelected">
+    /// Select and scroll to the snapshot's own selected line afterwards. Undo/redo pass false and
+    /// restore the pre-command row at its old viewport height themselves; the history dialog
+    /// (which restores several steps in a row) keeps the default.
+    /// </param>
+    private void RestoreUndoRedoState(UndoRedoItem undoRedoObject, bool scrollToSelected = true)
     {
+        // The rebuild below swaps the ItemsSource and refills the collection; the scroll anchor
+        // must not try to "restore" the view in the middle of that (see SelectAndScrollToRow).
+        using var anchorSuspended = SubtitleGrid is { } grid ? TableViewScrollAnchor.GetFor(grid)?.Suspend() : null;
+
         ReplaceSubtitles(undoRedoObject.Subtitles);
 
         _subtitleFileName = undoRedoObject.SubtitleFileName;
@@ -20621,7 +20933,10 @@ public partial class MainViewModel :
         _subtitleOriginal.Header = undoRedoObject.SubtitleHeaderOriginal;
         _subtitleOriginal.Footer = undoRedoObject.SubtitleFooterOriginal;
 
-        SelectAndScrollToRow(undoRedoObject.SelectedLines.First());
+        if (scrollToSelected)
+        {
+            SelectAndScrollToRow(undoRedoObject.SelectedLines.First());
+        }
     }
 
     public void AutoFitColumns()
@@ -20820,7 +21135,12 @@ public partial class MainViewModel :
     /// the scroll offset is left alone for a visible row (see <paramref name="row"/> callers such
     /// as delete/insert, which must not move the rows out from under the user).
     /// </param>
-    private void SelectAndScrollToRow(int index, SubtitleLineViewModel? row, bool? restoreGridFocus = null, bool centerEvenIfVisible = false)
+    /// <param name="keepRowViewportTop">
+    /// Put the target row's top edge at this viewport height instead of the usual "leave it if
+    /// visible, else scroll into view / center" - for callers that just rebuilt the grid from new
+    /// row objects (undo/redo) and captured where the row stood before (#14517).
+    /// </param>
+    private void SelectAndScrollToRow(int index, SubtitleLineViewModel? row, bool? restoreGridFocus = null, bool centerEvenIfVisible = false, double? keepRowViewportTop = null)
     {
         _shiftSelectAnchorIndex = -1;
         _shiftSelectCurrentIndex = -1;
@@ -20934,7 +21254,11 @@ public partial class MainViewModel :
                     EditTextBoxOriginal.CaretIndex = 0;
                 }
 
-                if (Se.Settings.General.SubtitleGridCenterSelectedRow && (!alreadyVisible || centerEvenIfVisible))
+                if (keepRowViewportTop is { } rowTop)
+                {
+                    TableViewExtras.PlaceRowAtViewportTop(SubtitleGrid, itemToScroll, rowTop);
+                }
+                else if (Se.Settings.General.SubtitleGridCenterSelectedRow && (!alreadyVisible || centerEvenIfVisible))
                 {
                     CenterSelectedRowInSubtitleGrid(itemToScroll);
                 }
@@ -22075,8 +22399,25 @@ public partial class MainViewModel :
 
             if (subtitle == null)
             {
+                // A .txt that no format and not even the generic importer could read is prose or
+                // lyrics: go straight to the plain text importer, as SE4 did (issue #14605).
+                if (string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) && FileUtil.IsPlainText(fileName))
+                {
+                    await ImportPlainTextFromFile(fileName, skipLoadVideo);
+                    return;
+                }
+
+                // Otherwise offer the importer on the prompt: users drop unsynced lyrics with
+                // other extensions too and expect them in the grid without a trip through
+                // the File menu.
                 var message = Se.Language.General.UnknownSubtitleFormat;
-                await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                var answer = await MessageBox.Show(Window!, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    custom1: Se.Language.File.Import.TitleImportPlainText);
+                if (answer == MessageBoxResult.Custom1)
+                {
+                    await ImportPlainTextFromFile(fileName, skipLoadVideo);
+                }
+
                 return;
             }
 
@@ -24313,51 +24654,7 @@ public partial class MainViewModel :
             }
         }
 
-        var language = LanguageAutoDetect.AutoDetectGoogleLanguageOrNull2(GetUpdateSubtitle());
-        if (!string.IsNullOrEmpty(language) && Se.Settings.General.SaveAsAppendLanguageCode != nameof(SaveAsLanguageAppendType.None))
-        {
-            var l = Iso639Dash2LanguageCode.List.FirstOrDefault(p => p.TwoLetterCode == language);
-            if (l != null)
-            {
-                if (newFileName.EndsWith("." + l.EnglishName, StringComparison.OrdinalIgnoreCase))
-                {
-                    newFileName = newFileName.Substring(0, newFileName.Length - (l.EnglishName.Length + 1));
-                }
-
-                if (newFileName.EndsWith("." + l.TwoLetterCode, StringComparison.OrdinalIgnoreCase))
-                {
-                    newFileName = newFileName.Substring(0, newFileName.Length - (l.TwoLetterCode.Length + 1));
-                }
-
-                if (newFileName.EndsWith("." + l.ThreeLetterCode, StringComparison.OrdinalIgnoreCase))
-                {
-                    newFileName = newFileName.Substring(0, newFileName.Length - (l.ThreeLetterCode.Length + 1));
-                }
-
-                if (l.BibliographicCode != l.ThreeLetterCode &&
-                    newFileName.EndsWith("." + l.BibliographicCode, StringComparison.OrdinalIgnoreCase))
-                {
-                    newFileName = newFileName.Substring(0, newFileName.Length - (l.BibliographicCode.Length + 1));
-                }
-
-                if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.TwoLetterLanguageCode))
-                {
-                    newFileName += "." + l.TwoLetterCode;
-                }
-                else if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.ThreeLEtterLanguageCode))
-                {
-                    newFileName += "." + l.ThreeLetterCode;
-                }
-                else if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.ThreeLetterLanguageCodeBibliographic))
-                {
-                    newFileName += "." + l.BibliographicCode;
-                }
-                else if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.FullLanguageName))
-                {
-                    newFileName += "." + l.EnglishName;
-                }
-            }
-        }
+        newFileName = AppendLanguageCodeToFileName(newFileName, GetUpdateSubtitle());
 
         newFileName = ApplyDefaultSaveLocation(newFileName);
 
@@ -24738,9 +25035,7 @@ public partial class MainViewModel :
 
     private void CleanUp()
     {
-        _positionTimer.Stop();
-        _cursorTimer.Stop();
-        _slowTimer.Stop();
+        StopBackgroundWork();
 
         if (_findViewModel != null)
         {
@@ -24848,6 +25143,8 @@ public partial class MainViewModel :
 
     internal void OnLoaded()
     {
+        StartBackgroundWork();
+
         if (OperatingSystem.IsMacOS())
         {
             Layout.InitNativeMacMenu.Sync(this);
@@ -25021,7 +25318,13 @@ public partial class MainViewModel :
 
             await Task.Delay(1000); // delay 1 second (off UI thread)          
 
-            _undoRedoManager.StartChangeDetection();
+            // The window can be gone again within that second (a test host, or a New window
+            // closed at once); StopBackgroundWork has run then and the poll must stay off.
+            if (_positionTimer.IsRunning)
+            {
+                _undoRedoManager.StartChangeDetection();
+            }
+
             _loading = false;
 
             Dispatcher.UIThread.Post(void () =>
@@ -28329,6 +28632,15 @@ public partial class MainViewModel :
         return true;
     }
 
+    /// <summary>
+    /// Alt+Space normally opens the Windows system menu (see UiUtil.TryHandleWindowSystemMenu),
+    /// but a shortcut the user bound to that chord must run instead (#14536).
+    /// </summary>
+    internal bool HasAltSpaceShortcut()
+    {
+        return _shortcutManager.HasShortcut("Alt", nameof(Key.Space));
+    }
+
     internal void OnKeyDownHandler(object? sender, KeyEventArgs keyEventArgs)
     {
         lock (_onKeyDownHandlerLock)
@@ -29520,22 +29832,33 @@ public partial class MainViewModel :
         if (_playheadSeekTarget.HasValue)
         {
             var target = _playheadSeekTarget.Value;
-            var arrived = Math.Abs(rawPosition - target) < PlayheadSeekArriveToleranceSeconds;
 
             // The 600 ms timeout is a guess at "the seek must have landed by now", and for a
             // slow seek (network share, cold spinning disk, heavy 4K hr-seek) it guesses wrong:
             // the pin expired mid-seek, the cursor snapped back to the old position, then jumped
             // again when the seek finally landed. When the player reports seek completion
             // exactly (mpv's MPV_EVENT_PLAYBACK_RESTART), don't give up while the seek is still
-            // in flight - hold the pin up to a hard cap instead. The restart signal is only ever
-            // used to extend the hold, never to release the pin early: a restart from an older
-            // seek in a scrub burst would otherwise release a newer pin onto a stale position.
+            // in flight - hold the pin up to a hard cap instead. A restart alone never releases
+            // the pin (a restart from an older seek in a scrub burst would release a newer pin
+            // onto a stale position); the position must be at the target too.
             var pinElapsedMs = (nowTimestamp - _playheadSeekTargetTs) * 1000.0 / Stopwatch.Frequency;
             var player = vp.VideoPlayer;
             var seekStillInFlight = player.SupportsPlaybackRestartEvents &&
                                     !player.HasPlaybackRestartedSince(_playheadSeekTargetTs);
             var timedOut = pinElapsedMs > PlayheadSeekPinTimeoutMs &&
                            (!seekStillInFlight || pinElapsedMs > PlayheadSeekPinMaxMs);
+
+            // "Arrived" needs more than the position reading near the target: while the pin's seek
+            // is in flight, Position is unreliable for this exact purpose - mpv's paused-value
+            // cache returns the seek target itself while paused, then flips back to the stale
+            // observed clock the moment an unpause clears it, then to the landed position (the
+            // resume-from-cursor seek showed all three within ~100 ms). A residual smaller than
+            // the tolerance also means the pre-seek position already reads as "arrived". So when
+            // the player reports seek completion exactly, arrival additionally requires that a
+            // restart has been observed since the pin was set - mpv's own word that the seek
+            // landed - and the timeout still bounds a seek whose restart never comes.
+            var arrived = Math.Abs(rawPosition - target) < PlayheadSeekArriveToleranceSeconds &&
+                          !seekStillInFlight;
 
             // A pause was requested but mpv still reports playing: it keeps decoding for ~100-200 ms and
             // its position runs on past the pinned spot, which is within the arrive tolerance, so "arrived"
@@ -29660,10 +29983,14 @@ public partial class MainViewModel :
                 // desync. Gated on a live raw clock so a paused-seek re-prime freeze can't trigger it.
                 _playheadEstimateSeconds = rawPosition;
             }
-            else if (drift > 0)
+            else if (drift > 0 && rawFrozenSeconds < PlayheadFreezeHoldSeconds)
             {
                 // Only ever nudge forward to close a lag (e.g. after a starved tick); never pull the
-                // cursor backward, which is what showed up as the sub-1x "slow" after the rush. Cap the
+                // cursor backward, which is what showed up as the sub-1x "slow" after the rush. Gated
+                // on a live raw clock like the snap above: while mpv's clock stands still (an hr-seek
+                // re-priming - e.g. the resume-from-cursor seek) the reported position is stale, and
+                // crawling toward it walks the cursor off the spot playback is about to start from,
+                // with no backward correction to ever undo it. Cap the
                 // per-tick correction against real elapsed time so the catch-up tops out around ~1.2x
                 // wall clock even when the timer is running slow - sizing it against the capped step
                 // (or only correcting on ticks where raw moved) throttled repayment to ~1.05x exactly
@@ -29746,8 +30073,18 @@ public partial class MainViewModel :
                 // mpv's clock has come to rest after the pause wind-down. Hold the cursor at the frozen
                 // keypress spot rather than snapping to mpv's settled frame: the video stopped where the
                 // cursor already is, and snapping here showed as the cursor shifting slightly after the
-                // numeric time display had already stopped (#12740). Just mark settled so we stop watching.
+                // numeric time display had already stopped (#12740).
                 _playheadPausedSettled = true;
+
+                // Then move mpv, not the cursor: seek the paused core back onto the cursor's spot
+                // now, while there is a whole pause ahead to absorb it. Doing this seek at play
+                // time instead meant unpausing onto a freshly flushed audio pipeline - the output
+                // started starved (heard as a brief stutter) and the cursor hopped forward when
+                // mpv's clock recovered. Aligned here, play is a plain hot unpause from exactly
+                // where the cursor stands; the restart-gated pin keeps the cursor still through
+                // the alignment, and the play paths keep the same call as a fallback for a play
+                // pressed before this settle ran.
+                AlignPausedPlayerWithCursor();
             }
             // else: still winding down, or settled with a standing residual and raw at rest -> hold frozen
             // (no easing, no delayed snap => no post-pause drift).
@@ -29799,7 +30136,7 @@ public partial class MainViewModel :
         Subtitles.CollectionChanged += OnSubtitlesCollectionChangedForMpv;
         foreach (var item in Subtitles)
             item.PropertyChanged += OnSubtitleItemChangedForMpv;
-        _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _positionTimer = new UiTickPump(TimeSpan.FromMilliseconds(50));
         _positionTimer.Tick += (s, e) =>
         {
             // update audio visualizer position if available
@@ -30032,7 +30369,6 @@ public partial class MainViewModel :
                 _avLastScrolling = isAvScrolloing;
             }
         };
-        _positionTimer.Start();
 
         // Dedicated high-frequency cursor timer (~60 fps). It only advances the interpolated
         // playhead and updates the waveform/video cursor position, which is cheap now that the
@@ -30046,8 +30382,15 @@ public partial class MainViewModel :
         // leaving the play-start lag-then-rush. Running at Normal (above Render) keeps the cursor timer
         // firing on time through the burst so the line glides smoothly. Its per-tick work is ~0.2 ms, so
         // it doesn't disturb video rendering.
-        _cursorTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(16) };
-        _cursorTimer.Tick += (s, e) =>
+        // Not a DispatcherTimer any more: with mpv embedded through its own native window (the
+        // Windows default), the platform timer message that a DispatcherTimer rides on stopped
+        // waking the message loop for 100-1000 ms around every play/pause - the UI thread sat idle
+        // in GetMessage with the tick overdue - while a posted message woke it at once. The cursor
+        // jumped ahead at every play and the time display froze (#14523 follow-up). UiTickPump
+        // posts each tick from its own thread, and executing a posted tick also promotes the
+        // dispatcher's other due timers, so the 50 ms position/display timers stop freezing too.
+        _cursorTimer?.Stop();
+        _cursorTimer = new UiTickPump(TimeSpan.FromMilliseconds(16), () =>
         {
             // Fast settle for the on-video subtitle preview: waiting for the 400 ms _slowTimer
             // added up to 400 ms of tick alignment on top of the settle window, so the preview
@@ -30130,8 +30473,7 @@ public partial class MainViewModel :
 
                 _pausedCenterLastSeconds = est;
             }
-        };
-        _cursorTimer.Start();
+        }, DispatcherPriority.Normal);
 
         _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _slowTimer.Tick += (s, e) =>
@@ -30161,7 +30503,35 @@ public partial class MainViewModel :
 
             TryRefreshVideoPreview();
         };
+    }
+
+    /// <summary>
+    /// Starts the position/cursor/slow timers. Called from <see cref="OnLoaded"/>, not from the
+    /// constructor: a view model without a shown window (File > New window before it is up,
+    /// and every headless test that builds one) has nothing for them to drive, and each
+    /// UiTickPump is a dedicated thread - hundreds of never-stopped 16/50 ms pumps and 400 ms
+    /// hash passes were running on the shared UI thread by the end of a test run.
+    /// </summary>
+    internal void StartBackgroundWork()
+    {
+        _positionTimer.Start();
+        _cursorTimer?.Start();
         _slowTimer.Start();
+    }
+
+    /// <summary>
+    /// Stops the timers and the undo change-detection poll. Runs on <see cref="CleanUp"/> and
+    /// when the host window closes (also without OnClosing, e.g. a test host that detaches the
+    /// save prompt), so an editor window's pumps do not outlive it - the change-detection tick
+    /// in particular does a blocking Dispatcher.Invoke and parked one thread-pool thread per
+    /// closed window for the rest of the process.
+    /// </summary>
+    internal void StopBackgroundWork()
+    {
+        _positionTimer.Stop();
+        _cursorTimer?.Stop();
+        _slowTimer.Stop();
+        _undoRedoManager.StopChangeDetection();
     }
 
     // Preview settle window after the last keystroke. Deliberately shorter than
@@ -30365,6 +30735,63 @@ public partial class MainViewModel :
         {
             _autoSaveInProgress = false;
         }
+    }
+
+    /// <summary>
+    /// Applies the "Save as: append language code" setting to an extension-less file name:
+    /// strips any language token already on it, then appends the configured form of the
+    /// subtitle's auto-detected language. Returns the name unchanged when the setting is off
+    /// or no language can be detected.
+    /// </summary>
+    private string AppendLanguageCodeToFileName(string newFileName, Subtitle subtitle)
+    {
+        var language = LanguageAutoDetect.AutoDetectGoogleLanguageOrNull2(subtitle);
+        if (!string.IsNullOrEmpty(language) && Se.Settings.General.SaveAsAppendLanguageCode != nameof(SaveAsLanguageAppendType.None))
+        {
+            var l = Iso639Dash2LanguageCode.List.FirstOrDefault(p => p.TwoLetterCode == language);
+            if (l != null)
+            {
+                if (newFileName.EndsWith("." + l.EnglishName, StringComparison.OrdinalIgnoreCase))
+                {
+                    newFileName = newFileName.Substring(0, newFileName.Length - (l.EnglishName.Length + 1));
+                }
+
+                if (newFileName.EndsWith("." + l.TwoLetterCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    newFileName = newFileName.Substring(0, newFileName.Length - (l.TwoLetterCode.Length + 1));
+                }
+
+                if (newFileName.EndsWith("." + l.ThreeLetterCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    newFileName = newFileName.Substring(0, newFileName.Length - (l.ThreeLetterCode.Length + 1));
+                }
+
+                if (l.BibliographicCode != l.ThreeLetterCode &&
+                    newFileName.EndsWith("." + l.BibliographicCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    newFileName = newFileName.Substring(0, newFileName.Length - (l.BibliographicCode.Length + 1));
+                }
+
+                if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.TwoLetterLanguageCode))
+                {
+                    newFileName += "." + l.TwoLetterCode;
+                }
+                else if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.ThreeLEtterLanguageCode))
+                {
+                    newFileName += "." + l.ThreeLetterCode;
+                }
+                else if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.ThreeLetterLanguageCodeBibliographic))
+                {
+                    newFileName += "." + l.BibliographicCode;
+                }
+                else if (Se.Settings.General.SaveAsAppendLanguageCode == nameof(SaveAsLanguageAppendType.FullLanguageName))
+                {
+                    newFileName += "." + l.EnglishName;
+                }
+            }
+        }
+
+        return newFileName;
     }
 
     private void UpdateTitleStatus(int mainHash, int originalHash)
@@ -30933,6 +31360,7 @@ public partial class MainViewModel :
             if (Se.Settings.General.SubtitleDoubleClickAction == SubtitleDoubleClickActionType.GoToSubtitleAndPlay.ToString())
             {
                 vp.Position = seconds;
+                PinPlayheadTo(seconds);
                 PlayVideo(vp);
                 AudioVisualizerCenterOnPositionIfNeeded(selectedItem, seconds);
                 return;
@@ -30950,6 +31378,7 @@ public partial class MainViewModel :
             if (Se.Settings.General.SubtitleDoubleClickAction == SubtitleDoubleClickActionType.GoToSubtitleAndPlayAndFocusTextBox.ToString())
             {
                 vp.Position = seconds;
+                PinPlayheadTo(seconds);
                 PlayVideo(vp);
                 AudioVisualizerCenterOnPositionIfNeeded(selectedItem, seconds);
                 FocusEditTextBox();
@@ -30985,6 +31414,7 @@ public partial class MainViewModel :
             {
                 seconds = Math.Max(0, seconds - 1.0);
                 vp.Position = seconds;
+                PinPlayheadTo(seconds);
                 PlayVideo(vp);
                 AudioVisualizerCenterOnPositionIfNeeded(selectedItem, seconds);
                 return;
@@ -31106,6 +31536,7 @@ public partial class MainViewModel :
             if (Se.Settings.General.SubtitleSingleClickAction == SubtitleSingleClickActionType.GoToSubtitleAndPlay.ToString())
             {
                 vp.Position = seconds;
+                PinPlayheadTo(seconds);
                 PlayVideo(vp);
                 AudioVisualizerCenterOnPositionIfNeeded(selectedItem, seconds);
                 return;
@@ -31123,6 +31554,7 @@ public partial class MainViewModel :
             if (Se.Settings.General.SubtitleSingleClickAction == SubtitleSingleClickActionType.GoToSubtitleAndPlayAndFocusTextBox.ToString())
             {
                 vp.Position = seconds;
+                PinPlayheadTo(seconds);
                 PlayVideo(vp);
                 AudioVisualizerCenterOnPositionIfNeeded(selectedItem, seconds);
                 FocusEditTextBox();

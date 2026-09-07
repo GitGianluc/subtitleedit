@@ -518,14 +518,28 @@ public static class UiUtil
         return button;
     }
 
+    /// <summary>
+    /// The dialog's accept button. <see cref="Button.IsDefault"/> makes it click on an unhandled
+    /// Enter anywhere in the window - the role WinForms' AcceptButton had in Subtitle Edit 4.
+    /// Initial focus deliberately does not land on this button (a focused button also clicks on
+    /// bare Space, see <see cref="FocusOnFirstActivation"/>), so without this Enter would reach OK
+    /// only after tabbing to it (#14586). Controls that give Enter their own meaning - a multi-line
+    /// TextBox, an open ComboBox, a focused Cancel button - mark the key handled first and win.
+    /// A window key handler that runs OK on Enter itself must also set Handled, or OK runs twice
+    /// (InitialFocusConventionTests checks that).
+    /// </summary>
     public static Button MakeButtonOk(IRelayCommand? command)
     {
-        return MakeButton(Se.Language.General.Ok, command);
+        var button = MakeButton(Se.Language.General.Ok, command);
+        button.IsDefault = true;
+        return button;
     }
 
     public static Button MakeButtonDone(IRelayCommand? command)
     {
-        return MakeButton(Se.Language.General.Done, command);
+        var button = MakeButton(Se.Language.General.Done, command);
+        button.IsDefault = true;
+        return button;
     }
 
     public static Button MakeButtonCancel(IRelayCommand? command)
@@ -2937,7 +2951,7 @@ public static class UiUtil
         return control;
     }
 
-    private static bool IsDarkTheme()
+    public static bool IsDarkTheme()
     {
         var app = Application.Current;
         if (app == null)
@@ -3564,6 +3578,25 @@ public static class UiUtil
                string.Equals(ShortcutManager.GetShortcutKey(e).ToString(), keyName, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static readonly ConditionalWeakTable<Window, Func<bool>> WindowSystemMenuOverrides = new();
+
+    /// <summary>
+    /// Lets a window claim Alt+Space for itself: while <paramref name="isOverridden"/> returns
+    /// true, <see cref="TryHandleWindowSystemMenu"/> leaves the key event alone instead of
+    /// opening the Windows system menu. The main window uses this so a user-assigned Alt+Space
+    /// shortcut wins over the Windows convention (#14536), mirroring the F10 rule; the shortcut
+    /// key-capture window uses it so the chord can be recorded at all.
+    /// </summary>
+    internal static void SetWindowSystemMenuOverride(Window window, Func<bool> isOverridden)
+    {
+        WindowSystemMenuOverrides.AddOrUpdate(window, isOverridden);
+    }
+
+    internal static bool IsWindowSystemMenuOverridden(Window window)
+    {
+        return WindowSystemMenuOverrides.TryGetValue(window, out var isOverridden) && isOverridden();
+    }
+
     internal static bool TryHandleWindowSystemMenu(KeyEventArgs e, Window? window)
     {
         if (!OperatingSystem.IsWindows() || window == null)
@@ -3573,6 +3606,12 @@ public static class UiUtil
 
         if (e.Key == Key.Space && e.KeyModifiers == KeyModifiers.Alt)
         {
+            if (IsWindowSystemMenuOverridden(window))
+            {
+                return false;
+            }
+
+
             SystemMenu.Show(window);
             e.Handled = true;
             return true;
