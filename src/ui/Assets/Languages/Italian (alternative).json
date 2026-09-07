@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.2.0-rc2",
+  "version": "v5.2.0-rc5",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -1000,7 +1000,21 @@
       "textPreviousHint": "Riproduci sottotitolo precedente e fermati alla fine {0}",
       "textPlayHint": "Riproduci sottotitolo attuale e fermati alla fine {0}",
       "textPauseHint": "Metti in pausa la riproduzione {0}",
-      "textNextHint": "Riproduci sottotitolo successivo e fermati alla fine {0}"
+      "textNextHint": "Riproduci sottotitolo successivo e fermati alla fine {0}",
+      "guessStartNoLineSelected": "Individua inizio stimato: nessuna riga selezionata",
+      "guessStartTimeCodesLocked": "Individua inizio stimato: i codici temporali sono bloccati",
+      "guessStartNoWaveform": "Individua inizio stimato: nessuna forma d’onda",
+      "guessStartNoRoomBeforePreviousLineX": "Individua inizio stimato: nessun intervallo prima della riga {0} rispetto alla precedente",
+      "guessStartLineXAlreadyAtBoundary": "Individua inizio stimato: la riga {0} comincia già in corrispondenza dell’avvio del parlato",
+      "guessStartNoSilenceFoundNearLineX": "Individua inizio stimato: nessun silenzio trovato in vicinanza della riga {0}",
+      "guessStartMovedLineXByYMs": "Individua inizio stimato: attacco della riga {0} spostato di {1} ms",
+      "guessEndNoLineSelected": "Individua fine stimata: nessuna riga selezionata",
+      "guessEndTimeCodesLocked": "Individua fine stimata: i codici temporali sono bloccati",
+      "guessEndNoWaveform": "Individua fine stimata: nessuna forma d’onda",
+      "guessEndNoRoomBeforeNextLineX": "Individua fine stimata: nessun intervallo dopo la riga {0} rispetto alla successiva",
+      "guessEndLineXAlreadyAtBoundary": "Individua fine stimata: la riga {0} termina già in corrispondenza della conclusione del parlato",
+      "guessEndNoSilenceFoundNearLineX": "Individua fine stimata: nessun silenzio trovato in vicinanza della riga {0}",
+      "guessEndMovedLineXByYMs": "Individua fine stimata: stacco della riga {0} spostato di {1} ms"
     },
     "audioTrackIsNowX": "La traccia audio è ora “{0}”",
     "audioTrackX": "Traccia audio {0}",
