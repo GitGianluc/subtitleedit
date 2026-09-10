@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.2.0-rc5",
+  "version": "v5.2.0-rc7",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -402,6 +402,8 @@
     "openVideoFileTitle": "Apri file video",
     "optimalCharactersPerSecond": "Caratteri/sec ottimali",
     "options": "Opzioni",
+    "originalSubtitleClosed": "Sottotitolo originale chiuso",
+    "originalSubtitleLoadedX": "Sottotitolo originale caricato: {0}",
     "originalText": "Testo originale",
     "outline": "Contorno",
     "outlineColor": "Colore contorno",
@@ -2366,6 +2368,7 @@
       "cloneVoicePerLinePreparing": "Estrazione della voce per ogni riga del video in corso…",
       "cloneVoicePerLineNeedsVideo": "La clonazione della voce per ogni riga richiede il video a cui appartengono i sottotitoli; apri il video e riprova.",
       "cloneVoicePerLineNoClips": "Non è stato possibile estrarre l’audio dal video, quindi non esiste materiale da cui clonare. Controlla che il video contenga una traccia audio.",
+      "cloneVoicePerLineNeedsOriginalSubtitleX": "{0} può clonare una riga solo se rileva che cosa viene detto nel video in quel punto, informazione che ricava dal sottotitolo nella lingua originale. Poiché non è stato caricato alcun sottotitolo originale, ogni riga verrà letta dalla prima voce importata anziché dalla voce effettiva del video.\n\nApri il sottotitolo originale (File > Apri originale…) accanto alla traduzione, quindi avvia nuovamente la generazione.",
       "voiceCloneConsentTitle": "Clonazione della voce: prima di cominciare",
       "voiceCloneConsentHeader": "Stai per clonare una voce",
       "voiceCloneConsentIntro": "La clonazione copia la voce di una persona reale. Questo comporta il rispetto di regole nella maggior parte dei paesi e, nell’UE, di obblighi legali che ricadono sull’utente e non su Subtitle Edit. Sei invitato a leggere queste informazioni almeno una volta.",
@@ -2668,6 +2671,7 @@
     "cloneVoiceExtractFailed": "Impossibile estrarre l’audio per la riga selezionata.",
     "toggleShotChange": "Attiva/disattiva cambio di inquadratura",
     "resetWaveformZoomAndSpeed": "Ripristina zoom e velocità della forma d’onda",
+    "showOriginalSubtitle": "Mostra sottotitolo originale",
     "showOnlyWaveform": "Mostra solo forma d’onda",
     "showOnlySpectrogram": "Mostra solo spettrogramma",
     "showWaveformAndSpectrogram": "Mostra forma d’onda e spettrogramma",
