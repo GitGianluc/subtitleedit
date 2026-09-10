@@ -97,7 +97,6 @@ public partial class TextToSpeechViewModel : ObservableObject
     [ObservableProperty] private bool _doGenerateVideoFile;
     [ObservableProperty] private bool _isEdgeTtsEngine;
     [ObservableProperty] private bool _isGenerating;
-    [ObservableProperty] private bool _isNotGenerating;
     [ObservableProperty] private bool _isEngineSettingsVisible;
     [ObservableProperty] private bool _isModelDownloadVisible;
     [ObservableProperty] private string _progressText;
@@ -187,7 +186,6 @@ public partial class TextToSpeechViewModel : ObservableObject
         IsVoiceTestEnabled = true;
         IsVoiceComboEnabled = true;
         IsGenerating = false;
-        IsNotGenerating = true;
         KeyFile = string.Empty;
         Instruction = string.Empty;
         CastButtonText = Se.Language.Video.TextToSpeech.SetupCast;
@@ -612,6 +610,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         bool isOmniVoiceCrispAsr = false;
         bool isMossTts = false;
         bool isQwen3Clone = false;
+        bool isFireRedTts3 = false;
         if (voice.EngineVoice is CosyVoice3Voice cosy && !string.IsNullOrEmpty(cosy.FilePath) && string.IsNullOrEmpty(cosy.RefText))
         {
             wavPath = cosy.FilePath;
@@ -653,6 +652,21 @@ public partial class TextToSpeechViewModel : ObservableObject
                 isMossTts = true;
             }
         }
+        else if (voice.EngineVoice is IndexTtsVoice audioCppVoice
+                 && !string.IsNullOrEmpty(audioCppVoice.FilePath)
+                 && SelectedEngine is FireRedTts3AudioCpp)
+        {
+            // IndexTtsVoice is shared by the four audio.cpp engines, and only FireRedTTS3 cannot
+            // clone without the transcript (its prompt pairs the reference audio with its text;
+            // without it the model returns noise - #14480). The others clone from the audio
+            // alone, so the engine decides, not the voice type.
+            var existing = Qwen3TtsCrispAsr.TryReadUsableTranscript(audioCppVoice.FilePath);
+            if (string.IsNullOrEmpty(existing))
+            {
+                wavPath = audioCppVoice.FilePath;
+                isFireRedTts3 = true;
+            }
+        }
         else if (voice.EngineVoice is Voices.Qwen3TtsVoice qwen3 && !string.IsNullOrEmpty(qwen3.FilePath))
         {
             // Only the Voice clone (Base) model carries a FilePath; CustomVoice/VoiceDesign leave
@@ -679,7 +693,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             // transcript (the sibling engines keep their type-or-click-STT prompt). The result is
             // still shown for a quick review/correction since clone quality is sensitive to it.
             var initialText = string.Empty;
-            if (isQwen3Clone)
+            if (isQwen3Clone || isFireRedTts3)
             {
                 initialText = await RunSpeechToTextForRefTextAsync(audioFileName) ?? string.Empty;
             }
@@ -719,7 +733,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             {
                 written = MossTtsCrispAsr.TryWriteRefTextSidecar(wavPath, result.Text);
             }
-            else if (isQwen3Clone)
+            else if (isQwen3Clone || isFireRedTts3)
             {
                 written = Qwen3TtsCrispAsr.TryWriteRefTextSidecar(wavPath, result.Text);
             }
@@ -996,7 +1010,6 @@ public partial class TextToSpeechViewModel : ObservableObject
         _cancellationTokenSource = new CancellationTokenSource();
         _cancellationToken = _cancellationTokenSource.Token;
         IsGenerating = false;
-        IsNotGenerating = true;
         IsEngineSettingsVisible = false;
         IsModelDownloadVisible = false;
         ProgressText = string.Empty;
@@ -1454,7 +1467,6 @@ public partial class TextToSpeechViewModel : ObservableObject
         ProgressEtaText = string.Empty;
         _generateStopwatch.Restart();
         IsGenerating = true;
-        IsNotGenerating = false;
         ProgressOpacity = 1.0;
         SaveSettings();
 
@@ -1555,7 +1567,6 @@ public partial class TextToSpeechViewModel : ObservableObject
         ProgressPercentText = string.Empty;
         ProgressEtaText = string.Empty;
         IsGenerating = false;
-        IsNotGenerating = true;
         ProgressOpacity = 0;
     }
 
@@ -2185,7 +2196,6 @@ public partial class TextToSpeechViewModel : ObservableObject
             ProgressPercentText = string.Empty;
             ProgressEtaText = string.Empty;
             IsGenerating = true;
-            IsNotGenerating = false;
             ProgressOpacity = 1.0;
 
             try
@@ -2391,7 +2401,6 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
 
         IsGenerating = false;
-        IsNotGenerating = true;
         ProgressOpacity = 0;
         OkPressed = true;
 
@@ -2420,7 +2429,6 @@ public partial class TextToSpeechViewModel : ObservableObject
             }
 
             IsGenerating = false;
-            IsNotGenerating = true;
             ProgressOpacity = 0;
             return;
         }
@@ -3197,6 +3205,21 @@ public partial class TextToSpeechViewModel : ObservableObject
                 Window!,
                 Se.Language.General.Error,
                 Se.Language.Video.TextToSpeech.CloneVoicePerLineNeedsVideo,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
+
+        // FireRedTTS3 refuses a clip without a transcript (MakePerLineCloneVoice returns null),
+        // and the transcripts come from the original-language subtitle. Without one loaded every
+        // line would silently fall back to the first imported voice - a run that "does not
+        // clone" (#14480). Say so up front instead of after minutes of generation.
+        if (engine is FireRedTts3AudioCpp && (_originalSubtitle == null || _originalSubtitle.Paragraphs.Count == 0))
+        {
+            await MessageBox.Show(
+                Window!,
+                Se.Language.General.Error,
+                string.Format(Se.Language.Video.TextToSpeech.CloneVoicePerLineNeedsOriginalSubtitleX, engine.Name),
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return false;

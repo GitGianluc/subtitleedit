@@ -1267,7 +1267,10 @@ public partial class BinaryEditViewModel : ObservableObject
 
     private void WriteExport(IExportHandler exportHandler, string fileOrFolderName)
     {
-        var imageParameter = new ImageParameter()
+        // One parameter object per line, like every other export caller: the Blu-ray sup
+        // handler holds a line back while the next may still overlap it, so a shared object
+        // mutated per line lost the first line and wrote the last twice (issue #14666).
+        ImageParameter MakeImageParameter() => new()
         {
             ScreenWidth = ScreenWidth,
             ScreenHeight = ScreenHeight,
@@ -1283,12 +1286,13 @@ public partial class BinaryEditViewModel : ObservableObject
             FramesPerSecond = Configuration.Settings.General.CurrentFrameRate,
         };
 
-        exportHandler.WriteHeader(fileOrFolderName, imageParameter);
+        exportHandler.WriteHeader(fileOrFolderName, MakeImageParameter());
         for (var i = 0; i < Subtitles.Count; i++)
         {
             // ToSkBitmap allocates a new SKBitmap each call; dispose it per iteration so the
             // export of a large file doesn't accumulate one undisposed native bitmap per line.
             using var skBitmap = Subtitles[i].Bitmap!.ToSkBitmap();
+            var imageParameter = MakeImageParameter();
             imageParameter.Bitmap = skBitmap;
             imageParameter.Text = Subtitles[i].Text;
             imageParameter.StartTime = Subtitles[i].StartTime;
@@ -2891,11 +2895,9 @@ public partial class BinaryEditViewModel : ObservableObject
         // so closing without ever opening a video forgot the window placement.
         UiUtil.SaveWindowPosition(Window);
 
-        if (VideoPlayerControl == null)
-            return;
-        if (string.IsNullOrWhiteSpace(VideoPlayerControl.VideoPlayer.FileName))
-            return;
-        VideoPlayerControl.VideoPlayer.CloseFile();
+        // Dispose the player core even when no video was ever opened - MakeVideoPlayer already
+        // created the mpv core and the position pump, and only CloseAndDisposePlayer frees them.
+        VideoPlayerControl?.CloseAndDisposePlayer();
     }
 
     public void Loaded()

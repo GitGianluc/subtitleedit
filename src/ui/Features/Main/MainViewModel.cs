@@ -603,6 +603,9 @@ public partial class MainViewModel :
     Control? _focusBeforeMainMenu;
     Control? _focusBeforeWindowDeactivated;
     bool _altClosesMainMenuOnKeyUp;
+    bool _altChordCancelsMainMenuActivation;
+    bool _mainMenuActiveBeforeAltRelease;
+    Control? _focusBeforeAltChord;
     readonly AltMenuActivationGuard _altMenuActivationGuard = new();
     bool _findClosingProgrammatically;
     ReplaceViewModel? _replaceViewModel;
@@ -2894,6 +2897,25 @@ public partial class MainViewModel :
         _shortcutManager.ClearKeys();
     }
 
+    /// <summary>
+    /// Re-opens the original remembered with a recent file (start-up and Reopen). The pair is one
+    /// load to the user, so the undo history starts over once both are in: with the original opened
+    /// as a step after "Subtitle loaded", a freshly opened pair had an undo step waiting, and the
+    /// first Ctrl+Z took the original away (#14634).
+    /// </summary>
+    private async Task RestoreRememberedOriginal(int selectedIndex, string? originalFileName, string subtitleFileName)
+    {
+        if (string.IsNullOrEmpty(originalFileName) || !File.Exists(originalFileName))
+        {
+            return;
+        }
+
+        await SubtitleOpenOriginal(selectedIndex, originalFileName);
+
+        _undoRedoManager.Reset();
+        _undoRedoManager.Do(MakeUndoRedoObject(string.Format(Se.Language.General.SubtitleLoadedX, subtitleFileName)));
+    }
+
     private async Task<bool> SubtitleOpenOriginal(int selectedIndex, string fileName)
     {
         // Replacing an editable original discards it - settle unsaved edits first (#13594).
@@ -2902,6 +2924,11 @@ public partial class MainViewModel :
             _shortcutManager.ClearKeys();
             return false;
         }
+
+        // The open is recorded as its own undo step (see ImportOriginalSubtitle); whatever the
+        // user edited in the last few hundred milliseconds must be its own step before that,
+        // or the first Ctrl+Z would take the edit away together with the original (#14634).
+        _undoRedoManager.CheckForChanges(null);
 
         var subtitle = Subtitle.Parse(fileName);
         if (subtitle == null)
@@ -3034,6 +3061,11 @@ public partial class MainViewModel :
         AutoFitColumns();
         SelectAndScrollToRow(selectedIndex);
         AddToRecentFiles(true);
+
+        // A named step rather than a "Changes detected" tick, so the history reads right and the
+        // snapshot carries the original's whole state (column, read-only, display-only rows) -
+        // which undo and redo then restore as a unit (#14634).
+        _undoRedoManager.Do(MakeUndoRedoObject(string.Format(Se.Language.General.OriginalSubtitleLoadedX, fileName)));
     }
 
     /// <summary>
@@ -3737,6 +3769,10 @@ public partial class MainViewModel :
     [RelayCommand]
     private async Task FileCloseOriginal()
     {
+        // As in SubtitleOpenOriginal: the close becomes its own undo step below, so pending edits
+        // must be recorded as theirs first.
+        _undoRedoManager.CheckForChanges(null);
+
         if (IsOriginalReadOnly || IsShowingOriginalNonMatchingLines || IsEditOriginalMode)
         {
             // An editable original with unsaved edits gets the save prompt before anything is torn
@@ -3778,6 +3814,7 @@ public partial class MainViewModel :
 
         ShowColumnOriginalText = false;
         AutoFitColumns();
+        _undoRedoManager.Do(MakeUndoRedoObject(Se.Language.General.OriginalSubtitleClosed));
         _shortcutManager.ClearKeys();
     }
 
@@ -4049,12 +4086,7 @@ public partial class MainViewModel :
             // Seek the video to the restored line - otherwise Reopen leaves it at 0:00.
             await SeekVideoToSelectedLineAsync();
 
-            if (!string.IsNullOrEmpty(recentFile.SubtitleFileNameOriginal) &&
-                File.Exists(recentFile.SubtitleFileNameOriginal))
-            {
-                var selectedIndex = recentFile.SelectedLine;
-                await SubtitleOpenOriginal(selectedIndex, recentFile.SubtitleFileNameOriginal);
-            }
+            await RestoreRememberedOriginal(recentFile.SelectedLine, recentFile.SubtitleFileNameOriginal, recentFile.SubtitleFileName);
 
             SetRecentFileProperties(recentFile);
 
@@ -6360,12 +6392,7 @@ public partial class MainViewModel :
         var spectrogramFileName = WavePeakGenerator2.SpectrogramDrawer.GetSpectrogramFileName(_videoFileName, _audioTrack?.FfIndex ?? -1);
         if (File.Exists(spectrogramFileName))
         {
-            var spectrogram = SpectrogramData2.FromDisk(spectrogramFileName);
-            if (spectrogram != null)
-            {
-                spectrogram.Load();
-                AudioVisualizer.SetSpectrogram(spectrogram);
-            }
+            AudioVisualizer.SetSpectrogram(TryLoadCachedSpectrogram(spectrogramFileName));
 
             AudioVisualizer.ResetCache();
             _updateAudioVisualizer = true;
@@ -10491,7 +10518,12 @@ public partial class MainViewModel :
             return;
         }
 
-        var wavePeaks = WavePeakData2.FromDisk(peakWaveFileName);
+        var wavePeaks = TryLoadCachedPeaks(peakWaveFileName);
+        if (wavePeaks == null)
+        {
+            return;
+        }
+
         if (AudioVisualizer != null)
         {
             AudioVisualizer.WavePeaks = wavePeaks;
@@ -10504,12 +10536,7 @@ public partial class MainViewModel :
             var spectrogramFileName = WavePeakGenerator2.SpectrogramDrawer.GetSpectrogramFileName(_videoFileName, _audioTrack?.FfIndex ?? -1);
             if (File.Exists(spectrogramFileName))
             {
-                var spectrogram = SpectrogramData2.FromDisk(spectrogramFileName);
-                if (spectrogram != null)
-                {
-                    spectrogram.Load();
-                    AudioVisualizer.SetSpectrogram(spectrogram);
-                }
+                AudioVisualizer.SetSpectrogram(TryLoadCachedSpectrogram(spectrogramFileName));
             }
 
             InitializeWaveformDisplayMode();
@@ -12988,7 +13015,13 @@ public partial class MainViewModel :
             AudioVisualizer.MinGapSeconds = Se.Settings.General.MinimumBetweenLines.GetMilliseconds() / 1000.0;
             AudioVisualizer.WaveformHeightPercentage = Se.Settings.Waveform.SpectrogramCombinedWaveformHeight;
             AudioVisualizer.FocusOnMouseOver = Se.Settings.Waveform.FocusOnMouseOver;
+            AudioVisualizer.ShowOriginalSubtitleOverlay = Se.Settings.Waveform.ShowOriginalSubtitle;
             AudioVisualizer.ResetCache();
+
+            // Purely visual waveform settings (paragraph footer toggles, fonts, colors) are read
+            // straight from Se.Settings while drawing, and none of them is an AffectsRender
+            // property, so ask for a repaint instead of waiting for the next selection change.
+            AudioVisualizer.InvalidateVisual();
 
             InitializeLibMpv();
             InitializeFfmpeg();
@@ -16509,6 +16542,7 @@ public partial class MainViewModel :
                 IsRightToLeftEnabled = Se.Settings.Appearance.RightToLeft;
                 RightToLeftHelper.SetRightToLeftForDataGridAndText(Window);
                 RightToLeftHelper.RefreshDataGridBindings(SubtitleGrid, Subtitles, SelectedSubtitle);
+                RefreshVideoPreviewAfterRightToLeftChange();
                 return;
             }
 
@@ -16537,9 +16571,38 @@ public partial class MainViewModel :
             Window.Width += 0.1;
             Task.Delay(50);
             Window.Width -= 0.1;
+
+            RefreshVideoPreviewAfterRightToLeftChange();
         });
 
         _shortcutManager.ClearKeys();
+    }
+
+    /// <summary>
+    /// Re-pushes the subtitle to the video player after the right-to-left mode changed.
+    /// The RTL unicode fix is applied inside the preview reloaders, but their change memo
+    /// is keyed on the subtitle text, which a settings flip does not touch - so without a
+    /// reset the next refresh reuses the old serialized text and the video keeps showing the
+    /// previous direction until the app is restarted (issue #14695).
+    /// </summary>
+    private void RefreshVideoPreviewAfterRightToLeftChange()
+    {
+        var vp = GetVideoPlayerControl();
+        if (vp == null)
+        {
+            return;
+        }
+
+        if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
+        {
+            _mpvReloader.Reset();
+            _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat));
+        }
+        else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
+        {
+            _vlcReloader.Reset();
+            _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+        }
     }
 
     /// <summary>
@@ -20776,6 +20839,7 @@ public partial class MainViewModel :
         {
             var preIndex = SelectedSubtitleIndex ?? 0;
             var preRowTop = GetSelectedRowViewportTop();
+            var preFocus = CaptureUndoRedoFocus();
 
             var undoRedoObject = _undoRedoManager.Undo()!;
             if (undoRedoObject?.Subtitles == null)
@@ -20784,7 +20848,8 @@ public partial class MainViewModel :
             }
 
             RestoreUndoRedoState(undoRedoObject, scrollToSelected: false);
-            RestoreSelectionToPreviousIndex(preIndex, preRowTop);
+            RestoreSelectionToPreviousIndex(preIndex, preRowTop, restoreGridFocus: preFocus == UndoRedoFocus.Grid);
+            RestoreUndoRedoFocus(preFocus);
             ShowUndoStatus();
         });
     }
@@ -20824,6 +20889,7 @@ public partial class MainViewModel :
         {
             var preIndex = SelectedSubtitleIndex ?? 0;
             var preRowTop = GetSelectedRowViewportTop();
+            var preFocus = CaptureUndoRedoFocus();
 
             var undoRedoObject = _undoRedoManager.Redo();
             if (undoRedoObject?.Subtitles == null)
@@ -20832,7 +20898,8 @@ public partial class MainViewModel :
             }
 
             RestoreUndoRedoState(undoRedoObject, scrollToSelected: false);
-            RestoreSelectionToPreviousIndex(preIndex, preRowTop);
+            RestoreSelectionToPreviousIndex(preIndex, preRowTop, restoreGridFocus: preFocus == UndoRedoFocus.Grid);
+            RestoreUndoRedoFocus(preFocus);
             ShowRedoStatus();
         });
     }
@@ -20860,14 +20927,64 @@ public partial class MainViewModel :
     /// the current line at the top of the grid on every Undo - disorienting when the user was
     /// working near the bottom of the view (#14517).
     /// </summary>
-    private void RestoreSelectionToPreviousIndex(int preIndex, double? preRowTop = null)
+    private enum UndoRedoFocus
+    {
+        Grid,
+        EditTextBox,
+        EditTextBoxOriginal,
+        AudioVisualizer,
+    }
+
+    /// <summary>
+    /// Which control should get focus back after undo/redo reloads the rows. Capture this
+    /// before the reload: rebuilding the grid drops focus synchronously. Nothing focused
+    /// (window root, layout host) counts as the grid, matching
+    /// <see cref="IsSubtitleGridFocusedOrFocusDropped"/>.
+    /// </summary>
+    private UndoRedoFocus CaptureUndoRedoFocus()
+    {
+        if (EditTextBox.IsFocused)
+        {
+            return UndoRedoFocus.EditTextBox;
+        }
+
+        if (EditTextBoxOriginal.IsFocused)
+        {
+            return UndoRedoFocus.EditTextBoxOriginal;
+        }
+
+        if (AudioVisualizer is { IsFocused: true })
+        {
+            return UndoRedoFocus.AudioVisualizer;
+        }
+
+        return UndoRedoFocus.Grid;
+    }
+
+    private void RestoreUndoRedoFocus(UndoRedoFocus focus)
+    {
+        switch (focus)
+        {
+            case UndoRedoFocus.EditTextBox:
+                Dispatcher.UIThread.Post(() => EditTextBox.Focus());
+                break;
+            case UndoRedoFocus.EditTextBoxOriginal:
+                Dispatcher.UIThread.Post(() => EditTextBoxOriginal.Focus());
+                break;
+            case UndoRedoFocus.AudioVisualizer:
+                Dispatcher.UIThread.Post(() => AudioVisualizer?.Focus());
+                break;
+        }
+    }
+
+    private void RestoreSelectionToPreviousIndex(int preIndex, double? preRowTop = null, bool? restoreGridFocus = null)
     {
         if (Subtitles.Count == 0)
         {
             return;
         }
 
-        SelectAndScrollToRow(Math.Clamp(preIndex, 0, Subtitles.Count - 1), null, keepRowViewportTop: preRowTop);
+        SelectAndScrollToRow(Math.Clamp(preIndex, 0, Subtitles.Count - 1), null, restoreGridFocus: restoreGridFocus, keepRowViewportTop: preRowTop);
     }
 
     public UndoRedoItem MakeUndoRedoObject(string description)
@@ -20896,6 +21013,12 @@ public partial class MainViewModel :
             SubtitleFileNameOriginal = _subtitleFileNameOriginal,
             SubtitleHeaderOriginal = _subtitleOriginal?.Header,
             SubtitleFooterOriginal = _subtitleOriginal?.Footer,
+            IsOriginalLoaded = _subtitleOriginal is { Paragraphs.Count: > 0 },
+            ShowColumnOriginalText = ShowColumnOriginalText,
+            IsOriginalReadOnly = IsOriginalReadOnly,
+            IsShowingOriginalNonMatchingLines = IsShowingOriginalNonMatchingLines,
+            IsEditOriginalMode = IsEditOriginalMode,
+            SubtitleOriginalFormat = _subtitleOriginal?.OriginalFormat,
         };
     }
 
@@ -20928,14 +21051,73 @@ public partial class MainViewModel :
         // Restore the original-subtitle file-level state too - the undo hash covers it,
         // so leaving it untouched makes the restored state hash-mismatch its own entry,
         // and the next Undo() clears the redo timeline as "unrecorded changes" (#12952).
+        var previousOriginalFileName = _subtitleFileNameOriginal ?? string.Empty;
         _subtitleFileNameOriginal = undoRedoObject.SubtitleFileNameOriginal;
-        _subtitleOriginal ??= new Subtitle();
-        _subtitleOriginal.Header = undoRedoObject.SubtitleHeaderOriginal;
-        _subtitleOriginal.Footer = undoRedoObject.SubtitleFooterOriginal;
+        RestoreOriginalState(undoRedoObject);
+
+        // The baseline says what the original's file holds. Undoing an edit to the original keeps
+        // it (the restored state is then clean or dirty exactly as it should be); undoing or
+        // redoing across an open or close is a different file, whose baseline is the restored
+        // content itself - otherwise the undone open left the column "unsaved", and closing SE
+        // offered to save an original that no longer existed as an empty file (#14634).
+        if (!string.Equals(previousOriginalFileName, _subtitleFileNameOriginal ?? string.Empty, StringComparison.Ordinal))
+        {
+            _changeSubtitleHashOriginal = GetFastHashOriginal();
+        }
 
         if (scrollToSelected)
         {
             SelectAndScrollToRow(undoRedoObject.SelectedLines.First());
+        }
+    }
+
+    /// <summary>
+    /// Puts the original back the way the snapshot had it: loaded or not, shown or hidden, read-only
+    /// or editable, with or without its display-only rows. The rows are the working text and were
+    /// restored already, so the original subtitle is rebuilt from them rather than snapshotted -
+    /// the same way every save and tool rebuilds it. Before this only the original's file name,
+    /// header and footer came back, so undoing past "open original" left an original column and
+    /// edit box with nothing behind them (#14634).
+    /// </summary>
+    private void RestoreOriginalState(UndoRedoItem undoRedoObject)
+    {
+        IsOriginalReadOnly = undoRedoObject.IsOriginalReadOnly;
+        IsShowingOriginalNonMatchingLines = undoRedoObject.IsShowingOriginalNonMatchingLines;
+        IsEditOriginalMode = undoRedoObject.IsEditOriginalMode;
+
+        if (undoRedoObject.IsOriginalLoaded)
+        {
+            _subtitleOriginal ??= new Subtitle();
+            if (undoRedoObject.SubtitleOriginalFormat != null)
+            {
+                _subtitleOriginal.OriginalFormat = undoRedoObject.SubtitleOriginalFormat;
+            }
+
+            // Rebuild after the mode flags above: with the non-matching lines shown, the display-only
+            // rows are original lines and the working rows without a counterpart are not.
+            GetUpdateSubtitleOriginal();
+        }
+        else
+        {
+            _subtitleOriginal = new Subtitle();
+            _subtitleOriginalBeforeEditMode = null;
+
+            // A remembered original-only scope would make every find come up empty now that the
+            // original is gone (as FileCloseOriginal does).
+            _findService.CurrentScope = FindScope.TextAndOriginal;
+        }
+
+        _subtitleOriginal.Header = undoRedoObject.SubtitleHeaderOriginal;
+        _subtitleOriginal.Footer = undoRedoObject.SubtitleFooterOriginal;
+
+        // The restored rows already hold the reference projection the snapshot was taken with, so
+        // no re-match is pending - the rebuild's collection changes flagged one.
+        _referenceMappingDirty = false;
+
+        if (ShowColumnOriginalText != undoRedoObject.ShowColumnOriginalText)
+        {
+            ShowColumnOriginalText = undoRedoObject.ShowColumnOriginalText;
+            AutoFitColumns();
         }
     }
 
@@ -24580,6 +24762,56 @@ public partial class MainViewModel :
         return _subtitleOriginal;
     }
 
+    internal void UpdateWaveformOriginalSubtitleCues(AudioVisualizer audioVisualizer)
+    {
+        if (!ShowColumnOriginalText || !Se.Settings.Waveform.ShowOriginalSubtitle || _subtitleOriginal == null)
+        {
+            audioVisualizer.SetOriginalSubtitleCues(null);
+            return;
+        }
+
+        if (IsEditOriginalMode)
+        {
+            var editedCues = new List<WaveformOriginalSubtitleCue>();
+            foreach (var row in Subtitles)
+            {
+                if (row.ReferenceParagraphId != null || !string.IsNullOrEmpty(row.OriginalText))
+                {
+                    editedCues.Add(new WaveformOriginalSubtitleCue(
+                        row.StartTime.TotalSeconds, row.EndTime.TotalSeconds, row.OriginalText));
+                }
+            }
+
+            audioVisualizer.SetOriginalSubtitleCues(editedCues);
+            return;
+        }
+
+        var rowsByReferenceId = new Dictionary<Guid, SubtitleLineViewModel>();
+        foreach (var row in Subtitles)
+        {
+            if (row.ReferenceParagraphId is { } id)
+            {
+                rowsByReferenceId[id] = row;
+            }
+        }
+
+        var cues = new List<WaveformOriginalSubtitleCue>(_subtitleOriginal.Paragraphs.Count);
+        foreach (var paragraph in _subtitleOriginal.Paragraphs)
+        {
+            var start = paragraph.StartTime.TotalSeconds;
+            var end = paragraph.EndTime.TotalSeconds;
+            var text = paragraph.Text;
+            if (paragraph.Id is { } id && rowsByReferenceId.TryGetValue(id, out var row))
+            {
+                text = row.OriginalText;
+            }
+
+            cues.Add(new WaveformOriginalSubtitleCue(start, end, text));
+        }
+
+        audioVisualizer.SetOriginalSubtitleCues(cues);
+    }
+
     /// <summary>
     /// Returns false if the user cancelled the save because some subtitles exceed the format's limits.
     /// </summary>
@@ -25250,11 +25482,7 @@ public partial class MainViewModel :
 
                         // Restore the original/translator-mode file too - otherwise only the
                         // translation comes back on start-up, unlike the Reopen menu (issue #12705).
-                        if (!string.IsNullOrEmpty(first.SubtitleFileNameOriginal) &&
-                            File.Exists(first.SubtitleFileNameOriginal))
-                        {
-                            await SubtitleOpenOriginal(first.SelectedLine, first.SubtitleFileNameOriginal);
-                        }
+                        await RestoreRememberedOriginal(first.SelectedLine, first.SubtitleFileNameOriginal, first.SubtitleFileName);
 
                         SetRecentFileProperties(first);
                     }
@@ -25572,7 +25800,24 @@ public partial class MainViewModel :
         else if (File.Exists(peakWaveFileName))
         {
             ShowStatus(Se.Language.Main.LoadingWaveInfoFromCache);
-            var wavePeaks = WavePeakData2.FromDisk(peakWaveFileName);
+            var wavePeaks = TryLoadCachedPeaks(peakWaveFileName);
+            if (wavePeaks == null)
+            {
+                // The cache file was corrupt and has now been thrown away, so extraction can
+                // produce a good one - which is the whole point of deleting it. With
+                // auto-generate off, the hint lets the user start that extraction.
+                if (Se.Settings.Waveform.WaveformAutoGenerate)
+                {
+                    StartWaveformExtraction(videoFileName, trackNumber, peakWaveFileName, spectrogramFileName);
+                }
+                else
+                {
+                    ShowClickToGenerateWaveformHint();
+                }
+
+                return;
+            }
+
             if (AudioVisualizer != null)
             {
                 Dispatcher.UIThread.Post(() =>
@@ -25585,12 +25830,9 @@ public partial class MainViewModel :
                         AudioVisualizer.UseSmpteDropFrameTime();
                     }
 
-                    var spectrogram = SpectrogramData2.FromDisk(spectrogramFileName);
-                    if (spectrogram != null)
-                    {
-                        spectrogram.Load();
-                        AudioVisualizer.SetSpectrogram(spectrogram);
-                    }
+                    // Always set it, null included: that is what clears the previously opened
+                    // video's spectrogram when this one has none.
+                    AudioVisualizer.SetSpectrogram(TryLoadCachedSpectrogram(spectrogramFileName));
 
                     InitializeWaveformDisplayMode();
 
@@ -25611,14 +25853,85 @@ public partial class MainViewModel :
                 });
             }
         }
-        else if (AudioVisualizer != null)
+        else
         {
             // No cached waveform and auto-generate is off: show the click-to-generate hint.
-            Dispatcher.UIThread.Post(() =>
-            {
-                AudioVisualizer.ShowClickToGenerateHint = true;
-                AudioVisualizer.InvalidateVisual();
-            });
+            ShowClickToGenerateWaveformHint();
+        }
+    }
+
+    private void ShowClickToGenerateWaveformHint()
+    {
+        var audioVisualizer = AudioVisualizer;
+        if (audioVisualizer == null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            audioVisualizer.ShowClickToGenerateHint = true;
+            audioVisualizer.InvalidateVisual();
+        });
+    }
+
+    /// <summary>
+    /// Reads cached wave peaks, discarding the cache file when it cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// A cache file left half-written by a crash (#14751) is not a one-off annoyance: nothing on
+    /// this path looks past File.Exists, so the same ruined file is re-read on every open of that
+    /// video and the failure repeats forever. Deleting it lets the next extraction replace it.
+    /// </remarks>
+    private static WavePeakData2? TryLoadCachedPeaks(string peakWaveFileName)
+    {
+        try
+        {
+            return WavePeakData2.FromDisk(peakWaveFileName);
+        }
+        catch (Exception exception)
+        {
+            Se.LogError(exception, $"Discarding unreadable waveform cache file: {peakWaveFileName}");
+            DeleteCorruptCacheFile(peakWaveFileName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads a cached spectrogram, discarding the cache file when it cannot be read. Returns null
+    /// when there is no spectrogram to show - which is also the normal case for a video whose
+    /// peaks were extracted with the spectrogram setting off.
+    /// </summary>
+    private static SpectrogramData2? TryLoadCachedSpectrogram(string spectrogramFileName)
+    {
+        if (!File.Exists(spectrogramFileName))
+        {
+            return null;
+        }
+
+        var spectrogram = SpectrogramData2.FromDisk(spectrogramFileName);
+        if (spectrogram.Load())
+        {
+            return spectrogram;
+        }
+
+        // The file was there a moment ago but would not load. Drop it, so the missing
+        // spectrogram makes the next open of this video extract a fresh one.
+        Se.LogError($"Discarding unreadable spectrogram cache file: {spectrogramFileName}");
+        spectrogram.Dispose();
+        DeleteCorruptCacheFile(spectrogramFileName);
+        return null;
+    }
+
+    private static void DeleteCorruptCacheFile(string fileName)
+    {
+        try
+        {
+            File.Delete(fileName);
+        }
+        catch (Exception exception)
+        {
+            Se.LogError(exception, $"Unable to delete corrupt cache file: {fileName}");
         }
     }
 
@@ -26451,6 +26764,9 @@ public partial class MainViewModel :
         if (AudioVisualizer != null)
         {
             AudioVisualizer.WavePeaks = null;
+            // Disposes the previous video's SKBitmap tiles - otherwise they stay resident (and get
+            // drawn against the next timeline) until a video that has its own spectrogram loads.
+            AudioVisualizer.SetSpectrogram(null);
             AudioVisualizer.ShotChanges = new List<double>();
             AudioVisualizer.Chapters = new List<WaveformChapter>();
             AudioVisualizer.StartPositionSeconds = 0;
@@ -28202,6 +28518,8 @@ public partial class MainViewModel :
         _shortcutManager.ClearKeys();
         _altMenuActivationGuard.Reset();
         _altClosesMainMenuOnKeyUp = false; // the matching Alt release will never arrive
+        _altChordCancelsMainMenuActivation = false;
+        _focusBeforeAltChord = null;
 
         // A task switch (Alt+Tab) must also drop any active menu-bar state. Otherwise Avalonia leaves
         // the access-key underlines / selection armed and they reappear when the window is re-activated,
@@ -28694,6 +29012,21 @@ public partial class MainViewModel :
                 // Alt+<key> is a shortcut or access key, not a toggle - releasing Alt afterwards
                 // must leave the menu alone (mirrors the built-in "ignore Alt up" bookkeeping).
                 _altClosesMainMenuOnKeyUp = false;
+
+                // Avalonia's AccessKeyHandler does the same bookkeeping ("Alt was part of a chord,
+                // so its release must not open the menu bar") in its own tunnelling key-down
+                // handler - but it registers that handler in the TopLevel constructor with
+                // handledEventsToo:false, and tunnel handlers on one element run in *reverse*
+                // registration order. Our window handler therefore runs first, and the moment it
+                // marks an Alt shortcut handled (Alt+Down = "go to next line" out of the box) the
+                // built-in handler never sees the chord key: releasing Alt then opens the menu bar,
+                // which swallows every following shortcut - Ctrl+Left/Right walked the menu items
+                // instead of moving the start time (#14743). Arm the cancellation here and undo the
+                // activation on the Alt release (see OnKeyUpHandler).
+                if (keyEventArgs.KeyModifiers.HasFlag(KeyModifiers.Alt))
+                {
+                    _altChordCancelsMainMenuActivation = true;
+                }
             }
 
             if (UiUtil.TryHandleWindowSystemMenu(keyEventArgs, Window))
@@ -28799,9 +29132,20 @@ public partial class MainViewModel :
                 // Bare and Ctrl+Left/Right are fundamental caret navigation in any
                 // text input — never override them with shortcuts even when
                 // "allow single-letter shortcuts in text box" is on (#11357).
+                // Bare Left/Right always stay with the caret; the modified chords (and
+                // Home/End below) are handed to bound shortcuts when the opt-in
+                // AllowTextNavigationShortcutsInTextbox setting is on (#14654).
+                var allowTextNavigationShortcuts = Se.Settings.Tools.AllowTextNavigationShortcutsInTextbox;
                 if ((keyEventArgs.Key == Key.Left || keyEventArgs.Key == Key.Right)
-                    && (keyEventArgs.KeyModifiers == KeyModifiers.None
-                        || keyEventArgs.KeyModifiers == KeyModifiers.Control
+                    && keyEventArgs.KeyModifiers == KeyModifiers.None)
+                {
+                    _shortcutManager.ClearKeys();
+                    return;
+                }
+
+                if (!allowTextNavigationShortcuts
+                    && (keyEventArgs.Key == Key.Left || keyEventArgs.Key == Key.Right)
+                    && (keyEventArgs.KeyModifiers == KeyModifiers.Control
                         || (OperatingSystem.IsMacOS()
                             && (keyEventArgs.KeyModifiers == KeyModifiers.Alt
                                 || keyEventArgs.KeyModifiers == (KeyModifiers.Shift | KeyModifiers.Alt)))))
@@ -28813,7 +29157,8 @@ public partial class MainViewModel :
                 // Home/End (with or without Ctrl/Cmd/Shift) is likewise standard text editing -
                 // line/document start/end and selection. The "go to first/last line" shortcuts
                 // default to Ctrl+Home/End (#13194) but must stay out of text inputs.
-                if ((keyEventArgs.Key == Key.Home || keyEventArgs.Key == Key.End)
+                if (!allowTextNavigationShortcuts
+                    && (keyEventArgs.Key == Key.Home || keyEventArgs.Key == Key.End)
                     && (keyEventArgs.KeyModifiers & ~(KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Meta)) == KeyModifiers.None)
                 {
                     _shortcutManager.ClearKeys();
@@ -29097,11 +29442,49 @@ public partial class MainViewModel :
             _setEndAtKeyUpLineGoToNext = false;
         }
 
+        // This handler is registered for both routing strategies, so every key-up runs it twice.
+        // Avalonia's AccessKeyHandler opens the menu bar from its own tunnelling key-up handler,
+        // which - tunnel handlers on one element running in reverse registration order - comes
+        // after ours: in the tunnel pass the bar is still closed, in the bubble pass it is open.
+        // Both undo paths below must therefore act in the bubble pass only. Remember here whether
+        // the bar was already active before the release, so an Alt+<access key> that opened it on
+        // the key *down* (Alt+F) is left alone and only a release-triggered activation is undone -
+        // and which control held focus, since that is the last moment before Avalonia takes it.
+        if (e.Key is Key.LeftAlt or Key.RightAlt && e.Route == RoutingStrategies.Tunnel)
+        {
+            _mainMenuActiveBeforeAltRelease = Menu is { IsOpen: true } || IsMainMenuFocused();
+            _focusBeforeAltChord = Window?.FocusManager?.GetFocusedElement() as Control;
+        }
+
+        // Undo the menu-bar activation Avalonia performs when Alt is released after an Alt+<key>
+        // shortcut it never saw (see the arming site in OnKeyDownHandler for why it misses it).
+        if (e.Key is Key.LeftAlt or Key.RightAlt &&
+            e.Route == RoutingStrategies.Bubble &&
+            _altChordCancelsMainMenuActivation)
+        {
+            _altChordCancelsMainMenuActivation = false;
+            var focusAfterChord = _focusBeforeAltChord;
+            _focusBeforeAltChord = null;
+
+            if (!_mainMenuActiveBeforeAltRelease && (Menu is { IsOpen: true } || IsMainMenuFocused()))
+            {
+                if (focusAfterChord is { IsEffectivelyVisible: true })
+                {
+                    _focusBeforeMainMenu = focusAfterChord;
+                }
+
+                DeactivateMainMenu();
+            }
+        }
+
         // Undo the menu-bar activation Avalonia performs when Alt is released after an Alt+click/drag.
         // Its AccessKeyHandler runs in the window's tunnel phase, so the menu is already open and
         // focused by the time we get here - without this, IsMainMenuFocused() in OnKeyDownHandler
-        // swallows every shortcut until the user clicks something (discussion #11744).
-        if (_altMenuActivationGuard.TryConsumeAltRelease(e.Key, out var focusToRestore) &&
+        // swallows every shortcut until the user clicks something (discussion #11744). The guard is
+        // consumed in the bubble pass only: consuming it in the tunnel pass disarmed it while the
+        // bar was still closed, so the undo never ran at all.
+        if (e.Route != RoutingStrategies.Tunnel &&
+            _altMenuActivationGuard.TryConsumeAltRelease(e.Key, out var focusToRestore) &&
             (Menu is { IsOpen: true } || IsMainMenuFocused()))
         {
             if (focusToRestore is { IsEffectivelyVisible: true })
@@ -29597,6 +29980,8 @@ public partial class MainViewModel :
     // guard below skips the work while it is hidden, so its values can be stale here.
     partial void OnShowColumnOriginalTextChanged(bool value)
     {
+        _updateAudioVisualizer = true;
+
         if (value && SelectedSubtitle != null)
         {
             MakeSubtitleTextInfoOriginal(SelectedSubtitle.OriginalText, SelectedSubtitle);
@@ -29658,13 +30043,28 @@ public partial class MainViewModel :
             _referenceMappingDirty = true;
         }
 
-        if (e.NewItems != null)
-            foreach (SubtitleLineViewModel item in e.NewItems)
-                item.PropertyChanged += OnSubtitleItemChangedForMpv;
+        // Subtitles.Clear() raises Reset with no OldItems, and the bulk paths (sort, delete, merge,
+        // undo/redo, ReplaceSubtitles) then re-add the same row instances - so unhook via the
+        // tracked set on Reset and never subscribe a row twice, or every pass stacks one more
+        // delegate on each surviving row and the handler runs N times per time-code change.
+        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+        {
+            foreach (var item in _mpvSubscribedRows)
+                item.PropertyChanged -= OnSubtitleItemChangedForMpv;
+            _mpvSubscribedRows.Clear();
+        }
+
         if (e.OldItems != null)
             foreach (SubtitleLineViewModel item in e.OldItems)
-                item.PropertyChanged -= OnSubtitleItemChangedForMpv;
+                if (_mpvSubscribedRows.Remove(item))
+                    item.PropertyChanged -= OnSubtitleItemChangedForMpv;
+        if (e.NewItems != null)
+            foreach (SubtitleLineViewModel item in e.NewItems)
+                if (_mpvSubscribedRows.Add(item))
+                    item.PropertyChanged += OnSubtitleItemChangedForMpv;
     }
+
+    private readonly HashSet<SubtitleLineViewModel> _mpvSubscribedRows = new(ReferenceEqualityComparer.Instance);
 
     private void OnSubtitleItemChangedForMpv(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
@@ -29694,6 +30094,11 @@ public partial class MainViewModel :
             // used to refill + order-check every line 20x a second while the user typed in
             // the edit box or dragged an end time in the waveform.
             _mpvPreviewDirty = true;
+        }
+        else if (e.PropertyName is nameof(SubtitleLineViewModel.OriginalText))
+        {
+            // Original cues are snapshots, so rebuild them after the original text changes.
+            _updateAudioVisualizer = true;
         }
         else if (e.PropertyName is nameof(SubtitleLineViewModel.Layer))
         {
@@ -30135,7 +30540,8 @@ public partial class MainViewModel :
     {
         Subtitles.CollectionChanged += OnSubtitlesCollectionChangedForMpv;
         foreach (var item in Subtitles)
-            item.PropertyChanged += OnSubtitleItemChangedForMpv;
+            if (_mpvSubscribedRows.Add(item))
+                item.PropertyChanged += OnSubtitleItemChangedForMpv;
         _positionTimer = new UiTickPump(TimeSpan.FromMilliseconds(50));
         _positionTimer.Tick += (s, e) =>
         {
@@ -30261,6 +30667,7 @@ public partial class MainViewModel :
 
                 if (_updateAudioVisualizer && av != null)
                 {
+                    UpdateWaveformOriginalSubtitleCues(av);
                     av.InvalidateVisual();
                     _updateAudioVisualizer = false;
                 }
@@ -30532,6 +30939,18 @@ public partial class MainViewModel :
         _cursorTimer?.Stop();
         _slowTimer.Stop();
         _undoRedoManager.StopChangeDetection();
+
+        // The auto-backup DispatcherTimer closes over this view model; left running it roots a
+        // closed "New window" editor (grid, rows, waveform, player wrapper) for the rest of the
+        // process and keeps calling HasChanges() on it.
+        _autoBackupService.StopAutobackup();
+
+        // Static slot assigned in the constructor - only the most recent window is registered,
+        // so clear it when that window goes so the dead view model is not pinned.
+        if (UiTheme.SystemThemeChangedCallback == OnSystemThemeChanged)
+        {
+            UiTheme.SystemThemeChangedCallback = null;
+        }
     }
 
     // Preview settle window after the last keystroke. Deliberately shorter than
@@ -31260,6 +31679,12 @@ public partial class MainViewModel :
         // Throttled: the pin below keeps the cursor/centered view exact per input event; the
         // actual mpv seek is issued at most every ScrubSeekMinIntervalMs, and a deferred target
         // is landed by the trailing check in the cursor timer. See the fields for the why.
+        if (e.IsCtrlShift && !vp.IsPlaying)
+        {
+            _wasPausedBeforeCtrlShiftDrag = true;
+            vp.VideoPlayer.Play();
+        }
+
         var nowTs = Stopwatch.GetTimestamp();
         var msSinceLastSeek = (nowTs - _scrubSeekLastIssuedTs) * 1000.0 / Stopwatch.Frequency;
         if (msSinceLastSeek >= ScrubSeekMinIntervalMs)
@@ -31277,6 +31702,18 @@ public partial class MainViewModel :
         PinPlayheadTo(newPosition);
 
         _updateAudioVisualizer = true;
+    }
+
+    private bool _wasPausedBeforeCtrlShiftDrag;
+
+    internal void AudioVisualizerOnDragEnded(object? sender, EventArgs e)
+    {
+        if (_wasPausedBeforeCtrlShiftDrag)
+        {
+            _wasPausedBeforeCtrlShiftDrag = false;
+            var vp = GetVideoPlayerControl();
+            vp?.VideoPlayer.Pause();
+        }
     }
 
     /// <summary>
