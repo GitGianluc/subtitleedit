@@ -27,6 +27,8 @@ public class SpellChecker : ISpellChecker, IDoSpell
     private static readonly HashSet<string> AllowedTokens = new() { "&", "—", "–", "…" };
 
     private WordList? _hunspellWeCantSpell;
+    // Finnish via libvoikko when the "fi_FI.voikko" pseudo dictionary is selected; null otherwise.
+    private VoikkoSpellChecker? _voikko;
     protected SpellCheckWordLists? WordLists;
     // Case-insensitive so per-word membership tests need no ToUpperInvariant allocation -
     // IsWordCorrect runs per word per grid cell repaint with live spell check on.
@@ -58,6 +60,18 @@ public class SpellChecker : ISpellChecker, IDoSpell
             {
                 DictionaryFileName = dic,
                 Name = name,
+            });
+        }
+
+        // Finnish via Voikko is listed as a pseudo dictionary (a marker path rather than a .dic) so
+        // every dictionary picker gets it for free. Only listed when libvoikko and a dictionary can
+        // actually be loaded - from the user's Voikko folder, the app bundle, or the system.
+        if (VoikkoSpellChecker.IsAvailable(dictionaryFolder))
+        {
+            list.Add(new SpellCheckDictionaryDisplay
+            {
+                DictionaryFileName = VoikkoSpellChecker.GetMarkerFile(dictionaryFolder),
+                Name = "Finnish (Voikko) [fi_FI]",
             });
         }
 
@@ -110,13 +124,30 @@ public class SpellChecker : ISpellChecker, IDoSpell
         SkipAllList.Clear();
         _twoLetterLanguageCode = twoLetterLanguageCode ?? string.Empty;
 
-        if (!File.Exists(dictionaryFile))
+        // The Voikko marker path need not exist (bundled / system dictionary); TryCreate validates.
+        if (!IsVoikkoDictionary(dictionaryFile) && !File.Exists(dictionaryFile))
         {
             return false;
         }
 
-        var affixFile = Path.ChangeExtension(dictionaryFile, ".aff");
-        _hunspellWeCantSpell = WordList.CreateFromFiles(dictionaryFile, affixFile);
+        _voikko?.Dispose();
+        _voikko = null;
+        _hunspellWeCantSpell = null;
+        if (IsVoikkoDictionary(dictionaryFile))
+        {
+            var dictionaryFolder = Path.GetDirectoryName(Path.GetDirectoryName(dictionaryFile)) ?? string.Empty;
+            _voikko = VoikkoSpellChecker.TryCreate(dictionaryFolder, out var error);
+            if (_voikko == null)
+            {
+                SpellCheckConfig.LogError("Voikko: " + error);
+                return false;
+            }
+        }
+        else
+        {
+            var affixFile = Path.ChangeExtension(dictionaryFile, ".aff");
+            _hunspellWeCantSpell = LoadHunspell(dictionaryFile, affixFile);
+        }
 
         if (string.IsNullOrEmpty(twoLetterLanguageCode))
         {
@@ -156,6 +187,11 @@ public class SpellChecker : ISpellChecker, IDoSpell
         if (WordSpellChecker != null)
         {
             return WordSpellChecker.GetSuggestions(word);
+        }
+
+        if (_voikko != null)
+        {
+            return _voikko.Suggest(word);
         }
 
         if (_hunspellWeCantSpell == null)
@@ -273,7 +309,7 @@ public class SpellChecker : ISpellChecker, IDoSpell
                 return true;
             }
         }
-        else if (_hunspellWeCantSpell != null && _hunspellWeCantSpell.Check(word))
+        else if (CheckWithDictionary(word))
         {
             return true;
         }
@@ -377,7 +413,85 @@ public class SpellChecker : ISpellChecker, IDoSpell
             return WordSpellChecker.DoSpell(word);
         }
 
+        return CheckWithDictionary(word);
+    }
+
+    private bool CheckWithDictionary(string word)
+    {
+        if (_voikko != null)
+        {
+            return _voikko.Spell(word);
+        }
+
         return _hunspellWeCantSpell != null && _hunspellWeCantSpell.Check(word);
+    }
+
+    /// <summary>
+    /// Loads a Hunspell dictionary via WeCantSpell, working around an upstream parser bug: a trailing
+    /// "# comment" on a COMPOUNDRULE line is read as part of the rule, so the rule never matches. The
+    /// Dutch nl_NL.aff comments most of its number rules that way, which flagged "achtenzestig" etc.
+    /// as misspelled (#14788, aarondandy/WeCantSpell.Hunspell#118). Native Hunspell ignores the comment.
+    /// </summary>
+    internal static WordList LoadHunspell(string dictionaryFile, string affixFile)
+    {
+        var affixBytes = StripCompoundRuleComments(File.ReadAllBytes(affixFile));
+        using var dictionaryStream = File.OpenRead(dictionaryFile);
+        using var affixStream = new MemoryStream(affixBytes, writable: false);
+        return WordList.CreateFromStreams(dictionaryStream, affixStream);
+    }
+
+    /// <summary>
+    /// Cuts "&lt;whitespace&gt;#..." off every COMPOUNDRULE line. Works on bytes so the .aff keeps
+    /// whatever encoding its SET line declares (all supported encodings are ASCII supersets).
+    /// </summary>
+    internal static byte[] StripCompoundRuleComments(byte[] affix)
+    {
+        var keyword = "COMPOUNDRULE"u8;
+        var output = new MemoryStream(affix.Length);
+        var lineStart = 0;
+        while (lineStart < affix.Length)
+        {
+            var lineEnd = Array.IndexOf(affix, (byte)'\n', lineStart);
+            if (lineEnd < 0)
+            {
+                lineEnd = affix.Length;
+            }
+
+            var line = affix.AsSpan(lineStart, lineEnd - lineStart);
+            var contentEnd = line.Length;
+            if (line.StartsWith(keyword))
+            {
+                var hash = line.IndexOf((byte)'#');
+                if (hash > 0 && (line[hash - 1] == (byte)' ' || line[hash - 1] == (byte)'\t'))
+                {
+                    contentEnd = hash;
+                    while (contentEnd > 0 && (line[contentEnd - 1] == (byte)' ' || line[contentEnd - 1] == (byte)'\t'))
+                    {
+                        contentEnd--;
+                    }
+                }
+            }
+
+            output.Write(line[..contentEnd]);
+            if (contentEnd < line.Length && line[^1] == (byte)'\r')
+            {
+                output.WriteByte((byte)'\r'); // keep CRLF line endings untouched
+            }
+
+            if (lineEnd < affix.Length)
+            {
+                output.WriteByte((byte)'\n');
+            }
+
+            lineStart = lineEnd + 1;
+        }
+
+        return output.ToArray();
+    }
+
+    public static bool IsVoikkoDictionary(string dictionaryFile)
+    {
+        return dictionaryFile.EndsWith(".voikko", StringComparison.OrdinalIgnoreCase);
     }
 
     protected static bool IsPartOfHtmlOrAssaTag(SpellCheckWord spellCheckWord, string text)

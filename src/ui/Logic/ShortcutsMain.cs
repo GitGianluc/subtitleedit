@@ -240,6 +240,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.CommandVideoCloseCommand), Se.Language.Options.Shortcuts.CloseVideo },
         { nameof(MainViewModel.ShowSpeechToTextWhisperCommand), Se.Language.Options.Shortcuts.SpeechToText },
         { nameof(MainViewModel.ShowVideoTextToSpeechCommand), Se.Language.Options.Shortcuts.TextToSpeech },
+        { nameof(MainViewModel.ShowVideoVoiceManagerCommand), Se.Language.Video.TextToSpeech.VoiceManagerTitle },
         { nameof(MainViewModel.ShowVideoOcrCommand), Se.Language.Options.Shortcuts.VideoOcr },
         { nameof(MainViewModel.ShowVideoBurnInCommand), Se.Language.Options.Shortcuts.BurnIn },
         { nameof(MainViewModel.ShowVideoTransparentSubtitlesCommand), Se.Language.Options.Shortcuts.GenerateTransparent },
@@ -269,6 +270,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ToggleLinesItalicOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleItalic },
         { nameof(MainViewModel.ToggleLinesBoldOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleBold },
         { nameof(MainViewModel.ToggleLinesUnderlineOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleUnderline },
+        { nameof(MainViewModel.ToggleLinesBoxOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleBox },
 
         { nameof(MainViewModel.PlayCommand), Se.Language.General.Play },
         { nameof(MainViewModel.PlayNextCommand), Se.Language.General.PlayNext },
@@ -319,6 +321,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.TextBoxItalicCommand), Se.Language.Options.Shortcuts.TextBoxItalic },
         { nameof(MainViewModel.TextBoxBoldCommand), Se.Language.Options.Shortcuts.TextBoxBold },
         { nameof(MainViewModel.TextBoxUnderlineCommand), Se.Language.Options.Shortcuts.TextBoxUnderline },
+        { nameof(MainViewModel.TextBoxBoxCommand), Se.Language.Options.Shortcuts.TextBoxBox },
 
         { nameof(MainViewModel.VideoOneFrameBackCommand), Se.Language.General.VideoOneFrameBack },
         { nameof(MainViewModel.VideoOneFrameForwardCommand),  Se.Language.General.VideoOneFrameForward },
@@ -406,6 +409,10 @@ public static class ShortcutsMain
         { nameof(MainViewModel.MoveStartOneFrameForwardKeepGapPrevCommand), Se.Language.Options.Shortcuts.MoveStartOneFrameForwardKeepGapPrev },
         { nameof(MainViewModel.MoveEndOneFrameBackKeepGapNextCommand), Se.Language.Options.Shortcuts.MoveEndOneFrameBackKeepGapNext },
         { nameof(MainViewModel.MoveEndOneFrameForwardKeepGapNextCommand), Se.Language.Options.Shortcuts.MoveEndOneFrameForwardKeepGapNext },
+        { nameof(MainViewModel.MoveSelectedLinesXMsBackCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesXMsBack },
+        { nameof(MainViewModel.MoveSelectedLinesXMsForwardCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesXMsForward },
+        { nameof(MainViewModel.MoveSelectedLinesAndForwardXMsBackCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesAndForwardXMsBack },
+        { nameof(MainViewModel.MoveSelectedLinesAndForwardXMsForwardCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesAndForwardXMsForward },
         { nameof(MainViewModel.MergeSelectedLinesCommand), Se.Language.General.MergeSelectedLines },
         { nameof(MainViewModel.MergeSelectedLinesDialogCommand), Se.Language.General.MergeSelectedLinesDialog },
         { nameof(MainViewModel.MergeSelectedLinesBilingualCommand), Se.Language.Options.Shortcuts.GeneralMergeSelectedLinesBilingual },
@@ -655,6 +662,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ToggleLinesItalicOrSelectedTextCommand, nameof(vm.ToggleLinesItalicOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.ToggleLinesBoldOrSelectedTextCommand, nameof(vm.ToggleLinesBoldOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.ToggleLinesUnderlineOrSelectedTextCommand, nameof(vm.ToggleLinesUnderlineOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
+        AddShortcut(shortcuts, vm.ToggleLinesBoxOrSelectedTextCommand, nameof(vm.ToggleLinesBoxOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
 
         AddShortcut(shortcuts, vm.PlayCommand, nameof(vm.PlayCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.PlayNextCommand, nameof(vm.PlayNextCommand), ShortcutCategory.General, ShortcutGroup.Video);
@@ -746,6 +754,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.CommandVideoCloseCommand, nameof(vm.CommandVideoCloseCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ShowSpeechToTextWhisperCommand, nameof(vm.ShowSpeechToTextWhisperCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoTextToSpeechCommand, nameof(vm.ShowVideoTextToSpeechCommand), ShortcutCategory.General, ShortcutGroup.Ai);
+        AddShortcut(shortcuts, vm.ShowVideoVoiceManagerCommand, nameof(vm.ShowVideoVoiceManagerCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoOcrCommand, nameof(vm.ShowVideoOcrCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoBurnInCommand, nameof(vm.ShowVideoBurnInCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ShowVideoTransparentSubtitlesCommand, nameof(vm.ShowVideoTransparentSubtitlesCommand), ShortcutCategory.General, ShortcutGroup.Video);
@@ -859,6 +868,10 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.MoveStartOneFrameForwardKeepGapPrevCommand, nameof(vm.MoveStartOneFrameForwardKeepGapPrevCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveEndOneFrameBackKeepGapNextCommand, nameof(vm.MoveEndOneFrameBackKeepGapNextCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveEndOneFrameForwardKeepGapNextCommand, nameof(vm.MoveEndOneFrameForwardKeepGapNextCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveSelectedLinesXMsBackCommand, nameof(vm.MoveSelectedLinesXMsBackCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveSelectedLinesXMsForwardCommand, nameof(vm.MoveSelectedLinesXMsForwardCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveSelectedLinesAndForwardXMsBackCommand, nameof(vm.MoveSelectedLinesAndForwardXMsBackCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveSelectedLinesAndForwardXMsForwardCommand, nameof(vm.MoveSelectedLinesAndForwardXMsForwardCommand), ShortcutCategory.General);
 
         AddShortcut(shortcuts, vm.MergeSelectedLinesDialogCommand, nameof(vm.MergeSelectedLinesDialogCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MergeSelectedLinesBilingualCommand, nameof(vm.MergeSelectedLinesBilingualCommand), ShortcutCategory.General);
@@ -1020,10 +1033,111 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ToggleSubtitlesOnVideoPlayerCommand, nameof(vm.ToggleSubtitlesOnVideoPlayerCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ToggleSmpteTimingCommand, nameof(vm.ToggleSmpteTimingCommand), ShortcutCategory.General, ShortcutGroup.Video);
 
+        // One entry per enabled plugin (SE 4 had the same: Options > Shortcuts > Plugins).
+        // The display name is the plugin name itself, registered the same way the
+        // surround-with / search-via slots publish their dynamic titles.
+        foreach (var entry in vm.PluginShortcutEntries)
+        {
+            CommandTranslationLookup[entry.ActionName] = entry.Plugin.Manifest.Name;
+            AddShortcut(shortcuts, entry.Command, entry.ActionName, ShortcutCategory.General, ShortcutGroup.Plugins);
+        }
+
         return shortcuts;
     }
 
+    /// <summary>
+    /// Default bindings suggested by plugin manifests ("shortcut": "Control+Shift+P"). Only
+    /// applied when the user has no binding for that plugin yet and the chord is not already
+    /// taken by any other shortcut, so a third-party manifest can never hijack a built-in key.
+    /// </summary>
+    private static void AddPluginDefaultShortcuts(MainViewModel? vm, List<SeShortCut> defaults)
+    {
+        if (vm == null)
+        {
+            // Tests call GetDefaultShortcuts(null!) - the built-in list only needs nameof().
+            return;
+        }
+
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var existing in defaults.Concat(Se.Settings.Shortcuts))
+        {
+            if (existing.Keys.Count > 0)
+            {
+                taken.Add(MakeChordKey(existing.Keys));
+            }
+        }
+
+        foreach (var entry in vm.PluginShortcutEntries)
+        {
+            var keys = ParseManifestShortcut(entry.Plugin.Manifest.Shortcut);
+            if (keys == null || !taken.Add(MakeChordKey(keys)))
+            {
+                continue;
+            }
+
+            defaults.Add(new SeShortCut(entry.ActionName, keys, ShortcutCategory.General));
+        }
+    }
+
+    private static string MakeChordKey(List<string> keys)
+    {
+        return string.Join("+", keys
+            .Select(ShortcutManager.NormalizeKeyToken)
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Parses "Control+Shift+P" / "Ctrl+Alt+F5" into the stored key token list. Returns null
+    /// for anything that is not modifiers plus exactly one Avalonia <see cref="Avalonia.Input.Key"/>.
+    /// </summary>
+    public static List<string>? ParseManifestShortcut(string? shortcut)
+    {
+        if (string.IsNullOrWhiteSpace(shortcut))
+        {
+            return null;
+        }
+
+        var keys = new List<string>();
+        var mainKeys = 0;
+        foreach (var raw in shortcut.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var token = raw.ToLowerInvariant() switch
+            {
+                "ctrl" or "control" => "Control",
+                "shift" => "Shift",
+                "alt" or "option" => "Alt",
+                "win" or "meta" or "cmd" or "command" => "Win",
+                _ => null,
+            };
+
+            if (token == null)
+            {
+                if (!Enum.TryParse<Avalonia.Input.Key>(raw, ignoreCase: true, out var key) || key == Avalonia.Input.Key.None)
+                {
+                    return null;
+                }
+
+                token = key.ToString();
+                mainKeys++;
+            }
+
+            if (!keys.Contains(token, StringComparer.OrdinalIgnoreCase))
+            {
+                keys.Add(token);
+            }
+        }
+
+        return mainKeys == 1 ? keys : null;
+    }
+
     public static List<SeShortCut> GetDefaultShortcuts(MainViewModel vm)
+    {
+        var defaults = GetBuiltInDefaultShortcuts(vm);
+        AddPluginDefaultShortcuts(vm, defaults);
+        return defaults;
+    }
+
+    private static List<SeShortCut> GetBuiltInDefaultShortcuts(MainViewModel vm)
     {
         var cmd = GetCommandOrWin();
 
@@ -1032,6 +1146,7 @@ public static class ShortcutsMain
             new(nameof(vm.UndoCommand), [cmd, "Z"]),
             new(nameof(vm.RedoCommand), [cmd, "Y"]),
             new(nameof(vm.ShowGoToLineCommand), [cmd, "G"]),
+            new(nameof(vm.ShowVideoVoiceManagerCommand), [cmd, "Shift", "V"]),
             new(nameof(vm.AddOrEditBookmarkCommand), [cmd, "Shift", "B"]),
             new(nameof(vm.GoToPreviousLineCommand), ["Alt", "Up"]),
             new(nameof(vm.GoToNextLineCommand), ["Alt", "Down"]),

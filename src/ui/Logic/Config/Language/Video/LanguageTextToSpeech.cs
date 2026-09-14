@@ -36,6 +36,13 @@ public class LanguageTextToSpeech
     public string AddingAudioToVideoFileDotDotDot { get; set; }
     public string PreparingMergeDotDotDot { get; set; }
     public string ImportVoiceDotDotDot { get; set; }
+    public string RenameVoiceDotDotDot { get; set; }
+    public string RenameVoiceTitle { get; set; }
+    public string VoiceXCouldNotBeRenamedX { get; set; }
+    public string DeleteVoiceDotDotDot { get; set; }
+    public string DeleteVoiceTitle { get; set; }
+    public string DeleteVoiceXQuestion { get; set; }
+    public string VoiceXCouldNotBeDeletedX { get; set; }
     public string VoiceImportSuccessTitle { get; set; }
     public string VoiceXImported { get; set; }
     public string VoiceXCouldNotBeImported { get; set; }
@@ -45,6 +52,39 @@ public class LanguageTextToSpeech
     public string DropAudioFileHereToImportVoice { get; set; }
     public string DropAudioFileHereHint { get; set; }
     public string VoiceCloneTranscriptTitle { get; set; }
+    // Voice manager
+    public string VoiceManagerTitle { get; set; }
+    public string VoiceManagerDotDotDot { get; set; }
+    public string VoiceManagerMenuItem { get; set; }
+    public string VoiceKindClone { get; set; }
+    public string VoiceKindPreset { get; set; }
+    public string VoiceKindModel { get; set; }
+    public string VoiceKindOnline { get; set; }
+    public string Transcript { get; set; }
+    public string TranscriptRequiredHint { get; set; }
+    public string TranscriptOptionalHint { get; set; }
+    public string SaveTranscript { get; set; }
+    public string SearchVoices { get; set; }
+    public string LoadingVoicesDotDotDot { get; set; }
+    public string NoVoicesForEngine { get; set; }
+    public string NoVoicesMatchFilter { get; set; }
+    public string CopyVoiceTo { get; set; }
+    public string CopyVoiceToDotDotDot { get; set; }
+    public string CopyingVoiceXToYDotDotDot { get; set; }
+    public string VoiceXCopiedToY { get; set; }
+    public string VoiceXCouldNotBeCopiedToY { get; set; }
+    public string VoiceXAlreadyExistsInYContinue { get; set; }
+    public string OpenVoicesFolder { get; set; }
+    public string DownloadVoicePacksDotDotDot { get; set; }
+    public string DownloadVoicePacksTitle { get; set; }
+    public string VoicePackIntro { get; set; }
+    public string VoicePackDetailsXVoicesYSizeZLicense { get; set; }
+    public string InstallToEngine { get; set; }
+    public string DownloadAndInstall { get; set; }
+    public string SelectAtLeastOneVoicePack { get; set; }
+    public string DownloadingXDotDotDot { get; set; }
+    public string InstallingXDotDotDot { get; set; }
+    public string XVoicesInstalledYSkipped { get; set; }
     public string UseSpeechToTextDotDotDot { get; set; }
 
     // Auto cast: find the voices in the video and clone them
@@ -201,6 +241,13 @@ public class LanguageTextToSpeech
         AddingAudioToVideoFileDotDotDot = "Adding audio to video file...";
         PreparingMergeDotDotDot = "Preparing merge...";
         ImportVoiceDotDotDot = "Import voice...";
+        RenameVoiceDotDotDot = "Rename voice...";
+        RenameVoiceTitle = "Rename voice";
+        VoiceXCouldNotBeRenamedX = "Voice '{0}' could not be renamed: {1}";
+        DeleteVoiceDotDotDot = "Delete voice...";
+        DeleteVoiceTitle = "Delete voice";
+        DeleteVoiceXQuestion = "Delete voice '{0}'?\n\nThe reference recording and its files are removed from disk.";
+        VoiceXCouldNotBeDeletedX = "Voice '{0}' could not be deleted: {1}";
         VoiceImportSuccessTitle = "Voice imported";
         VoiceXImported = "Voice '{0}' imported successfully";
         VoiceXCouldNotBeImported = "Voice '{0}' could not be imported - see the log for details";
@@ -210,6 +257,38 @@ public class LanguageTextToSpeech
         DropAudioFileHereToImportVoice = "Drop audio file here to import voice";
         DropAudioFileHereHint = ".wav or .mp3";
         VoiceCloneTranscriptTitle = "Enter transcript of the audio (required for voice cloning)";
+        VoiceManagerTitle = "TTS - Voice manager";
+        VoiceManagerDotDotDot = "Voice manager...";
+        VoiceManagerMenuItem = "TTS voice manager...";
+        VoiceKindClone = "Cloned voice";
+        VoiceKindPreset = "Built-in";
+        VoiceKindModel = "Voice model";
+        VoiceKindOnline = "Online";
+        Transcript = "Transcript";
+        TranscriptRequiredHint = "Required - the engine reads this transcript of the recording (ref-text) when cloning";
+        TranscriptOptionalHint = "Optional - an accurate transcript of the recording improves cloning";
+        SaveTranscript = "Save transcript";
+        SearchVoices = "Search voices";
+        LoadingVoicesDotDotDot = "Loading voices...";
+        NoVoicesForEngine = "No voices - import a recording or download a voice pack";
+        NoVoicesMatchFilter = "No voices match the search";
+        CopyVoiceTo = "Copy voice to";
+        CopyVoiceToDotDotDot = "Copy voice to engine...";
+        CopyingVoiceXToYDotDotDot = "Copying voice '{0}' to {1}...";
+        VoiceXCopiedToY = "Voice '{0}' copied to {1}";
+        VoiceXCouldNotBeCopiedToY = "Voice '{0}' could not be copied to {1} - see the log for details";
+        VoiceXAlreadyExistsInYContinue = "A voice named '{0}' already exists in {1}.\n\nCopy anyway?";
+        OpenVoicesFolder = "Open voices folder";
+        DownloadVoicePacksDotDotDot = "Download voice packs...";
+        DownloadVoicePacksTitle = "TTS - Download voice packs";
+        VoicePackIntro = "Voice packs are sets of short, clean recordings with transcripts, ready to clone from. Each pack is imported into the chosen engine (voices already present are skipped) and includes an ATTRIBUTION.txt with its license and sources.";
+        VoicePackDetailsXVoicesYSizeZLicense = "{0} voices · {1} · {2}";
+        InstallToEngine = "Install to engine";
+        DownloadAndInstall = "Download and install";
+        SelectAtLeastOneVoicePack = "Select at least one voice pack";
+        DownloadingXDotDotDot = "Downloading {0}...";
+        InstallingXDotDotDot = "Installing {0}...";
+        XVoicesInstalledYSkipped = "{0} voices installed ({1} already present)";
         UseSpeechToTextDotDotDot = "Use speech-to-text...";
         AutoCastMenuItem = "Find voices in video and clone...";
         AutoCastSpeakersTitle = "Voices found in the video";

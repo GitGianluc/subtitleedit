@@ -36,6 +36,7 @@ public class LanguageSettingsShortcuts
     public string GeneralToggleItalic { get; set; }
     public string GeneralToggleBold { get; set; }
     public string GeneralToggleUnderline { get; set; }
+    public string GeneralToggleBox { get; set; }
 
     public string FileOpen { get; set; }
     public string FileOpenKeepVideo { get; set; }
@@ -175,6 +176,7 @@ public class LanguageSettingsShortcuts
     public string TextBoxItalic { get; set; }
     public string TextBoxBold { get; set; }
     public string TextBoxUnderline { get; set; }
+    public string TextBoxBox { get; set; }
     public string ResetWaveformZoomAndSpeed { get; set; }
     public string TogglePlaybackSpeed { get; set; }
     public string PlaybackSpeedSlower { get; set; }
@@ -277,6 +279,10 @@ public class LanguageSettingsShortcuts
     public string MoveStartOneFrameForwardKeepGapPrev { get; set; }
     public string MoveEndOneFrameBackKeepGapNext { get; set; }
     public string MoveEndOneFrameForwardKeepGapNext { get; set; }
+    public string MoveSelectedLinesXMsBack { get; set; }
+    public string MoveSelectedLinesXMsForward { get; set; }
+    public string MoveSelectedLinesAndForwardXMsBack { get; set; }
+    public string MoveSelectedLinesAndForwardXMsForward { get; set; }
 
     public LanguageSettingsShortcuts()
     {
@@ -311,6 +317,7 @@ public class LanguageSettingsShortcuts
         GeneralToggleItalic = "Toggle italic";
         GeneralToggleBold = "Toggle bold";
         GeneralToggleUnderline = "Toggle underline";
+        GeneralToggleBox = "Toggle box (EBU STL)";
 
         FileOpen = "Open";
         FileOpenKeepVideo = "Open (keep video)";
@@ -455,6 +462,7 @@ public class LanguageSettingsShortcuts
         TextBoxItalic = "Text box italic";
         TextBoxBold = "Text box bold";
         TextBoxUnderline = "Text box underline";
+        TextBoxBox = "Text box box (EBU STL)";
         ResetWaveformZoomAndSpeed = "Reset waveform zoom and playback speed (play rate)";
         TogglePlaybackSpeed = "Toggle playback speed (play rate)";
         PlaybackSpeedSlower = "Playback speed slower (play rate)";
@@ -557,5 +565,9 @@ public class LanguageSettingsShortcuts
         MoveStartOneFrameForwardKeepGapPrev = "Move start one frame forward (keep gap to previous if close)";
         MoveEndOneFrameBackKeepGapNext = "Move end one frame back (keep gap to next if close)";
         MoveEndOneFrameForwardKeepGapNext = "Move end one frame forward (keep gap to next if close)";
+        MoveSelectedLinesXMsBack = "Move selected lines X ms back (X set in Settings)";
+        MoveSelectedLinesXMsForward = "Move selected lines X ms forward (X set in Settings)";
+        MoveSelectedLinesAndForwardXMsBack = "Move selected lines and all following X ms back (X set in Settings)";
+        MoveSelectedLinesAndForwardXMsForward = "Move selected lines and all following X ms forward (X set in Settings)";
     }
 }

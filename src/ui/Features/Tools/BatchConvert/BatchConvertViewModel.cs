@@ -78,6 +78,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private double _progressMaxValue;
     [ObservableProperty] private string _actionsSelected;
     [ObservableProperty] private bool _isTargetFormatSettingsVisible;
+    [ObservableProperty] private bool _isTransportStreamSettingsVisible;
     [ObservableProperty] private ObservableCollection<string> _filterItems;
     [ObservableProperty] private string? _selectedFilterItem;
     [ObservableProperty] private string _filterText;
@@ -192,6 +193,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     // Merge lines with same text
     [ObservableProperty] private int _mergeSameTextMaxMillisecondsBetweenLines;
     [ObservableProperty] private bool _mergeSameTextIncludeIncrementingLines;
+    [ObservableProperty] private bool _mergeSameTextIncludeRollUpCaptions;
 
     // Merge lines with same time codes
     [ObservableProperty] private int _mergeSameTimeMaxMillisecondsDifference;
@@ -719,6 +721,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // Merge lines with same text / same time codes (shared with the standalone dialogs)
         Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines = MergeSameTextMaxMillisecondsBetweenLines;
         Se.Settings.Tools.MergeSameText.IncludeIncrementingLines = MergeSameTextIncludeIncrementingLines;
+        Se.Settings.Tools.MergeSameText.IncludeRollUpCaptions = MergeSameTextIncludeRollUpCaptions;
         Se.Settings.Tools.MergeSameTimeCode.MaxMillisecondsDifference = MergeSameTimeMaxMillisecondsDifference;
         Se.Settings.Tools.MergeSameTimeCode.MergeDialog = MergeSameTimeMergeDialog;
         Se.Settings.Tools.MergeSameTimeCode.AutoBreak = MergeSameTimeAutoBreak;
@@ -918,6 +921,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         MergeSameTextMaxMillisecondsBetweenLines = Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines;
         MergeSameTextIncludeIncrementingLines = Se.Settings.Tools.MergeSameText.IncludeIncrementingLines;
+        MergeSameTextIncludeRollUpCaptions = Se.Settings.Tools.MergeSameText.IncludeRollUpCaptions;
 
         MergeSameTimeMaxMillisecondsDifference = Se.Settings.Tools.MergeSameTimeCode.MaxMillisecondsDifference;
         MergeSameTimeMergeDialog = Se.Settings.Tools.MergeSameTimeCode.MergeDialog;
@@ -1922,6 +1926,17 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [RelayCommand]
     private async Task AddFolder()
     {
+        await AddFolderAsync(Se.Settings.Tools.BatchConvert.ScanFolderRecursive);
+    }
+
+    [RelayCommand]
+    private async Task AddFolderRecursive()
+    {
+        await AddFolderAsync(recursive: true);
+    }
+
+    private async Task AddFolderAsync(bool recursive)
+    {
         if (Window == null)
         {
             return;
@@ -1933,7 +1948,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             return;
         }
 
-        await AddFilesAndFoldersAsync(Array.Empty<string>(), new[] { folder });
+        await AddFilesAndFoldersAsync(Array.Empty<string>(), new[] { folder }, recursive);
     }
 
     [RelayCommand]
@@ -1942,13 +1957,13 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         _addFilesCancellationTokenSource.Cancel();
     }
 
-    private async Task AddFilesAndFoldersAsync(IReadOnlyList<string> fileNames, IReadOnlyList<string> folders)
+    private async Task AddFilesAndFoldersAsync(IReadOnlyList<string> fileNames, IReadOnlyList<string> folders, bool? recursive = null)
     {
         var allFileNames = new List<string>(fileNames);
 
         if (folders.Count > 0)
         {
-            var scanned = await ScanFoldersAsync(folders);
+            var scanned = await ScanFoldersAsync(folders, recursive ?? Se.Settings.Tools.BatchConvert.ScanFolderRecursive);
             if (scanned == null)
             {
                 return; // cancelled during the scan - add nothing
@@ -1967,13 +1982,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
     /// <summary>
     /// Collects the files the batch converter can open from <paramref name="folders"/> (and their
-    /// subfolders when "include subfolders" is on). Walking a deep tree or a network share can take
-    /// a long time, so this runs off the UI thread behind the "please wait" overlay and can be
-    /// cancelled - returns null when it was.
+    /// subfolders when <paramref name="recursive"/> is set). Walking a deep tree or a network share
+    /// can take a long time, so this runs off the UI thread behind the "please wait" overlay and can
+    /// be cancelled - returns null when it was.
     /// </summary>
-    private async Task<List<string>?> ScanFoldersAsync(IReadOnlyList<string> folders)
+    private async Task<List<string>?> ScanFoldersAsync(IReadOnlyList<string> folders, bool recursive)
     {
-        var recursive = Se.Settings.Tools.BatchConvert.ScanFolderRecursive;
         _addFilesCancellationTokenSource = new CancellationTokenSource();
         var token = _addFilesCancellationTokenSource.Token;
 
@@ -2413,6 +2427,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         var total = _allBatchItems.Count;
         var shown = BatchItems.Count;
 
+        IsTransportStreamSettingsVisible = _allBatchItems.Any(p => p.Format != null && p.Format.StartsWith("Transport Stream", StringComparison.Ordinal));
+
         if (total == 0)
         {
             BatchItemsInfo = string.Empty;
@@ -2622,6 +2638,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     }
 
     [RelayCommand]
+    private async Task ShowTransportStreamSettings()
+    {
+        await _windowService.ShowDialogAsync<BatchConvertTsSettingsWindow, BatchConvertTsSettingsViewModel>(Window!);
+    }
+
+    [RelayCommand]
     private void SelectAll()
     {
         foreach (BatchConvertFunction batchConvertFunction in BatchFunctions)
@@ -2748,6 +2770,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             {
                 IsActive = activeFunctions.Contains(BatchConvertFunctionType.MergeLinesWithSameText),
                 IncludeIncrementingLines = MergeSameTextIncludeIncrementingLines,
+                IncludeRollUpCaptions = MergeSameTextIncludeRollUpCaptions,
                 MaxMillisecondsBetweenLines = MergeSameTextMaxMillisecondsBetweenLines,
             },
 

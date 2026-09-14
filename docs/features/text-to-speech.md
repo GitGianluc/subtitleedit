@@ -1,4 +1,4 @@
-# Text to Speech
+﻿# Text to Speech
 
 Generate speech audio from subtitle text using various TTS engines.
 
@@ -48,7 +48,7 @@ Lines that contain only sounds or music — `♪`, `[door slams]`, `(sighs)`, or
 
 ## Supported Engines
 
-- **Piper** — Local, open-source TTS (Windows and Linux)
+- **Piper** — Local, open-source TTS (Windows and Linux). Custom voice models are supported: any Piper voice is an `.onnx` model with an `.onnx.json` config beside it, and **Import voice...** in the voice settings dialog (the settings button next to **Test voice**) copies such a pair into the Piper folder (`TextToSpeech/Piper` in the data folder). It then appears in the voice list as *Custom - name*; a pair copied into the folder by hand is picked up the same way
 - **EdgeTts** — Microsoft Edge online voices
 - **AllTalk** — Local TTS server
 - **ElevenLabs** — Cloud-based, high-quality voices (requires API key)
@@ -132,6 +132,30 @@ The points that matter:
 - Each speech model also has its own license, which may add further limits on commercial use.
 
 Declining just means "not now" — nothing is changed, the clone is refused, and you are asked again the next time. The answer is remembered per terms version, so you are asked again if the terms change.
+
+### Renaming and Deleting Imported Voices
+
+Right-click the voice combo box for **Rename voice...** and **Delete voice...**. Both work on voices you imported or cloned - the engines list those straight from their `voices` folder, one reference recording per voice - and are disabled for engine presets, built-in speakers and the *Clone from video* entry.
+
+- **Rename voice...** moves the recording together with its sidecar files (the `.txt` transcript, engine JSON) and the cached prepared copy, so nothing is left behind as an orphan. Spaces are stored as underscores, which is what the engines show as spaces.
+- **Delete voice...** asks for confirmation, then removes the recording and its files from disk.
+
+Supported for every file-backed cloning voice: the CrispASR engines (Chatterbox, Confucius4-TTS, CosyVoice3, dots.tts, IndexTTS, MOSS-TTS, OmniVoice, Pocket TTS, Qwen3 TTS, VibeVoice, VoxCPM2, Zonos), the standalone OmniVoice TTS, and the audio.cpp engines (IndexTTS 2.5, Higgs Audio v3, Fish Audio S2 Pro, FireRedTTS3).
+
+### Voice Manager
+
+Click the voice-manager button (the head-and-microphone icon next to the voice combo box) or pick **Voice manager...** from the combo box's right-click menu to open one window for all voices of all engines.
+
+- **Engines** that support voice cloning are listed on the left; pick one to list its voices with type (cloned voice or built-in preset), duration, format and whether a transcript is present. Search filters the list.
+- **Play** (Space, or double-click) plays a cloned voice's reference recording; the waveform below shows the whole clip with a playhead, and clicking the waveform seeks.
+- **Transcript** - for engines that read the transcript of the reference recording (ref-text), the text is shown under the waveform and can be edited and saved, or filled in with **Use speech-to-text...**. The hint says whether the engine requires it (CosyVoice3, Fish Audio S2 Pro, Qwen3 TTS, OmniVoice TTS) or only benefits from it (F5-TTS, FireRedTTS3, Higgs Audio, MOSS-TTS, OmniVoice CrispASR, VoxCPM2). Engines that clone from a speaker embedding do not use one.
+- **Rename** (F2) and **Delete** (Del) work as in the combo box menu.
+- **Copy voice to engine...** imports the recording and its transcript into another cloning engine, resampled to what that engine wants. A transcript is asked for when the target requires one and none is stored. Voices with the same name in the target are confirmed first.
+- **Import voice...** adds a recording (or, for Piper, a voice model) to the current engine, with the same transcript prompt as the voice settings dialog.
+- **Download voice packs...** fetches ready-made sets of reference recordings with transcripts and installs them into a chosen cloning engine, skipping voices already present: the 18-voice English standard set, and German, Spanish, French, Italian, Dutch, Polish and Portuguese readers cut from Multilingual LibriSpeech (LibriVox, CC BY 4.0). Every pack carries an `ATTRIBUTION.txt` with its license and sources.
+- **Open voices folder** shows the engine's `voices` folder on disk; **Refresh** re-lists (and for online engines re-downloads the voice list).
+
+Cloned voices are the only editable kind; an engine's built-in presets are listed for orientation.
 
 ### Cloning a Voice Heard in the Video
 

@@ -52,20 +52,7 @@ public static class InitMenu
         // the menu itself closes (#13325).
         WindowService.SuspendUndockedTopmostWhileOpen(menu);
 
-        // Drop the menu's font one notch below the theme default and tighten
-        // each item's vertical padding — a denser menu reads better when there
-        // are this many entries. The style targets nested MenuItems so submenu
-        // items inherit the same look.
-        menu.FontSize = MenuFontSize;
-        menu.Styles.Add(new Style(x => x.OfType<MenuItem>())
-        {
-            Setters =
-            {
-                new Setter(MenuItem.FontSizeProperty, MenuFontSize),
-                new Setter(MenuItem.PaddingProperty, new Thickness(10, 1)),
-                new Setter(MenuItem.MinHeightProperty, 23.0),
-            },
-        });
+        ApplyFontSize(menu);
 
         menu.Items.Add(new MenuItem
         {
@@ -662,6 +649,11 @@ public static class InitMenu
             },
             new MenuItem
             {
+                Header = Se.Language.Video.RemuxVideoDotDotDot,
+                Command = vm.ShowVideoRemuxVideoCommand,
+            },
+            new MenuItem
+            {
                 // Finds who speaks in the video, clones each of them and assigns the cast, so the
                 // whole thing can be dubbed in its own voices (#13698).
                 Header = Se.Language.Video.TextToSpeech.AutoCastMenuItem,
@@ -770,6 +762,11 @@ public static class InitMenu
                 {
                     Header = l.TextToSpeech,
                     Command = vm.ShowVideoTextToSpeechCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Video.TextToSpeech.VoiceManagerMenuItem,
+                    Command = vm.ShowVideoVoiceManagerCommand,
                 },
                 new MenuItem
                 {
@@ -1103,6 +1100,35 @@ public static class InitMenu
         }
     }
 
+    private static Style? _menuFontStyle;
+
+    /// <summary>
+    /// Drops the menu's font one notch below the theme default and tightens each item's
+    /// vertical padding - a denser menu reads better when there are this many entries. The
+    /// style targets nested MenuItems so submenu items inherit the same look. Re-run after the
+    /// settings dialog so a changed font scale (#14812) reaches the main menu without a restart;
+    /// the previous style is swapped out so the items re-evaluate.
+    /// </summary>
+    public static void ApplyFontSize(Menu menu)
+    {
+        if (_menuFontStyle != null)
+        {
+            menu.Styles.Remove(_menuFontStyle);
+        }
+
+        menu.FontSize = UiUtil.ScaledFontSize(MenuFontSize);
+        _menuFontStyle = new Style(x => x.OfType<MenuItem>())
+        {
+            Setters =
+            {
+                new Setter(MenuItem.FontSizeProperty, UiUtil.ScaledFontSize(MenuFontSize)),
+                new Setter(MenuItem.PaddingProperty, new Thickness(10, 1)),
+                new Setter(MenuItem.MinHeightProperty, 23.0),
+            },
+        };
+        menu.Styles.Add(_menuFontStyle);
+    }
+
     public static void UpdateRecentFiles(MainViewModel vm)
     {
         var files = Se.Settings.File.RecentFiles.Where(p => !string.IsNullOrEmpty(p.SubtitleFileName) && System.IO.File.Exists(p.SubtitleFileName)).ToList();
@@ -1153,10 +1179,7 @@ public static class InitMenu
     {
         vm.MenuPlugins.Items.Clear();
 
-        var enabledPlugins = vm.GetInstalledPlugins()
-            .Where(p => !Se.Settings.Plugins.DisabledPluginNames.Contains(p.Manifest.Name))
-            .OrderBy(p => p.Manifest.Name)
-            .ToList();
+        var enabledPlugins = vm.PluginShortcutEntries;
         if (enabledPlugins.Count == 0)
         {
             vm.MenuPlugins.Items.Add(new MenuItem
@@ -1167,14 +1190,15 @@ public static class InitMenu
         }
         else
         {
-            foreach (var plugin in enabledPlugins)
+            // Per-plugin command so the gesture lookup in DisplayShortcuts (by command
+            // reference) finds the plugin's own shortcut.
+            foreach (var entry in enabledPlugins)
             {
                 vm.MenuPlugins.Items.Add(new MenuItem
                 {
-                    Header = plugin.Manifest.Name,
-                    Command = vm.RunPluginCommand,
-                    CommandParameter = plugin,
-                    IsEnabled = plugin.CanRun,
+                    Header = entry.Plugin.Manifest.Name,
+                    Command = entry.Command,
+                    IsEnabled = entry.Plugin.CanRun,
                 });
             }
         }

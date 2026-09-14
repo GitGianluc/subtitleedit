@@ -14,6 +14,7 @@ public class SeGeneral
     public string Version { get; set; }
     public string Language { get; set; }
     public int LayoutNumber { get; set; } = 0;
+    public int? LayoutMigrationVersion { get; set; }
 
     public string CurrentProfile { get; set; }
     public List<RulesProfile> Profiles { get; set; }
@@ -84,6 +85,9 @@ public class SeGeneral
     /// <summary>How much the time up/down controls change per step when the caret is on the
     /// milliseconds part. Frame mode always steps one frame (#12506).</summary>
     public int TimeCodeUpDownStepMs { get; set; }
+    /// <summary>How far the "move selected lines X ms back/forward" shortcuts shift, in
+    /// milliseconds (SE 4 had fixed 100 ms variants; #14789 asks for repeatable drift fixes).</summary>
+    public int MoveSelectedLinesStepMs { get; set; }
     public bool PromptBeforeDelete { get; set; }
     public bool LockTimeCodes { get; set; }
 
@@ -107,6 +111,9 @@ public class SeGeneral
     public bool AutoBackupOn { get; set; }
     public int AutoBackupIntervalMinutes { get; set; }
     public int AutoBackupDeleteAfterDays { get; set; }
+    public bool SettingsBackupOn { get; set; }
+    public int SettingsBackupIntervalDays { get; set; }
+    public int SettingsBackupMaxCount { get; set; }
     public bool ForceCrLfOnSave { get; set; }
 
     /// <summary>
@@ -256,10 +263,14 @@ public class SeGeneral
         AutoGuessAnsiEncoding = true;
         NewEmptyDefaultMs = 2000;
         TimeCodeUpDownStepMs = 100;
+        MoveSelectedLinesStepMs = 100;
         PromptBeforeDelete = true;
         AutoBackupOn = true;
         AutoBackupIntervalMinutes = 5;
         AutoBackupDeleteAfterDays = 90;
+        SettingsBackupOn = true;
+        SettingsBackupIntervalDays = 1;
+        SettingsBackupMaxCount = 30;
         DefaultSaveAsFormat = new SubRip().FriendlyName;
         FavoriteSubtitleFormats = new SubRip().FriendlyName + ";" + new AdvancedSubStationAlpha().FriendlyName;
         FavoriteLanguages = string.Empty;

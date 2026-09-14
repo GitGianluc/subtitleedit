@@ -19,8 +19,9 @@ public class Se
 {
     internal const int CurrentMacOsFontMigrationVersion = 1;
     internal const int CurrentShortcutsMigrationVersion = 3;
+    internal const int CurrentLayoutMigrationVersion = 1;
 
-    public static string Version { get; set; } = "v5.2.0-rc7";
+    public static string Version { get; set; } = "v5.2.0";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -183,7 +184,16 @@ public class Se
     public static string ThemesFolder => Path.Combine(DataFolder, "Themes");
     public static string FontsFolder => Path.Combine(DataFolder, "Fonts");
     public static string AutoBackupFolder => Path.Combine(DataFolder, "AutoBackup");
+
+    /// <summary>
+    /// Daily copies of Settings.json. A sub-folder of the subtitle auto-backup folder so the
+    /// non-recursive subtitle scan never lists them, and so both live under one place to clean.
+    /// </summary>
+    public static string SettingsBackupFolder => Path.Combine(AutoBackupFolder, "Settings");
     public static string FfmpegFolder => Path.Combine(DataFolder, "ffmpeg");
+
+    /// <summary>FFmpeg shared libraries (avcodec etc.) for the ffmpeg video player - kept apart from the static ffmpeg.exe above.</summary>
+    public static string FfmpegLibFolder => Path.Combine(FfmpegFolder, "lib");
     public static string TextToSpeechFolder => Path.Combine(DataFolder, "TextToSpeech");
     public static string SpeechToTextFolder => Path.Combine(DataFolder, "SpeechToText");
     public static string CrispAsrFolder => Path.Combine(DataFolder, "CrispASR");
@@ -588,6 +598,7 @@ public class Se
         }
 
         MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), settingsFileExists);
+        MigrateLayoutNumber(Settings.General);
 
         UpdateLibSeSettings();
 
@@ -613,6 +624,26 @@ public class Se
 
         // Once marked, a later explicit System Font selection must remain untouched.
         appearance.MacOsFontMigrationVersion = CurrentMacOsFontMigrationVersion;
+    }
+
+    /// <summary>
+    /// Version 1: layouts 12 and 13 (text box below the video player, issue #14812) were inserted
+    /// before the "no video" layout, which moved from 12 to 14. A persisted 12 from before that
+    /// still means "no video", so it is moved along once.
+    /// </summary>
+    internal static void MigrateLayoutNumber(SeGeneral general)
+    {
+        if (general.LayoutMigrationVersion.GetValueOrDefault() >= CurrentLayoutMigrationVersion)
+        {
+            return;
+        }
+
+        if (general.LayoutNumber == 12)
+        {
+            general.LayoutNumber = 14;
+        }
+
+        general.LayoutMigrationVersion = CurrentLayoutMigrationVersion;
     }
 
     /// <summary>

@@ -73,6 +73,7 @@ public class LanguageSettings
     public string ShowGridLines { get; set; }
     public string ShowHorizontalLineAboveToolbar { get; set; }
     public string BookmarkColor { get; set; }
+    public string SpellCheckHighlightColor { get; set; }
     public string SingleLineMaxLength { get; set; }
     public string OptimalCharsPerSec { get; set; }
     public string MaxCharsPerSec { get; set; }
@@ -97,6 +98,7 @@ public class LanguageSettings
     public string UseDoNotBreakAfterList { get; set; }
     public string NewEmptyDefaultMs { get; set; }
     public string TimeCodeUpDownStepMs { get; set; }
+    public string MoveSelectedLinesStepMs { get; set; }
     public string PromptBeforeDelete { get; set; }
     public string RememberPositionAndSize { get; set; }
     public string OpenLastFileOnStart { get; set; }
@@ -104,6 +106,9 @@ public class LanguageSettings
     public string AutoBackupOn { get; set; }
     public string AutoBackupIntervalMinutes { get; set; }
     public string AutoBackupDeleteAfterDays { get; set; }
+    public string SettingsBackupOn { get; set; }
+    public string SettingsBackupIntervalDays { get; set; }
+    public string SettingsBackupMaxCount { get; set; }
     public string AutoConvertToUtf8 { get; set; }
     public string AutoTrimWhiteSpace { get; set; }
     public string RemoveBlankLinesWhenOpening { get; set; }
@@ -150,33 +155,7 @@ public class LanguageSettings
     public string DownloadFfmpeg { get; set; }
     public string FixCommonErrorsSkipStep1 { get; set; }
 
-    // Toolbar
-    public string ShowToolbarNew { get; set; }
-    public string ShowToolbarOpen { get; set; }
-    public string ShowToolbarVideoFileOpen { get; set; }
-    public string ShowToolbarSave { get; set; }
-    public string ShowToolbarSaveAs { get; set; }
-    public string ShowToolbarFind { get; set; }
-    public string ShowToolbarReplace { get; set; }
-    public string ShowToolbarMultipleReplace { get; set; }
-    public string ShowToolbarSpellCheck { get; set; }
-    public string ShowToolbarFixCommonErrors { get; set; }
-    public string ShowToolbarRemoveTextForHi { get; set; }
-    public string ShowToolbarVisualSync { get; set; }
-    public string ShowToolbarPointSync { get; set; }
-    public string ShowToolbarBeautifyTimeCodes { get; set; }
-    public string ShowToolbarBurnIn { get; set; }
-    public string ShowToolbarAutoTranslate { get; set; }
-    public string ShowToolbarSpeechToText { get; set; }
-    public string ShowToolbarSettings { get; set; }
-    public string ShowToolbarLayout { get; set; }
-    public string ShowToolbarHelp { get; set; }
-    public string ShowToolbarEncoding { get; set; }
-    public string ShowToolbarFrameRate { get; set; }
-    public string ShowToolbarStyleManager { get; set; }
-    public string ShowToolbarProperties { get; set; }
-    public string ShowToolbarAttachments { get; set; }
-    public string ShowToolbarAssaDraw { get; set; }
+    // Plugins
     public string ShowPluginsMenu { get; set; }
 
     // Network
@@ -209,6 +188,7 @@ public class LanguageSettings
     public string DownloadMpv { get; set; }
     public string DownloadVlc { get; set; }
     public string AllowSingleLetterShortcutsInTextbox { get; set; }
+    public string AllowTextNavigationShortcutsInTextbox { get; set; }
     public string SpellCheckEnglishTreatInApostropheAsIng { get; set; }
     public string GoToLineNumberSetsVideoPosition { get; set; }
     public string AdjustAllTimesRememberLineSelectionChoice { get; set; }
@@ -266,7 +246,10 @@ public class LanguageSettings
     public string WaveformExtractAudioSampleRate { get; set; }
     public string WaveformExtractAudioSampleRateOriginal { get; set; }
     public string WaveformExtractAudioBitRate { get; set; }
+    public string FfmpegUseCenterChannelOnly { get; set; }
     public string VlcWidRendering { get; set; }
+    public string FfmpegSoftwareRendering { get; set; }
+    public string DownloadFfmpegLibs { get; set; }
     public string SubtitleGridEnterKeyAction { get; set; }
     public string SubtitleSingleClickAction { get; set; }
     public string SubtitleDoubleClickAction { get; set; }
@@ -294,6 +277,7 @@ public class LanguageSettings
     public string SubtitleGridFormattingShowFormatting { get; set; }
     public string SubtitleGridFormattingShowTags { get; set; }
     public string SubtitleGridFormattingHideTags { get; set; }
+    public string SubtitleGridFormattingShowFormattingKeepTags { get; set; }
     public string WaveformParagraphBackgroundColor { get; set; }
     public string WaveformParagraphSelectedBackgroundColor { get; set; }
     public string WaveformAllowOverlap { get; set; }
@@ -331,6 +315,7 @@ public class LanguageSettings
     public string WaveformDoubleClickAction { get; set; }
     public string AllSettings { get; set; }
     public string UiScale { get; set; }
+    public string FontScale { get; set; }
     public string WaveformToolbarItems { get; set; }
     public string MatchIconColorToDarkTheme { get; set; }
     public string SubtitlePreviewProperties { get; set; }
@@ -416,6 +401,7 @@ public class LanguageSettings
         ShowGridLines = "Show grid lines";
         ShowHorizontalLineAboveToolbar = "Show horizontal line above toolbar";
         BookmarkColor = "Bookmark color";
+        SpellCheckHighlightColor = "Spell check highlight color";
         SingleLineMaxLength = "Single line max length";
         OptimalCharsPerSec = "Optimal chars/sec";
         MaxCharsPerSec = "Max chars/sec";
@@ -440,6 +426,7 @@ public class LanguageSettings
         UseDoNotBreakAfterList = "Use do-not-break-after list";
         NewEmptyDefaultMs = "Default new subtitle duration (ms)";
         TimeCodeUpDownStepMs = "Time up/down increment (ms)";
+        MoveSelectedLinesStepMs = "Move selected lines shortcut step (ms)";
         PromptBeforeDelete = "Prompt before delete";
         RememberPositionAndSize = "Remember window position and size";
         OpenLastFileOnStart = "Open last recent file on start";
@@ -447,6 +434,9 @@ public class LanguageSettings
         AutoBackupOn = "Auto-backup";
         AutoBackupIntervalMinutes = "Auto-backup interval (minutes)";
         AutoBackupDeleteAfterDays = "Auto-backup retention (days)";
+        SettingsBackupOn = "Auto-backup settings";
+        SettingsBackupIntervalDays = "Settings backup interval (days)";
+        SettingsBackupMaxCount = "Settings backups to keep";
         AutoConvertToUtf8 = "Auto-convert encoding to UTF-8 on open";
         AutoTrimWhiteSpace = "Auto-trim white-space";
         RemoveBlankLinesWhenOpening = "Remove blank lines when opening a subtitle";
@@ -494,33 +484,7 @@ public class LanguageSettings
         DownloadFfmpeg = "Download ffmpeg";
         FixCommonErrorsSkipStep1 = "Fix common errors: skip step 1 (choose fixes)";
 
-        // Toolbar
-        ShowToolbarNew = "Show new icon";
-        ShowToolbarOpen = "Show open icon";
-        ShowToolbarVideoFileOpen = "Show video file open icon";
-        ShowToolbarSave = "Show save icon";
-        ShowToolbarSaveAs = "Show save as icon";
-        ShowToolbarFind = "Show find icon";
-        ShowToolbarReplace = "Show replace icon";
-        ShowToolbarMultipleReplace = "Show multiple replace icon";
-        ShowToolbarSpellCheck = "Show spell check icon";
-        ShowToolbarFixCommonErrors = "Show fix common errors icon";
-        ShowToolbarRemoveTextForHi = "Show remove text for hearing impaired icon";
-        ShowToolbarVisualSync = "Show visual sync icon";
-        ShowToolbarPointSync = "Show point sync icon";
-        ShowToolbarBeautifyTimeCodes = "Show beautify time codes icon";
-        ShowToolbarBurnIn = "Show burn-in icon";
-        ShowToolbarAutoTranslate = "Show auto-translate icon";
-        ShowToolbarSpeechToText = "Show speech to text icon";
-        ShowToolbarSettings = "Show settings icon";
-        ShowToolbarLayout = "Show layout icon";
-        ShowToolbarHelp = "Show help icon";
-        ShowToolbarEncoding = "Show encoding";
-        ShowToolbarFrameRate = "Show frame rate";
-        ShowToolbarStyleManager = "Show style manager icon (ASSA/SSA/WebVTT)";
-        ShowToolbarProperties = "Show properties icon (ASSA/SSA)";
-        ShowToolbarAttachments = "Show attachments icon (ASSA/SSA)";
-        ShowToolbarAssaDraw = "Show ASSA draw icon (ASSA)";
+        // Plugins
         ShowPluginsMenu = "Show Plugins menu";
 
         // Network
@@ -545,6 +509,7 @@ public class LanguageSettings
         DownloadMpv = "Download mpv";
         DownloadVlc = "Download VLC";
         AllowSingleLetterShortcutsInTextbox = "Allow single-letter shortcuts in text box";
+        AllowTextNavigationShortcutsInTextbox = "Allow shortcuts on text-navigation keys (Ctrl+Left/Right, Home/End) in text box";
         SpellCheckEnglishTreatInApostropheAsIng = "Spell check: Treat words ending in 'in'' as 'ing' (English only)";
         GoToLineNumberSetsVideoPosition = "Go-to-line-number also sets video position";
         AdjustAllTimesRememberLineSelectionChoice = "Adjust all times, remember line selection choice";
@@ -598,6 +563,8 @@ public class LanguageSettings
         MpvWidRendering = "libmpv - Native Window ID rendering";
         MpvSoftwareRendering = "libmpv - Software rendering (slow)";
         VlcWidRendering = "libVLC - Native Window ID rendering";
+        FfmpegSoftwareRendering = "FFmpeg";
+        DownloadFfmpegLibs = "Download FFmpeg libraries (for the FFmpeg video player)";
         WaveFormsAndSpectrogramFoldersContainsX = "\"Waveforms\" and \"spectrogram\" folders contains {0}";
         DeleteWaveformAndSpectrogramFoldersQuestion = "Delete \"Waveforms\" and \"Spectrogram\" files?";
         WaveformGenerateSpectrogram = "Generate spectrogram";
@@ -609,6 +576,7 @@ public class LanguageSettings
         WaveformExtractAudioSampleRate = "Extract audio sample rate";
         WaveformExtractAudioSampleRateOriginal = "Original (keep source)";
         WaveformExtractAudioBitRate = "Extract audio bitrate (MP3/M4A)";
+        FfmpegUseCenterChannelOnly = "Use only front center channel for 5.1 audio (FFmpeg)";
         SubtitleGridEnterKeyAction = "Subtitle grid Enter-key action";
         SubtitleSingleClickAction = "Subtitle grid single-click action";
         SubtitleDoubleClickAction = "Subtitle grid double-click action";
@@ -636,6 +604,7 @@ public class LanguageSettings
         SubtitleGridFormattingShowFormatting = "Show formatting";
         SubtitleGridFormattingShowTags = "Show tags";
         SubtitleGridFormattingHideTags = "Hide tags";
+        SubtitleGridFormattingShowFormattingKeepTags = "Show formatting, keep non-visual tags";
         WaveformParagraphBackgroundColor = "Waveform subtitle background color";
         WaveformParagraphSelectedBackgroundColor = "Waveform selected subtitle background color";
         WaveformAllowOverlap = "Allow overlap (when moving/resizing)";
@@ -673,6 +642,7 @@ public class LanguageSettings
         WaveformDoubleClickAction = "Waveform double-click action (after single-click action)";
         AllSettings = "All settings";
         UiScale = "UI scale (%)";
+        FontScale = "Font scale (%)";
         WaveformToolbarItems = "Waveform toolbar items";
         MatchIconColorToDarkTheme = "Match icon color to dark theme foreground color";
         SubtitlePreviewProperties = "Subtitle preview properties";

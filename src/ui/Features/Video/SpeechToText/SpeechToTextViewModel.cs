@@ -133,6 +133,9 @@ public partial class SpeechToTextViewModel : ObservableObject
     [ObservableProperty] private string? _googleCloudSttModel;
     [ObservableProperty] private string? _googleCloudSttLanguage;
     [ObservableProperty] private int _googleCloudSttTimeoutSeconds;
+    [ObservableProperty] private string? _googleCloudSttProjectId;
+    [ObservableProperty] private string? _googleCloudSttBucketName;
+    [ObservableProperty] private bool _googleCloudSttDynamicBatching;
 
     public Window? Window { get; set; }
 
@@ -387,6 +390,9 @@ public partial class SpeechToTextViewModel : ObservableObject
         GoogleCloudSttModel = Se.Settings.Tools.GoogleCloudSttModel;
         GoogleCloudSttLanguage = Se.Settings.Tools.GoogleCloudSttLanguage;
         GoogleCloudSttTimeoutSeconds = Se.Settings.Tools.GoogleCloudSttTimeoutSeconds;
+        GoogleCloudSttProjectId = Se.Settings.Tools.GoogleCloudSttProjectId;
+        GoogleCloudSttBucketName = Se.Settings.Tools.GoogleCloudSttBucketName;
+        GoogleCloudSttDynamicBatching = Se.Settings.Tools.GoogleCloudSttDynamicBatching;
 
         var savedChoice = Se.Settings.Tools.AudioToText.WhisperChoice;
         var whisperCppEngine = Engines.OfType<WhisperCppEngine>().FirstOrDefault();
@@ -472,6 +478,9 @@ public partial class SpeechToTextViewModel : ObservableObject
         Se.Settings.Tools.GoogleCloudSttModel = GoogleCloudSttModel ?? "chirp_3";
         Se.Settings.Tools.GoogleCloudSttLanguage = GoogleCloudSttLanguage ?? string.Empty;
         Se.Settings.Tools.GoogleCloudSttTimeoutSeconds = GoogleCloudSttTimeoutSeconds;
+        Se.Settings.Tools.GoogleCloudSttProjectId = GoogleCloudSttProjectId?.Trim() ?? string.Empty;
+        Se.Settings.Tools.GoogleCloudSttBucketName = GoogleCloudSttBucketName?.Trim() ?? string.Empty;
+        Se.Settings.Tools.GoogleCloudSttDynamicBatching = GoogleCloudSttDynamicBatching;
 
         Se.SaveSettings();
     }
@@ -3830,7 +3839,11 @@ public partial class SpeechToTextViewModel : ObservableObject
         ProgressOpacity = 1;
         ProgressText = GetProgressText();
 
-        _useCenterChannelOnly = false; // FFmpeg center-channel extraction is not configurable in SE 5 yet
+        // Same gate as WaveFileExtractor: the setting alone is not enough, the picked track must
+        // actually have a front center channel or "pan=mono|c0=FC" would fail on a stereo source.
+        _useCenterChannelOnly = Se.Settings.General.FfmpegUseCenterChannelOnly &&
+                                !string.IsNullOrEmpty(_videoFileName) &&
+                                FfmpegMediaInfo.Parse(_videoFileName).HasFrontCenterAudio(_audioTrackNumber);
 
         //Delete invalid preprocessor_config.json file
         if (settings.WhisperChoice is WhisperChoice.PurfviewFasterWhisperXxl)

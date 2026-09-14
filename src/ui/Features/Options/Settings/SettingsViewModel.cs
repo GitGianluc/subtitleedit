@@ -121,6 +121,7 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty] private int? _newEmptyDefaultMs;
     [ObservableProperty] private int? _timeCodeUpDownStepMs;
+    [ObservableProperty] private int? _moveSelectedLinesStepMs;
     [ObservableProperty] private bool _promptBeforeDelete;
     [ObservableProperty] private bool _lockTimeCodes;
     [ObservableProperty] private bool _rememberPositionAndSize;
@@ -139,6 +140,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _autoBackupOn;
     [ObservableProperty] private int? _autoBackupIntervalMinutes;
     [ObservableProperty] private int? _autoBackupDeleteAfterDays;
+    [ObservableProperty] private bool _settingsBackupOn;
+    [ObservableProperty] private int? _settingsBackupIntervalDays;
+    [ObservableProperty] private int? _settingsBackupMaxCount;
 
     [ObservableProperty] private ObservableCollection<string> _defaultSubtitleFormats;
     [ObservableProperty] private string _selectedDefaultSubtitleFormat;
@@ -186,6 +190,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _selectedSaveAsAppendLanguageCode;
 
     [ObservableProperty] private bool _allowSingleLetterShortcutsInTextbox;
+    [ObservableProperty] private bool _allowTextNavigationShortcutsInTextbox;
     [ObservableProperty] private bool _goToLineNumberAlsoSetVideoPosition;
     [ObservableProperty] private bool _adjustAllTimesRememberLineSelectionChoice;
     [ObservableProperty] private bool _mergeKeepEndTime;
@@ -210,34 +215,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _showUpDownDuration;
     [ObservableProperty] private bool _showUpDownLabels;
 
-    [ObservableProperty] private bool _showToolbarNew;
-    [ObservableProperty] private bool _showToolbarOpen;
-    [ObservableProperty] private bool _showToolbarVideoFileOpen;
-    [ObservableProperty] private bool _showToolbarSave;
-    [ObservableProperty] private bool _showToolbarSaveAs;
-    [ObservableProperty] private bool _showToolbarFind;
-    [ObservableProperty] private bool _showToolbarReplace;
-    [ObservableProperty] private bool _showToolbarMultipleReplace;
-    [ObservableProperty] private bool _showToolbarSpellCheck;
-    [ObservableProperty] private bool _showToolbarFixCommonErrors;
-    [ObservableProperty] private bool _showToolbarRemoveTextForHi;
-    [ObservableProperty] private bool _showToolbarVisualSync;
-    [ObservableProperty] private bool _showToolbarPointSync;
-    [ObservableProperty] private bool _showToolbarBeautifyTimeCodes;
-    [ObservableProperty] private bool _showToolbarBurnIn;
-    [ObservableProperty] private bool _showToolbarAutoTranslate;
-    [ObservableProperty] private bool _showToolbarSpeechToText;
+    public IReadOnlyList<ToolbarSettingItem> ToolbarItems { get; } = ToolbarSettingItem.CreateItems();
+
     [ObservableProperty] private bool _fixCommonErrorsSkipStep1;
-    [ObservableProperty] private bool _showToolbarSettings;
-    [ObservableProperty] private bool _showToolbarLayout;
-    [ObservableProperty] private bool _showToolbarSourceView;
-    [ObservableProperty] private bool _showToolbarHelp;
-    [ObservableProperty] private bool _showToolbarEncoding;
-    [ObservableProperty] private bool _showToolbarFrameRate;
-    [ObservableProperty] private bool _showToolbarStyleManager;
-    [ObservableProperty] private bool _showToolbarProperties;
-    [ObservableProperty] private bool _showToolbarAttachments;
-    [ObservableProperty] private bool _showToolbarAssaDraw;
 
     [ObservableProperty] private bool _showPluginsMenu;
 
@@ -296,6 +276,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _libVlcStatus;
     [ObservableProperty] private bool _isLibMpvDownloadVisible;
     [ObservableProperty] private bool _isLibVlcDownloadVisible;
+    [ObservableProperty] private string _ffmpegLibsStatus;
+    [ObservableProperty] private bool _isFfmpegLibsDownloadVisible;
     [ObservableProperty] private string _ffmpegPath;
     [ObservableProperty] private string _ffmpegStatus;
     [ObservableProperty] private string _proxyAddress = string.Empty;
@@ -377,6 +359,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _selectedWaveformExtractAudioSampleRate;
     [ObservableProperty] private ObservableCollection<string> _waveformExtractAudioBitRates;
     [ObservableProperty] private string _selectedWaveformExtractAudioBitRate;
+    [ObservableProperty] private bool _ffmpegUseCenterChannelOnly;
 
     [ObservableProperty] private bool _waveformRightClickSelectsSubtitle;
     [ObservableProperty] private ObservableCollection<string> _themes;
@@ -385,6 +368,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _selectedIconTheme;
     [ObservableProperty] private bool _matchIconColorToDarkTheme;
     [ObservableProperty] private int _layoutScale;
+    [ObservableProperty] private int _fontScale;
     [ObservableProperty] private ObservableCollection<string> _fontNames;
     [ObservableProperty] private string _selectedFontName;
     [ObservableProperty] private double _subtitleGridFontSize;
@@ -414,6 +398,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _useFocusedButtonBackgroundColor;
     [ObservableProperty] private Color _focusedButtonBackgroundColor;
     [ObservableProperty] private Color _bookmarkColor;
+    [ObservableProperty] private Color _spellCheckHighlightColor;
     [ObservableProperty] private Color _gridAlternatingRowColor;
     [ObservableProperty] private Color _gridAlternatingRowColorDark;
     [ObservableProperty] private bool _isEditCustomContinuationStyleVisible;
@@ -486,6 +471,7 @@ public partial class SettingsViewModel : ObservableObject
         MpvPreviewJustifyItems = new ObservableCollection<MpvJustifyDisplay>(MpvJustifyDisplay.GetAll());
         MpvPreviewSelectedJustify = MpvPreviewJustifyItems[0];
         LibVlcStatus = string.Empty;
+        FfmpegLibsStatus = string.Empty;
 
         UpdateChannels =
         [
@@ -518,6 +504,7 @@ public partial class SettingsViewModel : ObservableObject
             Se.Language.Options.Settings.SubtitleGridFormattingShowFormatting,
             Se.Language.Options.Settings.SubtitleGridFormattingShowTags,
             Se.Language.Options.Settings.SubtitleGridFormattingHideTags,
+            Se.Language.Options.Settings.SubtitleGridFormattingShowFormattingKeepTags,
         };
         SubtitleGridFormatting = SubtitleGridFormattings[0];
 
@@ -702,6 +689,7 @@ public partial class SettingsViewModel : ObservableObject
         LibMpvPath = string.Empty;
         IsLibMpvDownloadVisible = OperatingSystem.IsWindows();
         IsLibVlcDownloadVisible = OperatingSystem.IsWindows();
+        IsFfmpegLibsDownloadVisible = OperatingSystem.IsWindows();
 
         MpvPreviewFontName = FontNames.First();
         MpvPreviewSelectedBorderType = MpvPreviewBorderTypes.First();
@@ -786,6 +774,7 @@ public partial class SettingsViewModel : ObservableObject
         TextBoxLimitNewLines = general.SubtitleTextBoxLimitNewLines;
         NewEmptyDefaultMs = general.NewEmptyDefaultMs;
         TimeCodeUpDownStepMs = general.TimeCodeUpDownStepMs;
+        MoveSelectedLinesStepMs = general.MoveSelectedLinesStepMs;
         PromptBeforeDelete = general.PromptBeforeDelete;
         LockTimeCodes = general.LockTimeCodes;
         RememberPositionAndSize = general.RememberPositionAndSize;
@@ -794,6 +783,9 @@ public partial class SettingsViewModel : ObservableObject
         AutoBackupOn = general.AutoBackupOn;
         AutoBackupIntervalMinutes = general.AutoBackupIntervalMinutes;
         AutoBackupDeleteAfterDays = general.AutoBackupDeleteAfterDays;
+        SettingsBackupOn = general.SettingsBackupOn;
+        SettingsBackupIntervalDays = general.SettingsBackupIntervalDays;
+        SettingsBackupMaxCount = general.SettingsBackupMaxCount;
         DefaultEncoding = Encodings.FirstOrDefault(e => e.DisplayName == general.DefaultEncoding) ?? Encodings.First();
         SelectedSubtitleEnterKeyActionType = MapFromSelectedSubtitleEnterKeyAction(Se.Settings.General.SubtitleEnterKeyAction);
         SelectedSubtitleSingleClickActionType = MapFromSelectedSubtitleSingleClickAction(Se.Settings.General.SubtitleSingleClickAction);
@@ -854,6 +846,7 @@ public partial class SettingsViewModel : ObservableObject
         }
 
         AllowSingleLetterShortcutsInTextbox = Se.Settings.Tools.AllowSingleLetterShortcutsInTextbox;
+        AllowTextNavigationShortcutsInTextbox = Se.Settings.Tools.AllowTextNavigationShortcutsInTextbox;
         SpellCheckEnglishTreatInApostropheAsIng = Se.Settings.Tools.SpellCheckEnglishTreatInApostropheAsIng;
         GoToLineNumberAlsoSetVideoPosition = Se.Settings.Tools.GoToLineNumberAlsoSetVideoPosition;
         AdjustAllTimesRememberLineSelectionChoice = Se.Settings.Synchronization.AdjustAllTimesRememberLineSelectionChoice;
@@ -878,6 +871,7 @@ public partial class SettingsViewModel : ObservableObject
         SelectedIconTheme = IconThemes.FirstOrDefault(p => p == appearance.IconTheme) ?? IconThemes.First();
         MatchIconColorToDarkTheme = appearance.MatchIconColorToDarkTheme;
         LayoutScale = (int)Math.Round(appearance.LayoutScale * 100.0, MidpointRounding.AwayFromZero);
+        FontScale = (int)Math.Round(appearance.FontScale * 100.0, MidpointRounding.AwayFromZero);
         if (OperatingSystem.IsMacOS())
         {
             SelectedFontName = MapMacOsFontNameForDisplay(appearance.FontName, FontNames);
@@ -886,33 +880,10 @@ public partial class SettingsViewModel : ObservableObject
         {
             SelectedFontName = FontNames.FirstOrDefault(p => p == appearance.FontName) ?? FontNames.First();
         }
-        ShowToolbarNew = appearance.ToolbarShowFileNew;
-        ShowToolbarOpen = appearance.ToolbarShowFileOpen;
-        ShowToolbarVideoFileOpen = appearance.ToolbarShowVideoFileOpen;
-        ShowToolbarSave = appearance.ToolbarShowSave;
-        ShowToolbarSaveAs = appearance.ToolbarShowSaveAs;
-        ShowToolbarFind = appearance.ToolbarShowFind;
-        ShowToolbarReplace = appearance.ToolbarShowReplace;
-        ShowToolbarMultipleReplace = appearance.ToolbarShowMultipleReplace;
-        ShowToolbarSpellCheck = appearance.ToolbarShowSpellCheck;
-        ShowToolbarFixCommonErrors = appearance.ToolbarShowFixCommonErrors;
-        ShowToolbarRemoveTextForHi = appearance.ToolbarShowRemoveTextForHi;
-        ShowToolbarVisualSync = appearance.ToolbarShowVisualSync;
-        ShowToolbarPointSync = appearance.ToolbarShowPointSync;
-        ShowToolbarBeautifyTimeCodes = appearance.ToolbarShowBeautifyTimeCodes;
-        ShowToolbarBurnIn = appearance.ToolbarShowBurnIn;
-        ShowToolbarAutoTranslate = appearance.ToolbarShowAutoTranslate;
-        ShowToolbarSpeechToText = appearance.ToolbarShowSpeechToText;
-        ShowToolbarSettings = appearance.ToolbarShowSettings;
-        ShowToolbarLayout = appearance.ToolbarShowLayout;
-        ShowToolbarSourceView = appearance.ToolbarShowSourceView;
-        ShowToolbarHelp = appearance.ToolbarShowHelp;
-        ShowToolbarEncoding = appearance.ToolbarShowEncoding;
-        ShowToolbarFrameRate = appearance.ToolbarShowFrameRate;
-        ShowToolbarStyleManager = appearance.ToolbarShowStyleManager;
-        ShowToolbarProperties = appearance.ToolbarShowProperties;
-        ShowToolbarAttachments = appearance.ToolbarShowAttachments;
-        ShowToolbarAssaDraw = appearance.ToolbarShowAssaDraw;
+        foreach (var item in ToolbarItems)
+        {
+            item.Load(appearance);
+        }
         ShowPluginsMenu = appearance.ShowPluginsMenu;
         SubtitleGridFontSize = appearance.SubtitleGridFontSize;
         SubtitleGridTextSingleLine = appearance.SubtitleGridTextSingleLine;
@@ -944,6 +915,7 @@ public partial class SettingsViewModel : ObservableObject
         UseFocusedButtonBackgroundColor = appearance.UseFocusedButtonBackgroundColor;
         FocusedButtonBackgroundColor = appearance.FocusedButtonBackgroundColor.FromHexToColor();
         BookmarkColor = appearance.BookmarkColor.FromHexToColor();
+        SpellCheckHighlightColor = appearance.SpellCheckHighlightColor.FromHexToColor();
         GridAlternatingRowColor = appearance.GridAlternatingRowColor.FromHexToColor();
         GridAlternatingRowColorDark = appearance.GridAlternatingRowColorDark.FromHexToColor();
         ShowUpDownStartTime = appearance.ShowUpDownStartTime;
@@ -1055,6 +1027,7 @@ public partial class SettingsViewModel : ObservableObject
         SelectedWaveformExtractAudioBitRate = string.IsNullOrEmpty(Se.Settings.Waveform.ExtractAudioBitRate)
             ? "192k"
             : Se.Settings.Waveform.ExtractAudioBitRate;
+        FfmpegUseCenterChannelOnly = Se.Settings.General.FfmpegUseCenterChannelOnly;
 
         WaveformRightClickSelectsSubtitle = Se.Settings.Waveform.RightClickSelectsSubtitle;
 
@@ -1117,6 +1090,7 @@ public partial class SettingsViewModel : ObservableObject
         SetFfmpegStatus();
         SetLibMpvStatus();
         SetLibVlcStatus();
+        SetFfmpegLibsStatus();
         LoadFileTypeAssociations();
 
         ExistsErrorLogFile = File.Exists(Se.GetErrorLogFilePath());
@@ -1467,6 +1441,10 @@ public partial class SettingsViewModel : ObservableObject
         {
             return Se.Language.Options.Settings.SubtitleGridFormattingHideTags;
         }
+        else if (subtitleGridFormattingType == (int)SubtitleGridFormattingTypes.ShowFormattingKeepTags)
+        {
+            return Se.Language.Options.Settings.SubtitleGridFormattingShowFormattingKeepTags;
+        }
         else
         {
             return Se.Language.Options.Settings.SubtitleGridFormattingNone;
@@ -1486,6 +1464,10 @@ public partial class SettingsViewModel : ObservableObject
         else if (translation == Se.Language.Options.Settings.SubtitleGridFormattingHideTags)
         {
             return (int)SubtitleGridFormattingTypes.HideTags;
+        }
+        else if (translation == Se.Language.Options.Settings.SubtitleGridFormattingShowFormattingKeepTags)
+        {
+            return (int)SubtitleGridFormattingTypes.ShowFormattingKeepTags;
         }
         else
         {
@@ -1681,6 +1663,7 @@ public partial class SettingsViewModel : ObservableObject
         general.SubtitleTextBoxLimitNewLines = TextBoxLimitNewLines;
         general.NewEmptyDefaultMs = NewEmptyDefaultMs ?? general.NewEmptyDefaultMs;
         general.TimeCodeUpDownStepMs = TimeCodeUpDownStepMs ?? general.TimeCodeUpDownStepMs;
+        general.MoveSelectedLinesStepMs = MoveSelectedLinesStepMs ?? general.MoveSelectedLinesStepMs;
         general.PromptBeforeDelete = PromptBeforeDelete;
         general.LockTimeCodes = LockTimeCodes;
         general.RememberPositionAndSize = RememberPositionAndSize;
@@ -1689,6 +1672,9 @@ public partial class SettingsViewModel : ObservableObject
         general.AutoBackupOn = AutoBackupOn;
         general.AutoBackupIntervalMinutes = AutoBackupIntervalMinutes ?? general.AutoBackupIntervalMinutes;
         general.AutoBackupDeleteAfterDays = AutoBackupDeleteAfterDays ?? general.AutoBackupDeleteAfterDays;
+        general.SettingsBackupOn = SettingsBackupOn;
+        general.SettingsBackupIntervalDays = SettingsBackupIntervalDays ?? general.SettingsBackupIntervalDays;
+        general.SettingsBackupMaxCount = SettingsBackupMaxCount ?? general.SettingsBackupMaxCount;
         general.DefaultEncoding = DefaultEncoding?.DisplayName ?? Encodings.First().DisplayName;
         general.SubtitleEnterKeyAction = MapToSelectedSubtitleEnterKeyAction(SelectedSubtitleEnterKeyActionType);
         general.SubtitleSingleClickAction = MapToSelectedSubtitleSingleClickAction(SelectedSubtitleSingleClickActionType);
@@ -1721,6 +1707,7 @@ public partial class SettingsViewModel : ObservableObject
         general.FavoriteLanguages = string.Join(";", FavoriteLanguages.Select(l => l.Code));
 
         Se.Settings.Tools.AllowSingleLetterShortcutsInTextbox = AllowSingleLetterShortcutsInTextbox;
+        Se.Settings.Tools.AllowTextNavigationShortcutsInTextbox = AllowTextNavigationShortcutsInTextbox;
         Se.Settings.Tools.SpellCheckEnglishTreatInApostropheAsIng = SpellCheckEnglishTreatInApostropheAsIng;
         Se.Settings.Tools.GoToLineNumberAlsoSetVideoPosition = GoToLineNumberAlsoSetVideoPosition;
         Se.Settings.Synchronization.AdjustAllTimesRememberLineSelectionChoice = AdjustAllTimesRememberLineSelectionChoice;
@@ -1746,6 +1733,7 @@ public partial class SettingsViewModel : ObservableObject
         appearance.IconTheme = SelectedIconTheme;
         appearance.MatchIconColorToDarkTheme = MatchIconColorToDarkTheme;
         appearance.LayoutScale = LayoutScale / 100.0;
+        appearance.FontScale = FontScale / 100.0;
         if (OperatingSystem.IsMacOS())
         {
             appearance.FontName = SelectedFontName == "System Font"
@@ -1758,33 +1746,10 @@ public partial class SettingsViewModel : ObservableObject
                 ? new Label().FontFamily.Name
                 : SelectedFontName;
         }
-        appearance.ToolbarShowFileNew = ShowToolbarNew;
-        appearance.ToolbarShowFileOpen = ShowToolbarOpen;
-        appearance.ToolbarShowVideoFileOpen = ShowToolbarVideoFileOpen;
-        appearance.ToolbarShowSave = ShowToolbarSave;
-        appearance.ToolbarShowSaveAs = ShowToolbarSaveAs;
-        appearance.ToolbarShowFind = ShowToolbarFind;
-        appearance.ToolbarShowReplace = ShowToolbarReplace;
-        appearance.ToolbarShowMultipleReplace = ShowToolbarMultipleReplace;
-        appearance.ToolbarShowSpellCheck = ShowToolbarSpellCheck;
-        appearance.ToolbarShowFixCommonErrors = ShowToolbarFixCommonErrors;
-        appearance.ToolbarShowRemoveTextForHi = ShowToolbarRemoveTextForHi;
-        appearance.ToolbarShowVisualSync = ShowToolbarVisualSync;
-        appearance.ToolbarShowPointSync = ShowToolbarPointSync;
-        appearance.ToolbarShowBeautifyTimeCodes = ShowToolbarBeautifyTimeCodes;
-        appearance.ToolbarShowBurnIn = ShowToolbarBurnIn;
-        appearance.ToolbarShowAutoTranslate = ShowToolbarAutoTranslate;
-        appearance.ToolbarShowSpeechToText = ShowToolbarSpeechToText;
-        appearance.ToolbarShowSettings = ShowToolbarSettings;
-        appearance.ToolbarShowLayout = ShowToolbarLayout;
-        appearance.ToolbarShowSourceView = ShowToolbarSourceView;
-        appearance.ToolbarShowHelp = ShowToolbarHelp;
-        appearance.ToolbarShowEncoding = ShowToolbarEncoding;
-        appearance.ToolbarShowFrameRate = ShowToolbarFrameRate;
-        appearance.ToolbarShowStyleManager = ShowToolbarStyleManager;
-        appearance.ToolbarShowProperties = ShowToolbarProperties;
-        appearance.ToolbarShowAttachments = ShowToolbarAttachments;
-        appearance.ToolbarShowAssaDraw = ShowToolbarAssaDraw;
+        foreach (var item in ToolbarItems)
+        {
+            item.Save(appearance);
+        }
         appearance.ShowPluginsMenu = ShowPluginsMenu;
         appearance.SubtitleGridFontSize = SubtitleGridFontSize;
         appearance.SubtitleGridTextSingleLine = SubtitleGridTextSingleLine;
@@ -1810,6 +1775,7 @@ public partial class SettingsViewModel : ObservableObject
         appearance.UseFocusedButtonBackgroundColor = UseFocusedButtonBackgroundColor;
         appearance.FocusedButtonBackgroundColor = FocusedButtonBackgroundColor.FromColorToHex();
         appearance.BookmarkColor = BookmarkColor.FromColorToHex();
+        appearance.SpellCheckHighlightColor = SpellCheckHighlightColor.FromColorToHex();
         appearance.GridAlternatingRowColor = GridAlternatingRowColor.FromColorToHex();
         appearance.GridAlternatingRowColorDark = GridAlternatingRowColorDark.FromColorToHex();
         appearance.ShowUpDownStartTime = ShowUpDownStartTime;
@@ -1910,6 +1876,7 @@ public partial class SettingsViewModel : ObservableObject
                 ? extractRate
                 : 0; // "Original" (non-numeric) keeps the source sample rate
         Se.Settings.Waveform.ExtractAudioBitRate = SelectedWaveformExtractAudioBitRate;
+        Se.Settings.General.FfmpegUseCenterChannelOnly = FfmpegUseCenterChannelOnly;
 
         Se.Settings.Waveform.RightClickSelectsSubtitle = WaveformRightClickSelectsSubtitle;
 
@@ -2166,6 +2133,32 @@ public partial class SettingsViewModel : ObservableObject
                 }
             });
         });
+    }
+
+    private void SetFfmpegLibsStatus()
+    {
+        _ = Task.Run(() =>
+        {
+            var canLoad = Logic.VideoPlayers.Ffmpeg.FfmpegLibraries.IsAvailable();
+            Dispatcher.UIThread.Post(() =>
+            {
+                FfmpegLibsStatus = canLoad ? Se.Language.General.Installed : Se.Language.General.NotInstalled;
+            });
+        });
+    }
+
+    [RelayCommand]
+    private async Task DownloadFfmpegLibs()
+    {
+        var result = await _windowService.ShowDialogAsync<DownloadFfmpegLibsWindow, DownloadFfmpegLibsViewModel>(Window!);
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        Logic.VideoPlayers.Ffmpeg.FfmpegLibraries.LibraryPath = Se.FfmpegLibFolder;
+        Logic.VideoPlayers.Ffmpeg.FfmpegLibraries.Reset();
+        SetFfmpegLibsStatus();
     }
 
     public async void ScrollElementIntoView(ScrollViewer scrollViewer, Control target)
@@ -2826,6 +2819,13 @@ public partial class SettingsViewModel : ObservableObject
         // compared against - without it OK re-applies every change this Apply already made and
         // rebuilds the layout (and the video player) a second time (issue #14218).
         AppliedSettingsSnapshot = SettingsChangeSnapshot.Take();
+
+        // Icon theme and recoloring can change without changing the actual theme variant.
+        if (Window != null &&
+            UiTheme.GetUnscaledContent(Window) is SettingsPage page)
+        {
+            page.RefreshSections();
+        }
     }
 
     [RelayCommand]

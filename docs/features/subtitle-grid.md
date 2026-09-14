@@ -7,7 +7,7 @@ The subtitle grid is the main area for viewing and managing all subtitle lines.
 
 ## Columns
 
-The grid has a fixed set of columns. Some are always visible; others can be toggled on or off via the column header context menu (see [Customizing Visible Columns](#customizing-visible-columns) below).
+The grid can show the columns below. A few are always visible; the others can be toggled on or off via the column header context menu, and the whole set can be reordered in the **Columns...** dialog (see [Customizing Visible Columns](#customizing-visible-columns) below).
 
 | Column | Always visible | Description |
 |--------|---------------|-------------|
@@ -84,16 +84,17 @@ Both are a normal edit, so `Ctrl+Z` undoes them.
 
 ## Formatting Display
 
-How the grid treats HTML/ASSA markup is a four-way choice — **Show formatted (HTML/ASSA) text in subtitle grid** in **Options → Settings → Appearance**:
+How the grid treats HTML/ASSA markup is a five-way choice — **Show formatted (HTML/ASSA) text in subtitle grid** in **Options → Settings → Appearance**:
 
 | Mode | What the grid shows |
 |------|---------------------|
 | **Show formatting** | The tags are hidden and what they mean is rendered — italic, bold, color, font size. The default |
+| **Show formatting, keep non-visual tags** | Like *Show formatting*, but tags the grid cannot render — position, alignment, animation, borders, karaoke timing and other HTML tags — stay visible as text, so you can still see that a line is positioned or animated |
 | **Show tags** | The text with its tags, with the tags colored so they are easy to pick out |
 | **No formatting** | The raw text exactly as it is stored |
 | **Hide tags** | The markup is stripped and only the dialogue is drawn, as plain themed text — no colors, fonts or sizes. Useful for translation, where the styling is only a distraction. Vector drawing tags are dropped too |
 
-A shortcut can be assigned in **Options → Shortcuts** to cycle the four modes on the fly; the status bar names the mode you land on.
+A shortcut can be assigned in **Options → Shortcuts** to cycle the five modes on the fly; the status bar names the mode you land on.
 
 ## Bookmarks
 

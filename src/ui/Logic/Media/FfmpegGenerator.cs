@@ -266,22 +266,28 @@ public class FfmpegGenerator
         // sup demuxer cannot seek, so the subtitle input is shifted back by the cut instead.
         var imageSubtitleInput = string.Empty;
         string withSubtitles;
+        string filterParameter;
         if (subtitleIsImage)
         {
             imageSubtitleInput = $"{GetImageSubtitleOffset(cutStart)} -i \"{assaSubtitleFileName}\"";
             withSubtitles = $"{mainVideoStream}scale={width}:{height}[video];[{inputCount}:s]scale={width}:{height}[subs];[video][subs]overlay";
+            filterParameter = $"-filter_complex \"{withSubtitles}\"";
             inputCount++;
         }
         else
         {
-            withSubtitles = $"{mainVideoStream}scale={width}:{height},ass={Path.GetFileName(assaSubtitleFileName)}";
+            // Nothing to burn in (the subtitle has no lines) leaves only the scale: an "ass="
+            // filter without a file name makes ffmpeg fail with "Invalid argument" (exit code
+            // 234 on some builds) before a single frame is written (#14777).
+            var videoChain = string.IsNullOrWhiteSpace(assaSubtitleFileName)
+                ? $"scale={width}:{height}"
+                : $"scale={width}:{height},ass={Path.GetFileName(assaSubtitleFileName)}";
+            withSubtitles = mainVideoStream + videoChain;
+            filterParameter = $"-vf \"{videoChain}\"";
         }
 
         // Add logo overlay if specified
         var logoInput = string.Empty;
-        var filterParameter = subtitleIsImage
-            ? $"-filter_complex \"{withSubtitles}\""
-            : $"-vf \"scale={width}:{height},ass={Path.GetFileName(assaSubtitleFileName)}\"";
 
         if (burnInLogo != null && !string.IsNullOrEmpty(burnInLogo.LogoFileName) && File.Exists(burnInLogo.LogoFileName))
         {
@@ -1597,8 +1603,9 @@ public class FfmpegGenerator
         // Optional center-channel only
         if (useCenterChannelOnly)
         {
-            // Extract center channel: pan mono|c0=c2
-            args += " -af \"pan=mono|c0=c2\"";
+            // Extract the front center channel by name (same filter as WaveFileExtractor); "c2" is
+            // only the center in a 5.1 layout while FC resolves in any layout that has one.
+            args += " -af \"pan=mono|c0=FC\"";
         }
 
         // Add output file name

@@ -628,7 +628,7 @@ public static class UiUtil
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             Command = command,
-            FontSize = fontSize,
+            FontSize = ScaledFontSize(fontSize),
         };
 
         Attached.SetIcon(button, iconName);
@@ -1808,9 +1808,30 @@ public static class UiUtil
         return control;
     }
 
+    /// <summary>
+    /// Scales a design-time font size by the user's "Font scale (%)" setting (#14812). Route every
+    /// explicit control font size through this so it follows the setting; the window-inherited
+    /// default is scaled by <see cref="UiTheme.ApplyScaleToWindow"/>. Icons undo this again via
+    /// the icon style in <see cref="UiTheme"/>, so icon sizes stay put.
+    /// </summary>
+    public static double ScaledFontSize(double fontSize)
+    {
+        return fontSize * UiTheme.FontScale;
+    }
+
+    /// <summary>
+    /// Design-time font size for controls that outlive a font scale change (the main window's
+    /// hint labels, which are not rebuilt in undocked mode). <see cref="UiTheme.ApplyScaleToWindow"/>
+    /// walks every open window and re-applies <see cref="ScaledFontSize"/> for each control
+    /// carrying this, so the new scale shows without a restart. Set it next to FontSize:
+    /// <c>FontSize = UiUtil.ScaledFontSize(12), [UiUtil.DesignFontSizeProperty] = 12</c>.
+    /// </summary>
+    public static readonly AttachedProperty<double> DesignFontSizeProperty =
+        AvaloniaProperty.RegisterAttached<Control, double>("DesignFontSize", typeof(UiUtil), double.NaN);
+
     public static TextBlock WithFontSize(this TextBlock control, double fontSize)
     {
-        control.FontSize = fontSize;
+        control.FontSize = ScaledFontSize(fontSize);
         return control;
     }
 
@@ -1923,7 +1944,7 @@ public static class UiUtil
 
     public static Label WithFontSize(this Label control, int fontSize)
     {
-        control.FontSize = fontSize;
+        control.FontSize = ScaledFontSize(fontSize);
         return control;
     }
 
@@ -1964,7 +1985,7 @@ public static class UiUtil
 
     public static Button WithFontSize(this Button control, double fontSize)
     {
-        control.FontSize = fontSize;
+        control.FontSize = ScaledFontSize(fontSize);
         return control;
     }
 
@@ -2816,8 +2837,8 @@ public static class UiUtil
     }
 
     /// <summary>
-    /// Forwards the accessible name set on a <see cref="NumericUpDown"/> to its inner
-    /// PART_TextBox. The text box is the element that actually receives keyboard focus,
+    /// Forwards the accessible name (and LabeledBy link) set on a <see cref="NumericUpDown"/>
+    /// to its inner PART_TextBox. The text box is the element that actually receives keyboard focus,
     /// so without this a screen reader would announce the focused field with no name
     /// (issue #11553). Callers just set <c>AutomationProperties.Name</c> on the control.
     /// </summary>
@@ -2827,7 +2848,36 @@ public static class UiUtil
         {
             var textBox = e.NameScope.Find<TextBox>("PART_TextBox");
             textBox?.Bind(AutomationProperties.NameProperty, control.GetObservable(AutomationProperties.NameProperty));
+            textBox?.Bind(AutomationProperties.LabeledByProperty, control.GetObservable(AutomationProperties.LabeledByProperty));
+
+            var spinner = e.NameScope.Find<ButtonSpinner>("PART_Spinner");
+            if (spinner != null)
+            {
+                spinner.TemplateApplied += (_, spinnerArgs) => NameSpinnerButtons(spinnerArgs.NameScope);
+            }
         };
+    }
+
+    /// <summary>
+    /// The Fluent ButtonSpinner template gives its increase/decrease buttons a PathIcon as
+    /// content and no accessible name, so a screen reader announced them as
+    /// "Avalonia.Controls.PathIcon button" (#12087). Name them, and take them out of the tab
+    /// order: the text box already changes the value with the Up/Down arrows, so the two
+    /// extra tab stops per field only added noise for keyboard users.
+    /// </summary>
+    private static void NameSpinnerButtons(INameScope nameScope)
+    {
+        if (nameScope.Find<InputElement>("PART_IncreaseButton") is { } increase)
+        {
+            AutomationProperties.SetName(increase, Se.Language.General.Increase);
+            KeyboardNavigation.SetIsTabStop(increase, false);
+        }
+
+        if (nameScope.Find<InputElement>("PART_DecreaseButton") is { } decrease)
+        {
+            AutomationProperties.SetName(decrease, Se.Language.General.Decrease);
+            KeyboardNavigation.SetIsTabStop(decrease, false);
+        }
     }
 
     public static Label WithBindText(this Label control, object viewModel, string contentPropertyPath)
@@ -3378,6 +3428,10 @@ public static class UiUtil
                     ClampToWorkingArea(window);
                 }
             }, DispatcherPriority.Background);
+
+            // Name every input after its visible label for screen readers - once, here,
+            // instead of in each of the ~300 windows (#12087). See AccessibleLabels.
+            AccessibleLabels.Apply(window);
         };
     }
 

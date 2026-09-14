@@ -642,7 +642,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
             {
                 VerticalAlignment = VerticalAlignment.Bottom,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                FontSize = 12,
+                FontSize = UiUtil.ScaledFontSize(12),
                 FontWeight = FontWeight.Bold,
                 FontFeatures = FontFeatureCollection.Parse("tnum"),
             };
@@ -657,7 +657,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
             {
                 VerticalAlignment = VerticalAlignment.Top,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                FontSize = 9,
+                FontSize = UiUtil.ScaledFontSize(9),
                 FontWeight = FontWeight.Bold,
                 Opacity = 0.6,
             };
@@ -668,7 +668,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
             {
                 VerticalAlignment = VerticalAlignment.Bottom,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                FontSize = 9,
+                FontSize = UiUtil.ScaledFontSize(9),
                 FontWeight = FontWeight.Bold,
                 Opacity = 0.6,
                 TextAlignment = TextAlignment.Right,
@@ -1156,6 +1156,14 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                     _slowPollCounter = 0;
                     Duration = _videoPlayerInstance.Duration;
                     SetPlayPauseIcon(_videoPlayerInstance.IsPlaying);
+
+                    // The ffmpeg player only knows its decoder (hardware vs. software) once the
+                    // video thread has opened it, and may drop to software mid-playback.
+                    var playerName = _videoPlayerInstance.Name;
+                    if (_textBlockPlayerName.Text != playerName)
+                    {
+                        _textBlockPlayerName.Text = playerName;
+                    }
                 }
 
                 var postFix = IsSmpteTimingEnabled ? " (SMPTE)" : string.Empty;

@@ -173,13 +173,14 @@ public class BatchConvertWindow : Window
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             Width = new GridLength(120),
+            NameBinding = new Binding(nameof(BatchConvertItem.Status)),
             CellTemplate = new FuncDataTemplate<BatchConvertItem>((_, _) =>
             {
                 // Status as a colored badge: green converted, red errors, gray cancelled;
                 // in-progress statuses render as plain text (converter returns unset).
                 var text = new TextBlock
                 {
-                    FontSize = 11,
+                    FontSize = UiUtil.ScaledFontSize(11),
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 text.Bind(TextBlock.TextProperty, new Binding(nameof(BatchConvertItem.Status)));
@@ -212,6 +213,7 @@ public class BatchConvertWindow : Window
         dataGrid.DataContext = vm;
         dataGrid.ItemsSource = vm.BatchItems;
         dataGrid.Columns.AddRange(new[] { columnFileName, columnSize, columnFormat, columnStatus });
+        dataGrid.WithAccessibleName(Se.Language.General.SubtitleFiles);
 
         dataGrid.Bind(TableView.SelectedItemProperty, new Binding(nameof(vm.SelectedBatchItem)) { Source = vm });
         dataGrid.KeyDown += vm.FileGridKeyDown;
@@ -242,6 +244,11 @@ public class BatchConvertWindow : Window
             .WithMarginLeft(5)
             .WithMarginRight(5);
         buttonTargetFormatSettings.WithBindIsVisible(vm, nameof(vm.IsTargetFormatSettingsVisible));
+        // Only offered while a Transport Stream file is in the list - the settings apply to nothing else.
+        var buttonTransportStreamSettings = UiUtil.MakeButton(vm.ShowTransportStreamSettingsCommand, IconNames.FileCog, Se.Language.Tools.BatchConvert.TransportStreamSettingsDotDotDot)
+            .WithMarginLeft(5)
+            .WithMarginRight(5);
+        buttonTransportStreamSettings.WithBindIsVisible(vm, nameof(vm.IsTransportStreamSettingsVisible));
         var buttonSettings = UiUtil.MakeButton(vm.ShowOutputPropertiesCommand, IconNames.Settings, Se.Language.General.Settings).WithMarginLeft(15).WithMarginRight(5);
 
         var panelFileControls = new StackPanel
@@ -254,11 +261,13 @@ public class BatchConvertWindow : Window
             {
                 UiUtil.MakeButton(vm.AddFilesCommand, IconNames.Plus, Se.Language.General.Add).WithMarginLeft(10),
                 UiUtil.MakeButton(vm.AddFolderCommand, IconNames.Folder, Se.Language.Tools.BatchConvert.AddFolderDotDotDot).WithMarginLeft(5),
+                UiUtil.MakeButton(vm.AddFolderRecursiveCommand, IconNames.FolderMultiple, Se.Language.Tools.BatchConvert.AddFolderRecursiveDotDotDot).WithMarginLeft(5),
                 UiUtil.MakeButton(vm.RemoveSelectedFilesCommand, IconNames.Trash, Se.Language.General.Remove).WithMarginLeft(5),
                 UiUtil.MakeButton(vm.ClearAllFilesCommand, IconNames.Close, Se.Language.General.Clear).WithMarginLeft(5),
                 UiUtil.MakeLabel(Se.Language.General.TargetFormat).WithMarginLeft(15),
                 comboBoxSubtitleFormat,
                 buttonTargetFormatSettings,
+                buttonTransportStreamSettings,
                 buttonSettings,
                 MakeOutputPropertiesGrid(vm),
             }
@@ -330,6 +339,14 @@ public class BatchConvertWindow : Window
             Command = vm.AddFolderCommand,
         };
         flyout.Items.Add(menuItemImportFolder);
+
+        var menuItemImportFolderRecursive = new MenuItem
+        {
+            Header = Se.Language.Tools.BatchConvert.AddFolderRecursiveDotDotDot,
+            DataContext = vm,
+            Command = vm.AddFolderRecursiveCommand,
+        };
+        flyout.Items.Add(menuItemImportFolderRecursive);
 
         // hack to make drag and drop work on the file grid - also on empty rows
         var dropHost = new Border
@@ -519,6 +536,8 @@ public class BatchConvertWindow : Window
             },
         });
         TableViewExtras.BindSelectedItem(dataGrid, vm, nameof(vm.SelectedBatchFunction));
+        // The "N actions selected" label above is empty until something is ticked, so a static name (#12087).
+        dataGrid.WithAccessibleName(Se.Language.General.Options);
         // The DataGrid-era CheckboxMultiSelect helper is replaced by native selection,
         // AddSpaceToggle (Space toggles the checkbox) and a SelectionChanged hook that
         // shows the selected function's settings view (was onFocusedItemChanged).
@@ -564,6 +583,16 @@ public class BatchConvertWindow : Window
             Padding = new Thickness(5),
         };
         vm.FunctionContainer = scrollViewer;
+
+        // The function views are swapped in after the window has opened, so the one-time
+        // label pass in InitializeWindow never sees them; label each view as it is shown (#12087).
+        scrollViewer.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == ContentControl.ContentProperty && scrollViewer.Content is Control view)
+            {
+                AccessibleLabels.Apply(view);
+            }
+        };
 
         return UiUtil.MakeBorderForControl(scrollViewer);
     }
