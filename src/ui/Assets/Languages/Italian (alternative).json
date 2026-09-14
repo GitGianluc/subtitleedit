@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.2.0",
+  "version": "v5.3.0-beta1",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -583,7 +583,7 @@
     "shrink": "Riduci",
     "singleMode": "Modalità singola",
     "textTotalLength": "Testo – lunghezza totale",
-    "textSingleLineMaxLength": "Testo –\u00A0lunghezza massima riga singola",
+    "textSingleLineMaxLength": "Testo – lunghezza massima riga singola",
     "size": "Dimensione",
     "sizeX": "Dimensione: {0}",
     "skip": "Salta",
@@ -1426,7 +1426,7 @@
       "settingsBackedUp": "Backup delle impostazioni attuali eseguito.",
       "restoreSettings": "Ripristina impostazioni",
       "restoreSettingsFromX": "Vuoi sostituire le impostazioni attuali con il backup contenuto in {0}?\n\nPrima di procedere, verrà creato un backup delle impostazioni attuali. Alcune modifiche avranno effetto solo dopo il riavvio di Subtitle Edit.",
-      "settingsRestored": "Impostazioni ripristinate. È\u00A0necessario riavviare Subtitle Edit per applicare tutte le modifiche.",
+      "settingsRestored": "Impostazioni ripristinate. È necessario riavviare Subtitle Edit per applicare tutte le modifiche.",
       "settingsRestoreFailed": "Impossibile ripristinare le impostazioni: {0}",
       "deleteAllSettingsBackups": "Vuoi cancellare tutti i file di backup delle impostazioni?"
     },
@@ -2427,7 +2427,7 @@
       "voiceXAlreadyExistsInYContinue": "Una voce chiamata ‘{0}’ esiste già in {1}.\n\nCopiarla comunque?",
       "openVoicesFolder": "Apri cartella delle voci…",
       "downloadVoicePacksDotDotDot": "Scarica pacchetti di voci…",
-      "downloadVoicePacksTitle": "Sintesi vocale –\u00A0Scarica pacchetti di voci",
+      "downloadVoicePacksTitle": "Sintesi vocale – Scarica pacchetti di voci",
       "voicePackIntro": "I pacchetti di voci sono gruppi di registrazioni brevi e chiare con relative trascrizioni, pronte per essere di riferimento nel processo di clonazione. Ogni pacchetto viene importato nel motore scelto (le voci già presenti verranno ignorate) e include un file ATTRIBUTION.txt con la licenza e le fonti correlate.",
       "voicePackDetailsXVoicesYSizeZLicense": "{0} voci • {1} • {2}",
       "installToEngine": "Installa nel motore",
