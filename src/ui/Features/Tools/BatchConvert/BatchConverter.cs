@@ -757,13 +757,6 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             customFormats.Add(new CustomFormatItem(customFormat));
         }
 
-        var subtitles = new List<SubtitleLineViewModel>();
-        foreach (var p in item.Subtitle.Paragraphs)
-        {
-            var sv = new SubtitleLineViewModel(p, new SubRip());
-            subtitles.Add(sv);
-        }
-
         var customFormatName = Se.Settings.Tools.BatchConvert.CustomTextFormatName;
         var selectedCustomFormat =
             customFormats.FirstOrDefault(f => f.Name == customFormatName)
@@ -774,8 +767,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             return;
         }
 
-        var paragraphsForCustom = subtitles.Where(s => s.Paragraph != null).Select(s => s.Paragraph!).ToList();
-        var text = Nikse.SubtitleEdit.UiLogic.Export.CustomTextFormatter.GenerateCustomText(selectedCustomFormat.ToTemplate(), paragraphsForCustom, item.FileName, string.Empty);
+        var text = Nikse.SubtitleEdit.UiLogic.Export.CustomTextFormatter.GenerateCustomText(selectedCustomFormat.ToTemplate(), item.Subtitle.Paragraphs, item.FileName, string.Empty);
         var path = MakeOutputFileName(item, selectedCustomFormat.Extension);
         await File.WriteAllTextAsync(path, text, cancellationToken);
     }
@@ -3230,6 +3222,13 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         Configuration.Settings.Tools.AutoTranslateLibreUrl = Se.Settings.AutoTranslate.LibreTranslateUrl;
         Configuration.Settings.Tools.AutoTranslateLibreApiKey = Se.Settings.AutoTranslate.LibreTranslateApiKey;
+
+        // Same bridge for the generic OpenAI-compatible engine - the view model already copied the
+        // URL/key/model from its text boxes, but the prompt only lives in Se.Settings.
+        Configuration.Settings.Tools.OpenAiCompatibleTranslateUrl = Se.Settings.AutoTranslate.OpenAiCompatibleUrl;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslateApiKey = Se.Settings.AutoTranslate.OpenAiCompatibleApiKey;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslateModel = Se.Settings.AutoTranslate.OpenAiCompatibleModel;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslatePrompt = Se.Settings.AutoTranslate.OpenAiCompatiblePrompt;
 
         Configuration.Settings.Tools.AutoTranslateNllbApiUrl = Se.Settings.AutoTranslate.NllbApiUrl;
 

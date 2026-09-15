@@ -973,7 +973,8 @@ public static class DownloadHashManager
             // otherwise users will be prompted to "update" to the same version they just got.
             [CrispEmbed.WindowsCuda] = new[]
             {
-                "89bcdde6d81634461278bd877e6e35f477cd6771dec7de40f0cfeeca1c5b732a", // v0.17.9 (current download URL)
+                "56d83fd25253de920d5d7f8f949366eddcb202ff6b57d4158f5e886fc39f9b31", // v0.17.11 (current download URL)
+                "89bcdde6d81634461278bd877e6e35f477cd6771dec7de40f0cfeeca1c5b732a", // v0.17.9
                 "7572b58d33c70d308938a9cafa4fe26dd3521412ab1dbc8d6b75765140e3c5bd", // v0.17.8
                 "ff5d85824ecdbf2c29c4ed19f63024c94b963f3a7634e62f18140d9cb020ef8f", // v0.17.7
                 "b8c9355f5cdc318b84bcef50c293998d643ef0b0305215b6fc34213c43eaedb4", // v0.17.6
@@ -986,7 +987,8 @@ public static class DownloadHashManager
             },
             [CrispEmbed.WindowsVulkan] = new[]
             {
-                "ce2d3eb91b6dda3b9a50b96cf26e70010854c0b28fa38413c87cefe732dd9fc2", // v0.17.9 (current download URL)
+                "0579cc3d04e4493a6791887de518b29241ea50a0d8401b0dd82fb81e24a95d68", // v0.17.11 (current download URL)
+                "ce2d3eb91b6dda3b9a50b96cf26e70010854c0b28fa38413c87cefe732dd9fc2", // v0.17.9
                 "d6fe7d73689b801318214ff45ffc38e4aeb238b51abeb7569b31768c21222eea", // v0.17.8
                 "7a9b6cc9190be3283aa7f72e8f9ab9e035530f02d766afe77ee091e027ac9970", // v0.17.7
                 "591edc9c91991df575f867f10b91d69166daa80eaf49f9b5a8bd80e0541c890c", // v0.17.6
@@ -999,7 +1001,8 @@ public static class DownloadHashManager
             },
             [CrispEmbed.WindowsCpu] = new[]
             {
-                "dabf9483f1a2e6e801b85a3fe67a6dab2b55359fc604c91e80a44756a21e4b07", // v0.17.9 (current download URL)
+                "46a70c42eb1bfd079332e63ce41683fe48bf12d8dbba262de2a00ba87cbfff15", // v0.17.11 (current download URL)
+                "dabf9483f1a2e6e801b85a3fe67a6dab2b55359fc604c91e80a44756a21e4b07", // v0.17.9
                 "b302d567f40dd0f577aaf536735c1bab5548e579c5228bdc0ac2059602c95227", // v0.17.8
                 "e7b7dbbcfe192462d7a4b1d25a903d2394eae83c1c8efb8b8270fe9b3ec90f2e", // v0.17.7
                 "bcb3c1b5c2b88fea34390fdcd5a0f4e9805024aa31d2a30ab2526e2d9e28b0e2", // v0.17.6
@@ -1012,7 +1015,8 @@ public static class DownloadHashManager
             },
             [CrispEmbed.MacOs] = new[]
             {
-                "b85b636dfc5dfb2e9d7b7d6403931864bc42a756629a3962396cf750d6f604ca", // v0.17.9 (current download URL)
+                "24d64f99ebeb6797e3808f2ed933d5bc66d28c054ad4fd48c990e1c27f3d321b", // v0.17.11 (current download URL)
+                "b85b636dfc5dfb2e9d7b7d6403931864bc42a756629a3962396cf750d6f604ca", // v0.17.9
                 "1b3b454daa7ce39063c57bd577308b6a534c952d06a91c1e04bcf64c47089ddc", // v0.17.8
                 "0718bfc35e44ed4acd9d2c8d4c20a4b5b4134af826178a362b08a8c9985e0d7d", // v0.17.7
                 "09291257a15ea766373ef0a96126590d5ff6d65184b8ce1e80c4172f3ad5e5bb", // v0.17.6
@@ -1025,7 +1029,8 @@ public static class DownloadHashManager
             },
             [CrispEmbed.Linux] = new[]
             {
-                "775b138650a60064b66f976da3e22c8f5b36fa605f7ebd767967fb0c3b412984", // v0.17.9 (glibc 2.27 floor) (current download URL)
+                "8ded8e3162dc01717545ddf34cf1782469a075e9f5f84f7a737d5380b0c5cec0", // v0.17.11 (glibc 2.27 floor) (current download URL)
+                "775b138650a60064b66f976da3e22c8f5b36fa605f7ebd767967fb0c3b412984", // v0.17.9 (glibc 2.27 floor)
                 "d5cf6b6929c4aab481a556fe2c85b8607155556c3bd70e26644b91a4f8941b55", // v0.17.8 (glibc 2.27 floor)
                 "a5bbcbeb321489cc6cec79ea81ae12a6a93a35fd097a1ef907cee0e33f8c10e0", // v0.17.7 (glibc 2.27 floor)
                 "df9e2308b670d92135e48629baa5eb6278db35aeab324b787ae155589d113918", // v0.17.6 (glibc 2.27 floor)
@@ -1038,7 +1043,8 @@ public static class DownloadHashManager
             },
             [CrispEmbed.LinuxCuda] = new[]
             {
-                "3e1447bc93f8f7039c94b91d4bb97c739cc3b754d9b1ee3006616dbd445a1b6f", // v0.17.9 (bundled CUDA runtime) (current download URL)
+                "254fcd58d5a7f0fd13e2e303918048420dcfb9464329f35c5bea3e3ba6eaefc0", // v0.17.11 (bundled CUDA runtime) (current download URL)
+                "3e1447bc93f8f7039c94b91d4bb97c739cc3b754d9b1ee3006616dbd445a1b6f", // v0.17.9 (bundled CUDA runtime)
                 "2282c04015be8f65005dab3739ccee82ebe14e6ee97812242996361d0f1fa8a6", // v0.17.8 (bundled CUDA runtime)
                 "5639e562dde68730d4086c92366cdd2b95879164e5491096c1617e8ce88bd94f", // v0.17.7 (bundled CUDA runtime)
                 "337c7bf20b52eccd8d50159b8ca415224a9252aca3fbae53eb1ffea2432f5484", // v0.17.6 (bundled CUDA runtime)
@@ -1051,7 +1057,8 @@ public static class DownloadHashManager
             },
             [CrispEmbed.LinuxArm] = new[]
             {
-                "247915ad0c870814498a81731ddc037a79d00be5f05aee7c7c85a5dd5fae9c40", // v0.17.9 (glibc 2.27 floor) (current download URL)
+                "6e459cadf7e2273a5aeb6a802f6bc55f47613ebde7a90f4bad5f6de03fc6e78d", // v0.17.11 (glibc 2.27 floor) (current download URL)
+                "247915ad0c870814498a81731ddc037a79d00be5f05aee7c7c85a5dd5fae9c40", // v0.17.9 (glibc 2.27 floor)
                 "afeff7b6f957b28d4914fe12caec400c50eb74f930461c0e5fc4edbb1c1e46ce", // v0.17.8 (glibc 2.27 floor)
                 "9045e69e06fd9b456d3fbb4df37ec6cc0586e5eae74790e61b968d1befce5b07", // v0.17.7 (glibc 2.27 floor)
                 "90243108d6388bbb2780948a2dbe35a55b7f5670716fb5fb4f87576069f95427", // v0.17.6 (glibc 2.27 floor)
@@ -2249,7 +2256,8 @@ public static class DownloadHashManager
             // whatever URL WhisperDownloadService.cs is pinned to.
             [WhisperCpp.WindowsBlas] = new[]
             {
-                "78568aa80b361382cb303438a7be3b05669651f2ca8258910394679e049d26ea", // b4938 / v1.9.3 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "55c06d09e8b9b6cfb2b0b47ddedc71803054f0e48be1f41848b3141c06c703a9", // b5130 / v1.9.4 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "78568aa80b361382cb303438a7be3b05669651f2ca8258910394679e049d26ea", // b4938 / v1.9.3
                 "ffe5b47ca8e53a7677949f23a9c4641bbec4eee8a5714c3d14b67bb8d7b24a78", // v1.9.2
                 "3c319eab3e87f85883e1ff3d14426c0a1986c661c5eb5985e8af431ed9c4f71f", // v1.9.1
                 "eb4a51548a65c58cb22890066145dfe1026d5bd597c52ef0ccb0477e83159c91", // whispercpp-186 / v1.8.6
@@ -2258,7 +2266,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.WindowsCuBlas] = new[]
             {
-                "c1b17166e1e31a91cc8e9c1f910d3785e3ce757bb2958bf9dce13fdb4880005f", // b4938 / v1.9.3 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7", // b5130 / v1.9.4 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "c1b17166e1e31a91cc8e9c1f910d3785e3ce757bb2958bf9dce13fdb4880005f", // b4938 / v1.9.3
                 "443110ddaad70d4290ab2e77179e31cf712035bbc4fad56bb4519a90c917b39c", // v1.9.2
                 "106a2030eff8998e4ef320fe72e263a78449e9040386ee27c41ea80b001b601b", // v1.9.1
                 "63b70c91fe2fd7449865c45f6422ab628439eacc6985d8309c77bfb65cc68a19", // v1.8.6 (fetched directly from ggml-org/whisper.cpp)
@@ -2267,7 +2276,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.WindowsVulkan] = new[]
             {
-                "2b3829c69c64b3bbd117ef3fa3ae1de2574cab36a4a572199bf3c291404ff1cc", // whispercpp-193 / v1.9.3 (current download URL)
+                "b576bd3cc7282478ad49b32692416f02c0987b7cbc736b3b63cd39207a7a57af", // whispercpp-194 / v1.9.4 (current download URL)
+                "2b3829c69c64b3bbd117ef3fa3ae1de2574cab36a4a572199bf3c291404ff1cc", // whispercpp-193 / v1.9.3
                 "a220f2063bf60c18406beb37d2001d7da6cfd2253d5b38b4c78719a56bedd2c0", // whispercpp-192 / v1.9.2
                 "3e70fccfab278c7bb7c78efd7d101ba6e507b668ceccf3610b2d1c54d6d9f119", // whispercpp-191 / v1.9.1
                 "27a7e9612a930355e801d7ae45cd926b079bd215ce0527c219d7bd6a5acd4ada", // whispercpp-186 / v1.8.6
@@ -2276,7 +2286,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.MacOs] = new[]
             {
-                "dc6371c8f039705aef24b1eb70aa20cbc3058045e1690cc0302badd35f165ac9", // whispercpp-193 / v1.9.3 (current download URL)
+                "185f78870a9495813714a0a515add589f19f1a51a67b4376f2e6f8795d7cf773", // whispercpp-194 / v1.9.4 (current download URL)
+                "dc6371c8f039705aef24b1eb70aa20cbc3058045e1690cc0302badd35f165ac9", // whispercpp-193 / v1.9.3
                 "6654f5b628f59efb04a0ef6e6b8ece06595df1f2acf7635609d32052e7b6c906", // whispercpp-192 / v1.9.2
                 "3bbeed3e91cf07657e0d59c38de0cea15a276d59cd07e630951ef42927474983", // whispercpp-191 / v1.9.1
                 "9e7fb79d310a17cf992baa883fe1acfec693d2e72aadace784a3b8ac77eb2768", // whispercpp-186 / v1.8.6
@@ -2289,7 +2300,8 @@ public static class DownloadHashManager
             // listed so an existing install is still identified rather than reported as unknown.
             [WhisperCpp.LinuxVulkan] = new[]
             {
-                "14555fa34fff496f69252e2761dfe8c8fb710863d0213c9e5c3f294490775af3", // whispercpp-193 / v1.9.3 (current download URL)
+                "bee7c18bbeb0bad00c2092338656e2591bf4bdbe884b74543ce477d910b4c86e", // whispercpp-194 / v1.9.4 (current download URL)
+                "14555fa34fff496f69252e2761dfe8c8fb710863d0213c9e5c3f294490775af3", // whispercpp-193 / v1.9.3
                 "ef74909722eca7e422e21ef41a0060d38efadd055398697c17ce12d80c41d467", // whispercpp-192 / v1.9.2
                 "0943f97f58ca98aafa26659e7c4d8d87f474c74f966f0d9ae91491989a32cf2b", // whispercpp-191-r2 / v1.9.1
                 "7969c5a0ba912d0b0d8aaa2bdf911ca7896ef97a89e293d2596a96022c839e80", // whispercpp-191 / v1.9.1 (missing shared libraries)
@@ -2299,7 +2311,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.LinuxCuda] = new[]
             {
-                "f63bdee178d45121cd6b6d754914fb58e3cb71fcd6a493a9724aa200e83dc425", // whispercpp-193 / v1.9.3 (current download URL)
+                "c42ca4652796be5aff451c64f55c74c7aca17e5902cd47924f752e99b3ce32c7", // whispercpp-194 / v1.9.4 (current download URL)
+                "f63bdee178d45121cd6b6d754914fb58e3cb71fcd6a493a9724aa200e83dc425", // whispercpp-193 / v1.9.3
                 "dcf676854f473e9e3f0622b4725fa7123f18313e772002b1d3bb31efe4dc98b9", // whispercpp-192 / v1.9.2
                 "02129bac653d00d85ef110c24c37eb56d5470d4fee432a09f55ac9fbc63ff768", // whispercpp-191-r2 / v1.9.1
                 "19a232255838c77c9bcddf220292d96dfb62b9a8da1e66ed402961f6a41b1661", // whispercpp-191 / v1.9.1 (missing shared libraries)
@@ -2311,7 +2324,8 @@ public static class DownloadHashManager
             // SHA-256 of whisper-cli / whisper-cli.exe extracted from each archive above.
             [WhisperCpp.WindowsBlasExecutable] = new[]
             {
-                "b6b27a4b7ce9543382344ba273ea82bac35f821ca4317cf16710e16b26791e0f", // b4938 / v1.9.3 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "98d0df798385cc7ba713b56b2bdb7ffb5b3133cc1cfa63506fa2152d8b4d7f50", // b5130 / v1.9.4 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "b6b27a4b7ce9543382344ba273ea82bac35f821ca4317cf16710e16b26791e0f", // b4938 / v1.9.3
                 "225aa686b74010c0259e8d28763aa89a078a0141091f525779fae6892e8e6097", // v1.9.2
                 "254ee898dd8c3b16fa87583113320dad3f8e3787e15d8f14e245fcb3b487fc39", // v1.9.1
                 "c3ba7358316559cf80ae88e783daeb2f346d617d8074a0bd054998912cde979a", // whispercpp-186 / v1.8.6
@@ -2320,7 +2334,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.WindowsCuBlasExecutable] = new[]
             {
-                "41a586cac5863ebfc198cdc8ffb1642795543c1a4506c6be974e55adf301dccb", // b4938 / v1.9.3 (current download URL)
+                "2360ff153d9ab40254b9b5497a0f30ec7c5ef97d96d4b10a9521fa9b98e08c3a", // b5130 / v1.9.4 (current download URL — fetched directly from ggml-org/whisper.cpp)
+                "41a586cac5863ebfc198cdc8ffb1642795543c1a4506c6be974e55adf301dccb", // b4938 / v1.9.3
                 "92205834c7e2dfa35fac242fb438c285f70bcf942474f80f7dcf5fdac0d7a6dc", // v1.9.2
                 "789fddb0f05c0c28043b3c4f3bcf15a0ae839df24292c60f90c4edb8d02a5ab5", // v1.9.1
                 "ae283f6938fbe27aa12ad83bbfa0b4ca772dee21ffb54348eeb87c65eaf88b8a", // v1.8.6
@@ -2329,7 +2344,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.WindowsVulkanExecutable] = new[]
             {
-                "a99280f4497f867bb17d4e4e138b3694c930a42a897609974a19dc5b651ac2c5", // whispercpp-193 / v1.9.3 (current download URL)
+                "26a64c217a57e23da96c56a38f4fb35a3a27c9488631086f799a4e32fd1331e1", // whispercpp-194 / v1.9.4 (current download URL)
+                "a99280f4497f867bb17d4e4e138b3694c930a42a897609974a19dc5b651ac2c5", // whispercpp-193 / v1.9.3
                 "d003f2229418e8fd59c1e0aee62d7f996a768ad7ebda3da502bbfca2063b84a7", // whispercpp-192 / v1.9.2
                 "011d5f4d5d58eb2d3d0cafe64fd22d377bc066b2e6d2d91fd5d58c95be0b7244", // whispercpp-191 / v1.9.1
                 "fe6afff595b1c3a08a129c2a9047e6b9d10107acd3964a29f54b5459f6795bd4", // whispercpp-186 / v1.8.6
@@ -2338,7 +2354,8 @@ public static class DownloadHashManager
             },
             [WhisperCpp.MacOsExecutable] = new[]
             {
-                "fa5843c03ab0ae86771e5cadea81b5c34ef04d5a37a068b4b386ed46f9442fd6", // whispercpp-193 / v1.9.3 (current download URL)
+                "bc42d7bdde6ab5f318872a00e8a853ac07e7d70c14c7e5b59618428a200aac96", // whispercpp-194 / v1.9.4 (current download URL)
+                "fa5843c03ab0ae86771e5cadea81b5c34ef04d5a37a068b4b386ed46f9442fd6", // whispercpp-193 / v1.9.3
                 "ebaf5389eb619a376023e1ad9684409596dedc16869a59a3234191bb440a96fd", // whispercpp-192 / v1.9.2
                 "278e45caa50d4dc2e92d04e7fa9c19d3439350a7bd0c6bc40cc91b41d5cc72a5", // whispercpp-191 / v1.9.1
                 "0b9f4894727ece186163e15e07795b70a333c5834e2916c6032ae04e57d3e1e8", // whispercpp-186 / v1.8.6
@@ -2350,8 +2367,11 @@ public static class DownloadHashManager
             // single whisper-cli for both backends. See the note on LinuxVulkanExecutable.
             [WhisperCpp.LinuxVulkanExecutable] = new[]
             {
-                "f57c4dbd4478f73720533f477311e354dc04ac818ca558e5c9855d5978075894", // whispercpp-193 / v1.9.3 (current download URL)
-                "3e142b4a8c99a4d5cf00cdd4e15fb77c2a842dd0bd83f647675fe1d303e91a03", // whispercpp-192 / v1.9.2
+                // whisper-cli in whispercpp-194 is byte-identical to the -192 one (the v1.9.4 changes
+                // live in libwhisper.so.1 / libggml-vulkan.so), so the archive hash above is what
+                // tells those two apart.
+                "3e142b4a8c99a4d5cf00cdd4e15fb77c2a842dd0bd83f647675fe1d303e91a03", // whispercpp-194 / v1.9.4 (current download URL) and whispercpp-192 / v1.9.2
+                "f57c4dbd4478f73720533f477311e354dc04ac818ca558e5c9855d5978075894", // whispercpp-193 / v1.9.3
                 "da61c0c1910c103cf8dea855855f072249689ee2310f375e2b79615cbd012c05", // whispercpp-191-r2 / v1.9.1
                 "782fac61b9bcfe8f6db22564bb5a2cda2c22550b9ef38064ec5f188bc86dfe79", // whispercpp-191 / v1.9.1 (missing shared libraries)
                 "5a2343777fe57327c8956d836d1515ac422d2e7f9fd33ce4e7e62cfe4cd33cbd", // whispercpp-186 / v1.8.6 (missing shared libraries)
@@ -2360,9 +2380,9 @@ public static class DownloadHashManager
             },
             [WhisperCpp.LinuxCudaExecutable] = new[]
             {
-                // whisper-cli is byte-identical in whispercpp-192 and -193; the v1.9.3 changes live in
-                // libggml-cuda.so, so the archive hash above is what tells the two apart.
-                "9c93f819e170d0f00a08c256ac2299f819a8e94f3a6f116bac2657c6ab8de62a", // whispercpp-193 / v1.9.3 (current download URL) and whispercpp-192 / v1.9.2
+                // whisper-cli is byte-identical in whispercpp-192, -193 and -194; the per-release changes
+                // live in libggml-cuda.so, so the archive hash above is what tells them apart.
+                "9c93f819e170d0f00a08c256ac2299f819a8e94f3a6f116bac2657c6ab8de62a", // whispercpp-194 / v1.9.4 (current download URL) and whispercpp-193 / v1.9.3 and whispercpp-192 / v1.9.2
                 "3a4d717745c2d8cf19ca7a954c29c0349a7f158d93a6597bb86e155f0735474a", // whispercpp-191-r2 / v1.9.1
                 "16a838ae67e248020b9bc65b8584fcc113cf18167c9cfc0a2d98e194fa52cf95", // whispercpp-191 / v1.9.1 (missing shared libraries)
                 "330ff60cbabd8e77137000d05905cabca90e299c455a3282948c9edddf28bcd7", // whispercpp-186 / v1.8.6 (missing shared libraries)

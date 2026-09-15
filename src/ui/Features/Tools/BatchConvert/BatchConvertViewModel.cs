@@ -444,6 +444,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             new OllamaTranslate(),
             new OllamaAdvancedTranslate(),
             new LibreTranslate(),
+            new OpenAiCompatibleTranslate(),
             new LmStudioTranslate(),
             new LlamaCppTranslate(),
             new LlamaCppAdvancedTranslate(),
@@ -1829,12 +1830,10 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (targetFormat == BatchConverter.FormatCustomTextFormat)
         {
-            var subtitles = new List<SubtitleLineViewModel>();
-            var p = new Paragraph("This is a sample text", 0, 1000);
-            subtitles.Add(new SubtitleLineViewModel(p, new SubRip()));
+            var paragraphs = new List<Paragraph> { new Paragraph("This is a sample text", 0, 1000) };
 
             var result = await _windowService.ShowDialogAsync<ExportCustomTextFormatWindow, ExportCustomTextFormatViewModel>(Window,
-                vm => { vm.Initialize(subtitles, string.Empty, string.Empty, true); });
+                vm => { vm.Initialize(paragraphs, string.Empty, string.Empty, true); });
 
             // Remember which custom format was chosen so batch convert uses it (not just the first one).
             if (result.OkPressed && result.SelectedCustomFormat != null)
@@ -2995,6 +2994,28 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             }
         }
 
+        if (engineType == typeof(OpenAiCompatibleTranslate))
+        {
+            // The engine reads all three from Configuration.Settings.Tools, which SE5 never persists,
+            // so the durable copy is Se.Settings and both must be written (the prompt is seeded by
+            // BatchConverter.AutoTranslate together with the other engines' prompts).
+            var apiUrl = AutoTranslateUrl.Trim();
+            if (string.IsNullOrEmpty(apiUrl))
+            {
+                apiUrl = OpenAiCompatibleTranslate.DefaultUrl;
+            }
+
+            Configuration.Settings.Tools.OpenAiCompatibleTranslateUrl = apiUrl;
+            Se.Settings.AutoTranslate.OpenAiCompatibleUrl = apiUrl;
+
+            // Key and model may legitimately be empty (local server, single-model server), so an
+            // emptied field clears the stored value instead of keeping a stale one.
+            Configuration.Settings.Tools.OpenAiCompatibleTranslateApiKey = AutoTranslateApiKey.Trim();
+            Se.Settings.AutoTranslate.OpenAiCompatibleApiKey = AutoTranslateApiKey.Trim();
+            Configuration.Settings.Tools.OpenAiCompatibleTranslateModel = AutoTranslateModel.Trim();
+            Se.Settings.AutoTranslate.OpenAiCompatibleModel = AutoTranslateModel.Trim();
+        }
+
         if (engineType == typeof(LmStudioTranslate))
         {
             if (!string.IsNullOrEmpty(AutoTranslateUrl.Trim()))
@@ -3347,6 +3368,19 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateUrl = Se.Settings.AutoTranslate.LibreTranslateUrl;
             AutoTranslateUrlIsVisible = true;
             AutoTranslateApiKey = Se.Settings.AutoTranslate.LibreTranslateApiKey;
+            AutoTranslateApiKeyIsVisible = true;
+        }
+        else if (engine is OpenAiCompatibleTranslate)
+        {
+            // Any vLLM/llama-server/hosted "chat/completions" endpoint: URL, key and model are all
+            // user-typed. No model list to browse - the server decides which models exist, and a
+            // one-model server (llama.cpp, vLLM) may leave the model empty.
+            AutoTranslateModel = Se.Settings.AutoTranslate.OpenAiCompatibleModel;
+            AutoTranslateModelBrowseIsVisible = false;
+            AutoTranslateModelIsVisible = true;
+            AutoTranslateUrl = Se.Settings.AutoTranslate.OpenAiCompatibleUrl;
+            AutoTranslateUrlIsVisible = true;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.OpenAiCompatibleApiKey;
             AutoTranslateApiKeyIsVisible = true;
         }
         else if (engine is LmStudioTranslate)

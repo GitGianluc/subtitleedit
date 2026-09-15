@@ -901,6 +901,15 @@ public class AudioVisualizer : Control
                 newVideoPosition = WavePeaks.LengthInSeconds;
             }
 
+            // Wheeling past either end while already parked there clamps back onto the current
+            // position: nothing to seek, so raise nothing. The seek handler pins the playhead until
+            // the player confirms a seek, and with no seek sent that only ends at the pin's 5 s cap -
+            // the cursor stayed stuck through the start of playback (issue #14894).
+            if (Math.Abs(newVideoPosition - CurrentVideoPositionSeconds) < 0.001)
+            {
+                return;
+            }
+
             // Follow the play-head: with center-also-while-paused the view scrolls on every
             // step so the cursor stays pinned to the middle (SE 4's locked/center mode) and
             // the waveform reads as one continuous strip; otherwise scroll only when the
@@ -3902,19 +3911,25 @@ public class AudioVisualizer : Control
 
     private void DrawCurrentVideoPosition(DrawingContext context, ref RenderContext renderCtx)
     {
-        if (renderCtx.CurrentVideoPositionSeconds <= 0)
+        // Without peaks there is no timeline to place the cursor on (closing the video clears them
+        // and resets the position to 0). With them, 0 is a real position - after Stop, or on a
+        // freshly opened video - and the cursor shows there like anywhere else.
+        if (renderCtx.SampleRate <= 0 || renderCtx.CurrentVideoPositionSeconds < 0)
         {
             return;
         }
 
         var currentPositionPos = SecondsToXPositionOptimized(renderCtx.CurrentVideoPositionSeconds - renderCtx.StartPositionSeconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
-        if (currentPositionPos > 0 && currentPositionPos < renderCtx.Width)
+        if (currentPositionPos >= 0 && currentPositionPos < renderCtx.Width)
         {
             var isOnShotChange = GetShotChangeIndex(renderCtx.CurrentVideoPositionSeconds) >= 0;
             var pen = isOnShotChange ? _paintPenCursorOnShotChange : _paintPenCursor;
+
+            // A line centered on the left edge loses half its width to the clip; keep it inside.
+            var x = Math.Max(currentPositionPos, pen.Thickness / 2);
             context.DrawLine(pen,
-                new Point(currentPositionPos, 0),
-                new Point(currentPositionPos, renderCtx.Height));
+                new Point(x, 0),
+                new Point(x, renderCtx.Height));
         }
     }
 
