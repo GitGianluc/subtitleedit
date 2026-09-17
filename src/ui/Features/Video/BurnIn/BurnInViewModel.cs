@@ -72,6 +72,9 @@ public partial class BurnInViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<string> _videoPresets;
     [ObservableProperty] private string? _selectedVideoPreset;
     [ObservableProperty] private string _videoPresetText;
+    [ObservableProperty] private ObservableCollection<string> _videoTunes;
+    [ObservableProperty] private string? _selectedVideoTune;
+    [ObservableProperty] private bool _isVideoTuneVisible;
     [ObservableProperty] private ObservableCollection<string> _videoCrf;
     [ObservableProperty] private string? _selectedVideoCrf;
     [ObservableProperty] private string _videoCrfText;
@@ -166,6 +169,7 @@ public partial class BurnInViewModel : ObservableObject
         FontFactorText = string.Empty;
 
         VideoPresets = new ObservableCollection<string>();
+        VideoTunes = new ObservableCollection<string>();
 
         FontBoxTypes = new ObservableCollection<FontBoxItem>
         {
@@ -211,7 +215,7 @@ public partial class BurnInViewModel : ObservableObject
         };
         SelectedAudioBitRate = AudioBitRates[2];
 
-        VideoPixelFormats = new ObservableCollection<PixelFormatItem>(PixelFormatItem.PixelFormats);
+        VideoPixelFormats = new ObservableCollection<PixelFormatItem>(PixelFormatItem.GetPixelFormats(null));
 
         VideoEncodings = new ObservableCollection<VideoEncodingItem>(VideoEncodingItem.VideoEncodings);
         SelectedVideoEncoding = VideoEncodings[0];
@@ -853,7 +857,7 @@ public partial class BurnInViewModel : ObservableObject
             audioEncoding,
             AudioIsStereo,
             SelectedAudioSampleRate.Replace("Hz", string.Empty).Trim(),
-            string.Empty,
+            SelectedVideoTune ?? string.Empty,
             SelectedAudioBitRate,
             pass,
             jobItem.VideoBitRate,
@@ -1586,16 +1590,36 @@ public partial class BurnInViewModel : ObservableObject
         SelectedVideoEncoding = VideoEncodings.FirstOrDefault(p => p.Codec == settings.Encoding)
                                 ?? VideoEncodings.FirstOrDefault(p => p.Codec == SeVideoBurnIn.DefaultEncoding)
                                 ?? VideoEncodings[0];
-        SelectedVideoPixelFormat = VideoPixelFormats.FirstOrDefault(p => p.Codec == settings.PixelFormat) ?? VideoPixelFormats[0];
+        FillPixelFormats(SelectedVideoEncoding.Codec, settings.PixelFormat);
         FillPreset(SelectedVideoEncoding.Codec);
+        FillTune(SelectedVideoEncoding.Codec);
         FillCrf(SelectedVideoEncoding.Codec);
-        if (!string.IsNullOrEmpty(settings.Preset) && VideoPresets.Contains(settings.Preset))
+        var preset = VideoPresetOptions.Migrate(SelectedVideoEncoding.Codec, settings.Preset);
+        if (!string.IsNullOrEmpty(preset) && VideoPresets.Contains(preset))
         {
-            SelectedVideoPreset = settings.Preset;
+            SelectedVideoPreset = preset;
         }
-        if (!string.IsNullOrEmpty(settings.Crf) && VideoCrf.Contains(settings.Crf))
+
+        // A stored preset that was one of the removed aliases carries a tuning mode of its own
+        // ("lossless" was not just a speed), and settings written before the tune list existed
+        // have nothing to say about it - so the alias decides in that case.
+        var tune = VideoPresetOptions.MigrateTune(SelectedVideoEncoding.Codec, settings.Preset);
+        if (string.IsNullOrEmpty(tune))
         {
-            SelectedVideoCrf = settings.Crf;
+            tune = settings.Tune;
+        }
+
+        if (!string.IsNullOrEmpty(tune) && VideoTunes.Contains(tune))
+        {
+            SelectedVideoTune = tune;
+        }
+
+        // AMF qualities used to be stored as numbers ("0".."10"); the list now holds the names
+        // ffmpeg accepts, so a stored number is mapped to the name that meant the same.
+        var crf = VideoPresetOptions.MigrateAmfQuality(SelectedVideoEncoding.Codec, settings.Crf);
+        if (!string.IsNullOrEmpty(crf) && VideoCrf.Contains(crf))
+        {
+            SelectedVideoCrf = crf;
         }
 
         // Extension first: it decides which audio encoders the container can take.
@@ -1639,6 +1663,7 @@ public partial class BurnInViewModel : ObservableObject
 
         settings.Encoding = SelectedVideoEncoding.Codec;
         settings.Preset = SelectedVideoPreset ?? string.Empty;
+        settings.Tune = SelectedVideoTune ?? string.Empty;
         settings.Crf = SelectedVideoCrf ?? string.Empty;
         settings.PixelFormat = SelectedVideoPixelFormat?.Codec ?? string.Empty;
 
@@ -1847,7 +1872,9 @@ public partial class BurnInViewModel : ObservableObject
             return;
         }
 
+        FillPixelFormats(SelectedVideoEncoding.Codec);
         FillPreset(SelectedVideoEncoding.Codec);
+        FillTune(SelectedVideoEncoding.Codec);
         FillCrf(SelectedVideoEncoding.Codec);
         FillVideoExtensions(SelectedVideoEncoding.Codec);
     }
@@ -1889,6 +1916,38 @@ public partial class BurnInViewModel : ObservableObject
         SelectedAudioEncoding = !string.IsNullOrEmpty(wanted) && items.Contains(wanted) ? wanted : items[0];
     }
 
+    /// <summary>
+    /// Keeps the pixel format list to the formats the chosen encoder can actually take. ffmpeg
+    /// does not fail on an unsupported "-pix_fmt", it auto-selects another one - so a 10-bit pick
+    /// for nvenc used to write an 8-bit file without saying so.
+    /// </summary>
+    private void FillPixelFormats(string videoCodec, string? preferredPixelFormat = null)
+    {
+        var wanted = PixelFormatItem.Migrate(videoCodec, preferredPixelFormat ?? SelectedVideoPixelFormat?.Codec);
+        var items = PixelFormatItem.GetPixelFormats(videoCodec);
+
+        VideoPixelFormats.Clear();
+        VideoPixelFormats.AddRange(items);
+        SelectedVideoPixelFormat = items.FirstOrDefault(p => p.Codec == wanted) ?? items[0];
+    }
+
+    /// <summary>
+    /// The nvenc tuning modes, empty for every other encoder. The row is hidden when there is
+    /// nothing to pick, so the dialog does not grow a dead field for e.g. libx264.
+    /// </summary>
+    private void FillTune(string videoCodec)
+    {
+        var previousTune = SelectedVideoTune;
+        SelectedVideoTune = null;
+
+        var items = VideoPresetOptions.GetTunes(videoCodec);
+
+        VideoTunes.Clear();
+        VideoTunes.AddRange(items);
+        IsVideoTuneVisible = items.Count > 1;
+        SelectedVideoTune = previousTune != null && VideoTunes.Contains(previousTune) ? previousTune : items[0];
+    }
+
     private void FillPreset(string videoCodec)
     {
         VideoPresetText = Se.Language.Video.BurnIn.Preset;
@@ -1910,55 +1969,9 @@ public partial class BurnInViewModel : ObservableObject
 
         var defaultItem = "medium";
 
-        if (videoCodec == "h264_nvenc")
+        if (VideoPresetOptions.IsNvenc(videoCodec))
         {
-            items = new List<string>
-            {
-                "default",
-                "slow",
-                "medium",
-                "fast",
-                "hp",
-                "hq",
-                "bd",
-                "ll",
-                "llhq",
-                "llhp",
-                "lossless",
-                "losslesshp",
-                "p1",
-                "p2",
-                "p3",
-                "p4",
-                "p5",
-                "p6",
-                "p7",
-            };
-        }
-        else if (videoCodec == "hevc_nvenc")
-        {
-            items = new List<string>
-            {
-                "default",
-                "slow",
-                "medium",
-                "fast",
-                "hp",
-                "hq",
-                "bd",
-                "ll",
-                "llhq",
-                "llhp",
-                "lossless",
-                "losslesshp",
-                "p1",
-                "p2",
-                "p3",
-                "p4",
-                "p5",
-                "p6",
-                "p7",
-            };
+            items = VideoPresetOptions.GetNvencPresets();
         }
         else if (videoCodec == "h264_qsv" || videoCodec == "hevc_qsv")
         {
@@ -2033,6 +2046,7 @@ public partial class BurnInViewModel : ObservableObject
 
         VideoPresets.Clear();
         VideoPresets.AddRange(items);
+        previousPreset = VideoPresetOptions.Migrate(videoCodec, previousPreset);
         if (!string.IsNullOrEmpty(previousPreset) && VideoPresets.Contains(previousPreset))
         {
             SelectedVideoPreset = previousPreset;
@@ -2088,19 +2102,29 @@ public partial class BurnInViewModel : ObservableObject
             VideoCrf.AddRange(items);
             SelectedVideoCrf = null;
         }
-        else if (videoCodec == "h264_amf" ||
-                 videoCodec == "hevc_amf")
+        else if (VideoPresetOptions.IsAmf(videoCodec))
         {
-            for (var i = 0; i <= 10; i++)
+            // Named values, not a number - see VideoPresetOptions.GetAmfQualities.
+            VideoCrfText = Se.Language.General.Quality;
+            VideoCrf.Clear();
+            VideoCrf.AddRange(VideoPresetOptions.GetAmfQualities());
+            SelectedVideoCrf = null;
+        }
+        else if (videoCodec is "h264_qsv" or "hevc_qsv")
+        {
+            // QSV has no "crf" option at all: ffmpeg took the value, logged "Codec AVOption crf
+            // ... has not been used for any stream" and encoded with its default CQP, so the
+            // quality picked here did nothing. The QSV knob is "-global_quality".
+            for (var i = 1; i <= 51; i++)
             {
                 items.Add(i.ToString(CultureInfo.InvariantCulture));
             }
 
             VideoCrfText = Se.Language.General.Quality;
-            VideoCrfHint = "0=best quality, 10=best speed";
+            VideoCrfHint = "1=best quality, 51=best speed";
             VideoCrf.Clear();
             VideoCrf.AddRange(items);
-            SelectedVideoCrf = null;
+            SelectedVideoCrf = "23";
         }
         else if (videoCodec is "h264_videotoolbox" or "hevc_videotoolbox")
         {
@@ -2147,6 +2171,7 @@ public partial class BurnInViewModel : ObservableObject
             SelectedVideoCrf = "23";
         }
 
+        previousCrf = VideoPresetOptions.MigrateAmfQuality(videoCodec, previousCrf);
         if (!string.IsNullOrWhiteSpace(previousCrf) && VideoCrf.Contains(previousCrf))
         {
             SelectedVideoCrf = previousCrf;

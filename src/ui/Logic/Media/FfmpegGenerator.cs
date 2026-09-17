@@ -169,11 +169,26 @@ public class FfmpegGenerator
         {
             if (videoEncoding == "h264_nvenc" || videoEncoding == "hevc_nvenc")
             {
-                crfSettings = $" -cq {crf}";
+                // "-tune lossless" pins nvenc to constant QP 0, so a CQ value alongside it is
+                // silently dropped by ffmpeg - leave it out rather than write a command line that
+                // claims a quality the encode does not use.
+                if (tune != "lossless")
+                {
+                    crfSettings = $" -cq {crf}";
+                }
             }
             else if (videoEncoding == "h264_amf" || videoEncoding == "hevc_amf")
             {
+                // A quality preference name ("quality"/"balanced"/"speed"), not a number: the
+                // integers behind them differ per codec and the H.264 encoder rejects anything
+                // above 2.
                 crfSettings = $" -quality {crf}";
+            }
+            else if (videoEncoding is "h264_qsv" or "hevc_qsv")
+            {
+                // QSV knows no "crf" - ffmpeg accepted it, warned that the option went unused and
+                // encoded at its default CQP instead. "-global_quality" is the ICQ knob.
+                crfSettings = $" -global_quality {crf}";
             }
             else if (videoEncoding is "h264_videotoolbox" or "hevc_videotoolbox")
             {
@@ -314,7 +329,7 @@ public class FfmpegGenerator
         // Without it ffmpeg hits "File ... already exists. Exiting." and writes nothing - and as
         // the old file is still there, the burn-in looked like it succeeded (issue #14210).
         return
-            $"-y{cutStart}-i \"{inputVideoFileName}\"{canvasInput}{imageSubtitleInput}{logoInput}{cutEnd} {filterParameter} -g 30 -bf 2 -s {width}x{height} {videoEncodingSettings} {passSettings} {presetSettings} {crfSettings} {pixelFormat} {audioSettings}{tuneParameter} -use_editlist 0 -movflags +faststart{shortestParameter} {outputVideoFileName}";
+            $"-y{cutStart}-i \"{inputVideoFileName}\"{canvasInput}{imageSubtitleInput}{logoInput}{cutEnd} {filterParameter} -g 30 -bf 2 -s {width}x{height} {videoEncodingSettings} {passSettings} {presetSettings}{tuneParameter} {crfSettings} {pixelFormat} {audioSettings} -use_editlist 0 -movflags +faststart{shortestParameter} {outputVideoFileName}";
     }
 
     /// <summary>

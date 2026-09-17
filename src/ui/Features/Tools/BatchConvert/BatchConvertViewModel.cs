@@ -232,9 +232,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private bool _convertColorsToDialogAddNewLines;
     [ObservableProperty] private bool _convertColorsToDialogReBreakLines;
 
-    // Bride gaps
-    [ObservableProperty] private int _bridgeGapsSmallerThanMs;
-    [ObservableProperty] private int _bridgeGapsMinGapMs;
+    // Bridge gaps - frames in frame mode, like the Bridge gaps dialog (#14959)
+    [ObservableProperty] private int _bridgeGapsSmallerThanMsOrFrames;
+    [ObservableProperty] private int _bridgeGapsMinGapMsOrFrames;
     [ObservableProperty] private int _bridgeGapsPercentForLeft;
 
     // Split/break long lines
@@ -833,8 +833,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // These were read in LoadSettings but never written back, so every number the user typed
         // into the bridge-gaps, min-gap and split/break function panels was discarded on close.
         // They go to the same keys the dedicated dialogs use.
-        Se.Settings.Tools.BridgeGaps.BridgeGapsSmallerThanMs = BridgeGapsSmallerThanMs;
-        Se.Settings.Tools.BridgeGaps.MinGapMs = BridgeGapsMinGapMs;
+        Se.Settings.Tools.BridgeGaps.SetBridgeGapsSmallerThan(BridgeGapsSmallerThanMsOrFrames, Se.Settings.General.UseFrameMode);
+        Se.Settings.Tools.BridgeGaps.SetMinGap(BridgeGapsMinGapMsOrFrames, Se.Settings.General.UseFrameMode);
         Se.Settings.Tools.BridgeGaps.PercentForLeft = BridgeGapsPercentForLeft;
         Se.Settings.Tools.ApplyMinGapMilliseconds = MinGapMs;
         Se.Settings.Tools.SplitRebalanceLongLinesSplit = SplitBreakSplitLongLines;
@@ -889,8 +889,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             SelectedSourceLanguage = sourceLanguage;
         }
 
-        var defaultTarget = AutoTranslateViewModel.EvaluateDefaultTargetLanguageCode(string.Empty, SelectedSourceLanguage?.Code ?? string.Empty);
-        SelectedTargetLanguage = TargetLanguages.FirstOrDefault(p => p.TwoLetterIsoLanguageName == defaultTarget);
+        SelectedTargetLanguage = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            TargetLanguages,
+            SelectedSourceLanguage,
+            Se.Settings.AutoTranslate.AutoTranslateLastTarget,
+            Se.Language.CultureName);
         var targetLanguage = TargetLanguages.FirstOrDefault(p => p.TwoLetterIsoLanguageName == Se.Settings.Tools.BatchConvert.AutoTranslateTargetLanguage);
         if (targetLanguage != null)
         {
@@ -941,8 +944,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             RtlReverseStartEnd = true;
         }
 
-        BridgeGapsSmallerThanMs = Se.Settings.Tools.BridgeGaps.BridgeGapsSmallerThanMs;
-        BridgeGapsMinGapMs = Se.Settings.Tools.BridgeGaps.MinGapMs;
+        BridgeGapsSmallerThanMsOrFrames = Se.Settings.Tools.BridgeGaps.GetBridgeGapsSmallerThan(Se.Settings.General.UseFrameMode);
+        BridgeGapsMinGapMsOrFrames = Se.Settings.Tools.BridgeGaps.GetMinGap(Se.Settings.General.UseFrameMode);
         BridgeGapsPercentForLeft = Se.Settings.Tools.BridgeGaps.PercentForLeft;
 
         // "Apply minimum gap" was never loaded. Its editor passes the saved value only as the
@@ -2823,8 +2826,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             BridgeGaps = new BatchConvertConfig.BridgeGapsSettings
             {
                 IsActive = activeFunctions.Contains(BatchConvertFunctionType.BridgeGaps),
-                BridgeGapsSmallerThanMs = BridgeGapsSmallerThanMs,
-                MinGapMs = BridgeGapsMinGapMs,
+                BridgeGapsSmallerThanMsOrFrames = BridgeGapsSmallerThanMsOrFrames,
+                MinGapMsOrFrames = BridgeGapsMinGapMsOrFrames,
+                UseFrames = Se.Settings.General.UseFrameMode,
                 PercentForLeft = BridgeGapsPercentForLeft,
             },
 
@@ -3513,42 +3517,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             TargetLanguages.Add(language);
         }
 
-        SelectedTargetLanguage = null;
-        var targetLanguageIsoCode = AutoTranslateViewModel.EvaluateDefaultTargetLanguageCode(SelectedTargetLanguage?.Code ?? string.Empty, SelectedSourceLanguage?.Code ?? string.Empty);
-        if (!string.IsNullOrEmpty(targetLanguageIsoCode))
-        {
-            var lang = TargetLanguages.FirstOrDefault(p => p.Code == targetLanguageIsoCode);
-            if (lang != null)
-            {
-                SelectedTargetLanguage = lang;
-            }
-        }
-
-        if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.AutoTranslateLastTarget))
-        {
-            var lang = TargetLanguages.FirstOrDefault(p => p.Code == Se.Settings.AutoTranslate.AutoTranslateLastTarget);
-            if ((SelectedSourceLanguage == null || lang == null || SelectedSourceLanguage.Code != lang.Code) && lang != null)
-            {
-                SelectedTargetLanguage = lang;
-            }
-        }
-
-        if (SelectedTargetLanguage == null && TargetLanguages.Count > 0)
-        {
-            SelectedTargetLanguage = TargetLanguages[0];
-        }
-
-        if (SelectedSourceLanguage == SelectedTargetLanguage && TargetLanguages.Count > 1)
-        {
-            if (SelectedSourceLanguage?.Code == "en")
-            {
-                SelectedTargetLanguage = TargetLanguages.FirstOrDefault(p => p.Code == "de");
-            }
-            else
-            {
-                SelectedTargetLanguage = TargetLanguages.FirstOrDefault(p => p.Code == "en");
-            }
-        }
+        SelectedTargetLanguage = AutoTranslateViewModel.FindDefaultTargetLanguage(
+            TargetLanguages,
+            SelectedSourceLanguage,
+            Se.Settings.AutoTranslate.AutoTranslateLastTarget,
+            Se.Language.CultureName);
     }
 
     internal void Onloaded(object? sender, RoutedEventArgs e)

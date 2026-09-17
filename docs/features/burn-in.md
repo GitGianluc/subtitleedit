@@ -74,8 +74,24 @@ the full list is kept.
 | `h264_amf` / `hevc_amf` | AMD GPU | **Quality** 0–10 (lower is better) |
 | `h264_qsv` / `hevc_qsv` | Intel Quick Sync | **CRF** (lower is better) |
 
-NVENC takes its own preset list (`p1`–`p7`, `hq`, `ll`, …) instead of the x264 presets. AMF has
-no preset. Quality is left blank by default, which lets FFmpeg pick a bitrate.
+NVENC takes its own preset list (`slow`, `medium`, `fast` and `p1`–`p7`) instead of the x264
+presets. The old aliases (`hq`, `ll`, `lossless`, …) were removed in FFmpeg 9.0 and are no longer
+offered — a saved one is moved to its `p1`–`p7` equivalent. AMF has no preset. Quality is left
+blank by default, which lets FFmpeg pick a bitrate.
+
+NVENC also has a **Tune** list, which is what those old aliases really set on top of a preset.
+The row is shown for the NVIDIA encoders only:
+
+| Tune | Meaning |
+|------|---------|
+| *(blank)* | FFmpeg's default — high quality |
+| `hq` | High quality (the default, stated explicitly) |
+| `ll` / `ull` | Low latency / ultra low latency — for streaming, not for burn-in |
+| `lossless` | Lossless encoding |
+
+`lossless` pins the encoder to constant QP 0, so the **CQ** value is left out of the command line
+when it is picked — FFmpeg would ignore it anyway. Not every GPU can encode losslessly; where it
+cannot, FFmpeg stops with *"Lossless encoding not supported"*.
 
 All HEVC output is tagged `hvc1` so it plays in QuickTime and other Apple players, which reject
 the `hev1` tag FFmpeg writes by default.
