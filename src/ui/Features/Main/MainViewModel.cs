@@ -152,6 +152,7 @@ using Nikse.SubtitleEdit.Features.Main.AssistedSplit;
 using Nikse.SubtitleEdit.Features.Tools.SplitBreakLongLines;
 using Nikse.SubtitleEdit.Features.Tools.SplitSubtitle;
 using Nikse.SubtitleEdit.Features.Translate;
+using Nikse.SubtitleEdit.Features.Video.BackgroundMusic;
 using Nikse.SubtitleEdit.Features.Video.BlankVideo;
 using Nikse.SubtitleEdit.Features.Video.BurnIn;
 using Nikse.SubtitleEdit.Features.Video.CutVideo;
@@ -4030,17 +4031,26 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<OpenSecondarySubtitleWindow, OpenSecondarySubtitleViewModel>(vm =>
+        // "Do not show this dialog again" in the dialog: apply its remembered settings directly.
+        if (Se.Settings.Video.SecondarySubtitleOverrideStyle && !Se.Settings.Video.SecondarySubtitleShowDialog)
         {
-            vm.Initialize(subtitle, GetUpdateSubtitle(), SelectedSubtitleFormat, _mediaInfo, _videoFileName);
-        });
+            _subtitleSecondary = SecondarySubtitleStyler.BuildFromSettings(subtitle, _mediaInfo);
+        }
+        else
+        {
+            var result = await ShowDialogAsync<OpenSecondarySubtitleWindow, OpenSecondarySubtitleViewModel>(vm =>
+            {
+                vm.Initialize(subtitle, GetUpdateSubtitle(), SelectedSubtitleFormat, _mediaInfo, _videoFileName);
+            });
 
-        if (!result.OkPressed)
-        {
-            return;
+            if (!result.OkPressed)
+            {
+                return;
+            }
+
+            _subtitleSecondary = result.ResultSubtitle;
         }
 
-        _subtitleSecondary = result.ResultSubtitle;
         _subtitleSecondaryFileName = fileName;
         IsSubtitleSecondaryVisible = true;
 
@@ -11417,6 +11427,38 @@ public partial class MainViewModel :
                 Se.WriteToolsLog("TTS: applying subtitle changes after OK failed: " + ex, true);
             }
         }
+    }
+
+    private Window? _backgroundMusicWindow;
+
+    [RelayCommand]
+    private async Task ShowVideoBackgroundMusic()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var ffmpegOk = await RequireFfmpegOk();
+        if (!ffmpegOk)
+        {
+            return;
+        }
+
+        if (_backgroundMusicWindow != null)
+        {
+            _backgroundMusicWindow.Activate();
+            _backgroundMusicWindow.Focus();
+            return;
+        }
+
+        _windowService.ShowWindow<BackgroundMusicWindow, BackgroundMusicViewModel>(Window, (window, vm) =>
+        {
+            _backgroundMusicWindow = window;
+            window.Closed += (_, _) => _backgroundMusicWindow = null;
+            WindowService.KeepTopmostWhileOwnerActive(window, Window);
+            vm.Initialize(_videoFileName);
+        });
     }
 
     private Window? _remuxVideoWindow;
@@ -27674,6 +27716,28 @@ public partial class MainViewModel :
         // above never covered it and every tick of a drag deep-copied the whole subtitle and
         // pushed an intermediate state onto the undo stack (issue #13234).
         return AudioVisualizer?.IsEditingWithPointer == true;
+    }
+
+    void IUndoRedoClient.OnChangeDetected(UndoRedoItem? lastRecorded)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Invoke(() => ((IUndoRedoClient)this).OnChangeDetected(lastRecorded));
+            return;
+        }
+
+        // Frame mode: keep what the user just re-timed on frames, so "Snap all times to frames"
+        // is not needed by hand. Only lines changed since the last undo step are touched, and
+        // nothing is snapped without a baseline (e.g. a file opened in frame mode stays as is).
+        if (!Se.Settings.General.UseFrameMode || lastRecorded == null)
+        {
+            return;
+        }
+
+        if (FrameModeTimeSnapper.SnapChangedLines(Subtitles, lastRecorded.Subtitles) > 0)
+        {
+            _updateAudioVisualizer = true;
+        }
     }
 
     // Hash used by undo change detection. Undo snapshots capture and restore OriginalText,

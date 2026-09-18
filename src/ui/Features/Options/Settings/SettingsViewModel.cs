@@ -249,6 +249,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _showFullscreenButton;
     [ObservableProperty] private bool _fullscreenHideControls;
     [ObservableProperty] private bool _autoOpenVideoFile;
+    [ObservableProperty] private bool _showSecondarySubtitleDialog;
 
     [ObservableProperty] private bool _waveformDrawGridLines;
     [ObservableProperty] private bool _waveformUseSkiaRenderer;
@@ -1071,6 +1072,7 @@ public partial class SettingsViewModel : ObservableObject
         ShowFullscreenButton = video.ShowFullscreenButton;
         FullscreenHideControls = video.FullscreenHideControls;
         AutoOpenVideoFile = video.AutoOpen;
+        ShowSecondarySubtitleDialog = video.SecondarySubtitleShowDialog;
 
         MpvPreviewFontName = video.MpvPreviewFontName;
         MpvPreviewFontSize = video.MpvPreviewFontSize;
@@ -1915,6 +1917,7 @@ public partial class SettingsViewModel : ObservableObject
         video.ShowFullscreenButton = ShowFullscreenButton;
         video.FullscreenHideControls = FullscreenHideControls;
         video.AutoOpen = AutoOpenVideoFile;
+        video.SecondarySubtitleShowDialog = ShowSecondarySubtitleDialog;
 
         video.MpvPreviewFontName = MpvPreviewFontName;
         video.MpvPreviewFontSize = MpvPreviewFontSize;
@@ -3090,15 +3093,24 @@ public partial class SettingsViewModel : ObservableObject
             e.Handled = true;
             Window?.Close();
         }
-        else if (e.KeyModifiers == KeyModifiers.Control && e.Key is Key.PageDown or Key.PageUp)
-        {
-            e.Handled = true;
-            SelectAdjacentSection(e.Key == Key.PageDown ? 1 : -1);
-        }
         else if (UiUtil.IsHelp(e))
         {
             e.Handled = true;
             UiUtil.ShowHelp("features/settings");
+        }
+    }
+
+    /// <summary>
+    /// Runs on the tunnel pass: the content's ScrollViewer, text boxes and combo boxes handle
+    /// PageUp/PageDown themselves, so a bubbling handler only saw Ctrl+PageUp/PageDown while focus
+    /// was on the category buttons, not on a setting inside the section (#12087).
+    /// </summary>
+    public void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key is Key.PageDown or Key.PageUp)
+        {
+            e.Handled = true;
+            SelectAdjacentSection(e.Key == Key.PageDown ? 1 : -1);
         }
     }
 

@@ -50,7 +50,7 @@ public class SettingsPage : UserControl
             // The placeholder text is not exposed as the UIA Name, so screen readers announce a
             // bare "edit" without this (#12087).
             [AutomationProperties.NameProperty] = Se.Language.Options.Settings.SearchSettingsDotDotDot,
-        };
+        }.WithSearchAndClearIcons();
 
         _contentPanel = new StackPanel
         {
@@ -603,6 +603,7 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowFullscreenButton, nameof(_vm.ShowFullscreenButton)),
             MakeCheckboxSetting(Se.Language.Options.Settings.FullscreenHideControls, nameof(_vm.FullscreenHideControls)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoOpenVideoFile, nameof(_vm.AutoOpenVideoFile)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.ShowSecondarySubtitleDialog, nameof(_vm.ShowSecondarySubtitleDialog)),
             new SettingsItem(!_vm.IsLibMpvDownloadVisible, Se.Language.Options.Settings.DownloadMpv, () => new StackPanel
             {
                 Children =
