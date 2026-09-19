@@ -4054,6 +4054,44 @@ public partial class MainViewModel :
         }
 
         _subtitleSecondaryFileName = fileName;
+        PushSecondarySubtitle();
+
+        // Persist the file name on the recent-file entry now rather than at the next save or
+        // close, so it survives a crash too (#15044).
+        AddToRecentFiles(false);
+    }
+
+    /// <summary>
+    /// Brings back the second subtitle file this subtitle was last shown with (#15044). Quiet by
+    /// design: no dialog, and a file that is gone or no longer parses is just skipped.
+    /// </summary>
+    private void RestoreRememberedSecondarySubtitle(string? fileName)
+    {
+        if (!Se.Settings.Video.SecondarySubtitleRememberFile || string.IsNullOrEmpty(fileName) || !File.Exists(fileName))
+        {
+            return;
+        }
+
+        try
+        {
+            var subtitle = Subtitle.Parse(fileName);
+            if (subtitle == null || subtitle.Paragraphs.Count == 0)
+            {
+                return;
+            }
+
+            _subtitleSecondary = SecondarySubtitleStyler.BuildRemembered(subtitle, _mediaInfo);
+            _subtitleSecondaryFileName = fileName;
+            PushSecondarySubtitle();
+        }
+        catch (Exception e)
+        {
+            Se.LogError(e);
+        }
+    }
+
+    private void PushSecondarySubtitle()
+    {
         IsSubtitleSecondaryVisible = true;
 
         var vp = GetVideoPlayerControl();
@@ -18115,10 +18153,14 @@ public partial class MainViewModel :
         var survivorIndex = GridSelectionAnchor.PickSurvivorIndex(blank, SelectedSubtitleIndex ?? 0);
         var survivor = survivorIndex >= 0 ? Subtitles[survivorIndex] : null;
 
-        var blankLines = Subtitles.Where(s => s.Text.IsOnlyControlCharactersOrWhiteSpace()).ToList();
-        foreach (var line in blankLines)
+        // By index from the bottom, with the flags from above: Subtitles.Remove(line) searched
+        // the collection for every blank line, and testing the texts a second time is not needed.
+        for (var i = blank.Count - 1; i >= 0; i--)
         {
-            Subtitles.Remove(line);
+            if (blank[i])
+            {
+                Subtitles.RemoveAt(i);
+            }
         }
 
         Renumber();
@@ -21685,6 +21727,7 @@ public partial class MainViewModel :
             var preIndex = SelectedSubtitleIndex ?? 0;
             var preRowTop = GetSelectedRowViewportTop();
             var preFocus = CaptureUndoRedoFocus();
+            var preRows = Se.Settings.Tools.UndoRedoGoToChangedLine ? Subtitles.ToArray() : null;
 
             var undoRedoObject = _undoRedoManager.Undo()!;
             if (undoRedoObject?.Subtitles == null)
@@ -21693,7 +21736,7 @@ public partial class MainViewModel :
             }
 
             RestoreUndoRedoState(undoRedoObject, scrollToSelected: false);
-            RestoreSelectionToPreviousIndex(preIndex, preRowTop, restoreGridFocus: preFocus == UndoRedoFocus.Grid);
+            RestoreSelectionAfterUndoRedo(preRows, preIndex, preRowTop, restoreGridFocus: preFocus == UndoRedoFocus.Grid);
             RestoreUndoRedoFocus(preFocus);
             ShowUndoStatus();
         });
@@ -21735,6 +21778,7 @@ public partial class MainViewModel :
             var preIndex = SelectedSubtitleIndex ?? 0;
             var preRowTop = GetSelectedRowViewportTop();
             var preFocus = CaptureUndoRedoFocus();
+            var preRows = Se.Settings.Tools.UndoRedoGoToChangedLine ? Subtitles.ToArray() : null;
 
             var undoRedoObject = _undoRedoManager.Redo();
             if (undoRedoObject?.Subtitles == null)
@@ -21743,7 +21787,7 @@ public partial class MainViewModel :
             }
 
             RestoreUndoRedoState(undoRedoObject, scrollToSelected: false);
-            RestoreSelectionToPreviousIndex(preIndex, preRowTop, restoreGridFocus: preFocus == UndoRedoFocus.Grid);
+            RestoreSelectionAfterUndoRedo(preRows, preIndex, preRowTop, restoreGridFocus: preFocus == UndoRedoFocus.Grid);
             RestoreUndoRedoFocus(preFocus);
             ShowRedoStatus();
         });
@@ -21819,6 +21863,39 @@ public partial class MainViewModel :
             case UndoRedoFocus.AudioVisualizer:
                 Dispatcher.UIThread.Post(() => AudioVisualizer?.Focus());
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Undo/redo normally keep the row the user is on (#11308). With "Undo/redo: go to changed
+    /// line" on, the first row the step changed is selected instead, and the video follows it -
+    /// undoing "move text to next, go to next and play" then lands back on the line the text
+    /// came from (#15029).
+    /// </summary>
+    private void RestoreSelectionAfterUndoRedo(SubtitleLineViewModel[]? preRows, int preIndex, double? preRowTop, bool? restoreGridFocus)
+    {
+        var changedIndex = preRows == null ? -1 : UndoRedoChangedRowFinder.FindFirstChangedRowIndex(preRows, Subtitles);
+        if (changedIndex < 0 || Subtitles.Count == 0)
+        {
+            RestoreSelectionToPreviousIndex(preIndex, preRowTop, restoreGridFocus);
+            return;
+        }
+
+        changedIndex = Math.Min(changedIndex, Subtitles.Count - 1);
+        if (changedIndex == preIndex)
+        {
+            RestoreSelectionToPreviousIndex(preIndex, preRowTop, restoreGridFocus);
+            return;
+        }
+
+        SelectAndScrollToRow(changedIndex, null, restoreGridFocus: restoreGridFocus);
+
+        var vp = GetVideoPlayerControl();
+        if (vp != null && !string.IsNullOrEmpty(_videoFileName))
+        {
+            var seconds = Subtitles[changedIndex].StartTime.TotalSeconds;
+            SeekVideoPlayer(vp, seconds);
+            PinPlayheadTo(seconds);
         }
     }
 
@@ -22982,6 +23059,12 @@ public partial class MainViewModel :
 
         RecentFile? rememberedRecentFile = null;
 
+        // Read the remembered second subtitle before the open touches anything: ResetSubtitle
+        // clears the current one, and the recent-file writes during the open (VideoOpenFile, the
+        // end of this method) then overwrite the entry with none (#15044).
+        var rememberedSecondaryFileName = Se.Settings.File.RecentFiles.FirstOrDefault(rf =>
+            string.Equals(rf.SubtitleFileName, fileName, StringComparison.OrdinalIgnoreCase))?.SubtitleFileNameSecondary;
+
         try
         {
             _opening = true;
@@ -23585,6 +23668,10 @@ public partial class MainViewModel :
                     await AutoOpenVideoFile(videoFileName, desiredAudioTrackId, videoStartPositionSeconds);
                 }
             }
+
+            // After the video, so the style is sized for it - and before the write below, which
+            // would otherwise persist the entry without it.
+            RestoreRememberedSecondarySubtitle(rememberedSecondaryFileName);
 
             // Pass the index explicitly: SelectAndScrollToRow applies the selection via a
             // dispatcher post that may not have run yet, so reading SelectedSubtitleIndex
@@ -26037,7 +26124,8 @@ public partial class MainViewModel :
             SelectedEncoding.DisplayName,
             Se.Settings.General.CurrentVideoOffsetInMs,
             IsSmpteTimingEnabled,
-            _audioTrack?.Id ?? -1);
+            _audioTrack?.Id ?? -1,
+            _subtitleSecondaryFileName ?? string.Empty);
         Se.SaveSettings();
 
         if (updateMenu)
@@ -30288,6 +30376,14 @@ public partial class MainViewModel :
                     // Shift+Delete fell through to Avalonia's plain delete instead of cutting (#13711).
                     var isBareKeyChord = keyEventArgs.KeyModifiers == KeyModifiers.None ||
                                          (keyEventArgs.KeyModifiers == KeyModifiers.Shift && !NonTypingEditKeys.Contains(key));
+                    // Space always types in a text input, even with "allow single-letter shortcuts
+                    // in text box" on: bare Space is the default play/pause shortcut, so the option
+                    // made it impossible to type a space (#15028).
+                    if (key == Key.Space && isBareKeyChord)
+                    {
+                        return;
+                    }
+
                     if (!Se.Settings.Tools.AllowSingleLetterShortcutsInTextbox && !AlwaysAllowedSingleKeyShortcuts.Contains(key) && isBareKeyChord)
                     {
                         return; // allow single key shortcuts in text input if enabled in settings, or if it's not an allowed single key shortcut

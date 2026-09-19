@@ -36,6 +36,8 @@ public partial class ToolbarItemDisplay : ObservableObject
             SeWaveformToolbarItemType.New => Format(w.NewHint),
             SeWaveformToolbarItemType.SetStart => Format(w.SetStartHint),
             SeWaveformToolbarItemType.SetEnd => Format(w.SetEndHint),
+            SeWaveformToolbarItemType.SetEndAndGoToNext => Se.Language.General.SetEndAndGoToNext,
+            SeWaveformToolbarItemType.PlayFromJustBeforeText => Se.Language.General.PlayFromJustBeforeText,
             SeWaveformToolbarItemType.SetStartAndOffsetTheRest => Format(w.SetStartAndOffsetTheRestHint),
             SeWaveformToolbarItemType.MoveSelectedLines => w.MoveSelectedLines,
             SeWaveformToolbarItemType.MoveSelectedLinesAndFollowing => w.MoveSelectedLinesAndFollowing,
@@ -54,6 +56,8 @@ public partial class ToolbarItemDisplay : ObservableObject
             SeWaveformToolbarItemType.TextPause => Format(w.TextPauseHint),
             SeWaveformToolbarItemType.TextNext => Format(w.TextNextHint),
             SeWaveformToolbarItemType.More => Se.Language.General.More,
+            SeWaveformToolbarItemType.LineBreak1 => string.Format(w.ToolbarLineBreakX, 1),
+            SeWaveformToolbarItemType.LineBreak2 => string.Format(w.ToolbarLineBreakX, 2),
             _ => type.ToString(),
         };
     }

@@ -199,10 +199,13 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<string> _splitOddNumberOfLinesActions;
     [ObservableProperty] private string _selectedSplitOddNumberOfLinesAction;
     [ObservableProperty] private bool _ocrUseWordSplitList;
+    [ObservableProperty] private bool _spellCheckRememberUseAlwaysList;
+    [ObservableProperty] private bool _fixShortDisplayTimesAllowMoveStartTime;
     [ObservableProperty] private bool _ocrGuessUnknownWords;
     [ObservableProperty] private bool _speechToTextSelectedLinesPromptFistTimeOnly;
     [ObservableProperty] private bool _multipleReplaceShowDotDotDotButtons;
     [ObservableProperty] private bool _gridFocusTextboxAfterInsertNew;
+    [ObservableProperty] private bool _undoRedoGoToChangedLine;
     [ObservableProperty] private bool _textToSpeechPromptMergeContinuationLines;
     [ObservableProperty] private bool _textToSpeechPromptSkipNoiseLines;
     [ObservableProperty] private bool _textToSpeechPromptDetectSpeakers;
@@ -250,6 +253,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _fullscreenHideControls;
     [ObservableProperty] private bool _autoOpenVideoFile;
     [ObservableProperty] private bool _showSecondarySubtitleDialog;
+    [ObservableProperty] private bool _rememberSecondarySubtitleFile;
 
     [ObservableProperty] private bool _waveformDrawGridLines;
     [ObservableProperty] private bool _waveformUseSkiaRenderer;
@@ -868,10 +872,13 @@ public partial class SettingsViewModel : ObservableObject
         SelectedSplitOddNumberOfLinesAction = MapFromSplitOddActionToLanguageCode(Se.Settings.Tools.SplitOddLinesAction);
         SelectedSpellCheckEngine = MapFromSpellCheckEngine(Se.Settings.SpellCheck.SpellCheckProvider);
         OcrUseWordSplitList = Se.Settings.Ocr.UseWordSplitList;
+        SpellCheckRememberUseAlwaysList = Se.Settings.Tools.SpellCheckRememberUseAlwaysList;
+        FixShortDisplayTimesAllowMoveStartTime = Se.Settings.Tools.FixShortDisplayTimesAllowMoveStartTime;
         OcrGuessUnknownWords = Se.Settings.Ocr.DoTryToGuessUnknownWords;
         SpeechToTextSelectedLinesPromptFistTimeOnly = Se.Settings.Tools.SpeechToTextSelectedLinesPromptFirstTimeOnly;
         MultipleReplaceShowDotDotDotButtons = Se.Settings.Tools.MultipleReplaceShowDotDotDotButtons;
         GridFocusTextboxAfterInsertNew = Se.Settings.Tools.GridFocusTextboxAfterInsertNew;
+        UndoRedoGoToChangedLine = Se.Settings.Tools.UndoRedoGoToChangedLine;
         TextToSpeechPromptMergeContinuationLines = Se.Settings.Tools.TextToSpeechPromptMergeContinuationLines;
         TextToSpeechPromptSkipNoiseLines = Se.Settings.Tools.TextToSpeechPromptSkipNoiseLines;
         TextToSpeechPromptDetectSpeakers = Se.Settings.Tools.TextToSpeechPromptDetectSpeakers;
@@ -1073,6 +1080,7 @@ public partial class SettingsViewModel : ObservableObject
         FullscreenHideControls = video.FullscreenHideControls;
         AutoOpenVideoFile = video.AutoOpen;
         ShowSecondarySubtitleDialog = video.SecondarySubtitleShowDialog;
+        RememberSecondarySubtitleFile = video.SecondarySubtitleRememberFile;
 
         MpvPreviewFontName = video.MpvPreviewFontName;
         MpvPreviewFontSize = video.MpvPreviewFontSize;
@@ -1731,10 +1739,13 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Tools.SplitOddLinesAction = MapFromSplitOddActionTranslationToCode(SelectedSplitOddNumberOfLinesAction);
         Se.Settings.SpellCheck.SpellCheckProvider = MapFromUISpellCheckEngineToCode(SelectedSpellCheckEngine);
         Se.Settings.Ocr.UseWordSplitList = OcrUseWordSplitList;
+        Se.Settings.Tools.SpellCheckRememberUseAlwaysList = SpellCheckRememberUseAlwaysList;
+        Se.Settings.Tools.FixShortDisplayTimesAllowMoveStartTime = FixShortDisplayTimesAllowMoveStartTime;
         Se.Settings.Ocr.DoTryToGuessUnknownWords = OcrGuessUnknownWords;
         Se.Settings.Tools.SpeechToTextSelectedLinesPromptFirstTimeOnly = SpeechToTextSelectedLinesPromptFistTimeOnly;
         Se.Settings.Tools.MultipleReplaceShowDotDotDotButtons = MultipleReplaceShowDotDotDotButtons;
         Se.Settings.Tools.GridFocusTextboxAfterInsertNew = GridFocusTextboxAfterInsertNew;
+        Se.Settings.Tools.UndoRedoGoToChangedLine = UndoRedoGoToChangedLine;
         Se.Settings.Tools.TextToSpeechPromptMergeContinuationLines = TextToSpeechPromptMergeContinuationLines;
         Se.Settings.Tools.TextToSpeechPromptSkipNoiseLines = TextToSpeechPromptSkipNoiseLines;
         Se.Settings.Tools.TextToSpeechPromptDetectSpeakers = TextToSpeechPromptDetectSpeakers;
@@ -1918,6 +1929,7 @@ public partial class SettingsViewModel : ObservableObject
         video.FullscreenHideControls = FullscreenHideControls;
         video.AutoOpen = AutoOpenVideoFile;
         video.SecondarySubtitleShowDialog = ShowSecondarySubtitleDialog;
+        video.SecondarySubtitleRememberFile = RememberSecondarySubtitleFile;
 
         video.MpvPreviewFontName = MpvPreviewFontName;
         video.MpvPreviewFontSize = MpvPreviewFontSize;

@@ -195,11 +195,13 @@ public class SeWaveform
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.Play, IsVisible = true, SortOrder = 10 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.PlayNext, IsVisible = false, SortOrder = 20 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.PlaySelection, IsVisible = false, SortOrder = 30 },
+            new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.PlayFromJustBeforeText, IsVisible = false, SortOrder = 35 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.Repeat, IsVisible = true, SortOrder = 40 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.RemoveBlankLines, IsVisible = false, SortOrder = 50 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.New, IsVisible = true, SortOrder = 60 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.SetStart, IsVisible = true, SortOrder = 70 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.SetEnd, IsVisible = true, SortOrder = 80 },
+            new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.SetEndAndGoToNext, IsVisible = false, SortOrder = 85 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.SetStartAndOffsetTheRest, IsVisible = true, SortOrder = 90 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.MoveSelectedLines, IsVisible = false, SortOrder = 91 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.MoveSelectedLinesAndFollowing, IsVisible = false, SortOrder = 92 },
@@ -214,6 +216,8 @@ public class SeWaveform
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.AutoSelectOnPlay, IsVisible = true, SortOrder = 140 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.Center, IsVisible = true, SortOrder = 150 },
             new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.More, IsVisible = true, SortOrder = 160 },
+            new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.LineBreak1, IsVisible = false, SortOrder = 170 },
+            new SeWaveformToolbarItem { Type = SeWaveformToolbarItemType.LineBreak2, IsVisible = false, SortOrder = 180 },
         ];
     }
 
