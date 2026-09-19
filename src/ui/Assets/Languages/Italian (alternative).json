@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.3.0-beta5",
+  "version": "v5.3.0-beta6",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -3239,9 +3239,12 @@
       "splitOddLinesAction": "Azione per la divisione delle righe non omogenee",
       "ocrUseWordSplitList": "OCR: usa lista per la divisione delle parole",
       "ocrGuessUnknownWords": "OCR: prova a individuare le parole sconosciute",
+      "spellCheckRememberUseAlwaysList": "Controllo ortografico: ricorda lista “Usa sempre”",
+      "fixShortDisplayTimesAllowMoveStartTime": "Correggi errori comuni: la correzione dei tempi di visualizzazione brevi può variare la tempistica iniziale",
       "speechToTextSelectedLinesPromptFirstTimeOnly": "Conversione da voce a testo: righe selezionate, richiesta lingua/motore solo la prima volta",
       "multipleReplaceShowDotDotDotButtons": "Sostituzioni multiple: mostra pulsanti menu contestuale",
       "gridFocusTextboxAfterInsertNew": "Griglia: metti a fuoco il riquadro di testo dopo l’inserimento di un nuovo sottotitolo",
+      "undoRedoGoToChangedLine": "Annulla/ripeti: vai alla riga modificata (e alla posizione del video)",
       "musicSymbol": "Simbolo musicale",
       "musicSymbolsToReplace": "Simboli musicali da sostituire (separati da virgola)",
       "textToSpeechPromptMergeContinuationLines": "Sintesi vocale: chiedi conferma per unire le righe di prosecuzione",
@@ -4006,9 +4009,9 @@
     "translatedBy": "Tradotto da: {0}",
     "licenseText": "Subtitle Edit è software libero sotto licenza MIT.",
     "descriptionText": "Subtitle Edit è un editor di sottotitoli gratuito e open source, disponibile per Windows, macOS e Linux.\nSupporta più di 300 formati di sottotitoli, OCR, riconoscimento vocale, traduzione basata su intelligenza artificiale e molto altro ancora.\n\nGrazie di fare parte della comunità di Subtitle Edit! :)",
-    "issueTrackingAndSourceCode": "Tracciamento problemi e codice sorgente:",
+    "issueTrackingAndSourceCode": "Tracciamento problemi e codice sorgente: ",
     "gitHub": "GitHub",
-    "donate": "Donazioni:",
+    "donate": "Donazioni: ",
     "payPal": "PayPal",
     "gitHubSponsor": "Diventa sponsor su GitHub",
     "or": " o "
