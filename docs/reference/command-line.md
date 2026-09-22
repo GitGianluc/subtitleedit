@@ -136,6 +136,7 @@ seconv lint *.srt --json             # CI-friendly: exit 1 on any issue
 | `--output-filename:<name>` | Output file name (single input only) |
 | `--output-filename-append:<text>` | Text appended to the output file name stem, before any language/track suffix: `movie.ts` → `movie_fixed.eng.srt`. Ignored with `--output-filename` |
 | `--overwrite` | Overwrite existing files (default: rotate to `name_2.ext`, `_3.ext`, ...) |
+| `--no-language-suffix` | Do not insert the language code before the extension (`movie.srt` instead of `movie.en.srt` for container tracks and `--translate-to`). With `--overwrite` and `--translate-to` the file is translated in place |
 | `--keep-timestamp` (also `--keep-timestamps`) | Give output files the source file's modified/created date instead of the conversion time |
 | `--encoding:<name>` | Encoding name or codepage. Special values: `utf-8`, `utf-8-no-bom` (also `utf-8-nobom`, `utf8-nobom`), a code page number, or `source` to keep the input file's detected encoding. Defaults: auto-detect on input, UTF-8 BOM on output |
 | `--input-encoding-fallback:<name>` | Encoding to assume when the input is not UTF-8 / has no BOM, instead of the ANSI auto-detection (names as in `seconv list-encodings`). Ignored when `--encoding` is set |
@@ -270,6 +271,7 @@ An AVI stream header carries no language, so a multi-stream `.avi` names its out
 | `--ocr-language:<lang>` | Tesseract: ISO 639-2 (`eng`, `deu`); Paddle: short (`en`); Ollama/llama.cpp: human (`English`); Apple Vision: Vision tag (`en-US`) |
 | `--ocr-db:<path>` | OCR database file: `.nocr` for `nocr`, `.db` for `binaryocr` (required for both) |
 | `--dictionary-folder:<path>` | Folder with Hunspell dictionaries + `*_OCRFixReplaceList.xml`; enables the "Fix common OCR errors" pass of `--fix-common-errors` (English is bundled, so this is only needed for other languages) |
+| `--ocr-auto-detect-assa-alignment` | Add an ASSA alignment tag from where each subtitle image sits in the video frame — the same logic as **Auto-detect ASSA alignment** in the OCR window. The frame is divided into a 3×3 grid: a caption at the top centre gets `{\an8}`, a sign at the left edge `{\an4}`, and so on; bottom-centre is the default and gets no tag. A tall image holding a few short lines placed apart (one at the top, one at the bottom) is tagged per line and written as separate subtitles with the same time codes. Sources that do not report a frame size (MP4 VobSub) are left untagged. Ignored with `--time-codes-only`. |
 | `--ollama-url:<url>` | Default `http://localhost:11434/api/chat` |
 | `--ollama-model:<model>` | Default `llama3.2-vision` |
 | `--ocr-model:<model>` | llama.cpp OCR model: the file name of a model in the llama.cpp models folder - curated (e.g. `GLM-OCR-Q8_0.gguf`) or your own vision model with its `mmproj` sidecar next to it - or a full path to a `.gguf` with its `mmproj` sidecar next to it. Default: the first downloaded OCR model. |
@@ -339,7 +341,7 @@ seconv movie.sub subrip --time-codes-only
 
 `--translate-to:<language>` machine-translates each file as part of the conversion (after OCR for image sources, before the cleanup operations). Languages are given as a code or English name (`de`, `German`, `da`, `Danish`, …); the source language is auto-detected per file unless `--translate-from` is set.
 
-Translated output is named with the target language code — `way.srt --translate-to:zh-CN` writes `way.zh-CN.srt` (for container tracks the target code replaces the track's own language suffix, since the content leaves in the target language). An explicit `--output-filename` is used as-is.
+Translated output is named with the target language code — `way.srt --translate-to:zh-CN` writes `way.zh-CN.srt` (for container tracks the target code replaces the track's own language suffix, since the content leaves in the target language). An explicit `--output-filename` is used as-is, and `--no-language-suffix` keeps the plain name (`way.srt`) — combine it with `--overwrite` to translate a file in place.
 
 | Option | Description |
 |---|---|

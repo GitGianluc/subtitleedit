@@ -518,12 +518,13 @@ internal class SubtitleConverter
             return false;
         }
 
-        // Both bitmap track kinds are eligible for image-to-image: PGS, and VobSub (whose
+        // Every bitmap track kind is eligible for image-to-image: PGS, VobSub (whose
         // subpictures previously fell through to the OCR pipeline and were re-rasterised as
-        // text at the default font — issue #12772 part 3).
+        // text at the default font — issue #12772 part 3) and DVB-sub, which did the same.
         var bitmapTracks = matroska.GetTracks(true)
             .Where(t => t.CodecId.Equals("S_HDMV/PGS", StringComparison.OrdinalIgnoreCase)
-                        || t.CodecId.Equals("S_VOBSUB", StringComparison.OrdinalIgnoreCase))
+                        || t.CodecId.Equals("S_VOBSUB", StringComparison.OrdinalIgnoreCase)
+                        || t.CodecId.Equals("S_DVBSUB", StringComparison.OrdinalIgnoreCase))
             .Where(t => !options.ForcedOnly || t.IsForced)
             .Where(t => options.TrackNumbers.Count == 0 || options.TrackNumbers.Contains(t.TrackNumber))
             .ToList();
@@ -544,21 +545,22 @@ internal class SubtitleConverter
         foreach (var track in bitmapTracks)
         {
             var isVobSub = track.CodecId.Equals("S_VOBSUB", StringComparison.OrdinalIgnoreCase);
+            var isDvbSub = track.CodecId.Equals("S_DVBSUB", StringComparison.OrdinalIgnoreCase);
             var outputFile = ResolveOutputFileName(
                 inputFile, options, AppendForcedToken(ContainerSubtitleLoader.SanitizeLang(track.Language), track.IsForced), track.TrackNumber, _usedOutputFileNames);
 
             if (!options.Quiet)
             {
                 var trackLabel = $"#{track.TrackNumber} ";
-                var kind = isVobSub ? "VobSub" : "PGS";
+                var kind = isVobSub ? "VobSub" : isDvbSub ? "DVB" : "PGS";
                 AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [yellow]{trackLabel}[/][dim]({kind} img→img)→[/] [green]{outputFile}[/]...");
             }
 
             IReadOnlyList<BitmapSubtitleLoader.BitmapSubtitleItem>? items = null;
             try
             {
-                items = isVobSub
-                    ? BitmapSubtitleLoader.LoadMatroskaVobSub(matroska, track)
+                items = isVobSub ? BitmapSubtitleLoader.LoadMatroskaVobSub(matroska, track)
+                    : isDvbSub ? BitmapSubtitleLoader.LoadMatroskaDvbSub(matroska, track)
                     : BitmapSubtitleLoader.LoadMatroskaPgs(matroska, track);
                 WritePreservedBitmaps(items, outputFile, options);
                 result.SuccessfulFiles++;
@@ -1057,6 +1059,9 @@ internal class SubtitleConverter
     /// A name in <paramref name="usedNames"/> was handed out earlier in this run (e.g.
     /// the first of two "eng" tracks) and always counts as taken - --overwrite only
     /// clobbers files from before the run, never the run's own output.
+    /// --no-language-suffix drops the language token altogether (#15156): with
+    /// --overwrite a --translate-to run then writes back to the input's own name, without
+    /// it the counter keeps the input safe.
     /// </summary>
     internal static string ResolveOutputFileName(
         string inputFile,
@@ -1065,6 +1070,11 @@ internal class SubtitleConverter
         int? trackNumber = null,
         ISet<string>? usedNames = null)
     {
+        if (options.NoLanguageSuffix)
+        {
+            languageSuffix = null;
+        }
+
         string baseName;
         string ext;
         if (!string.IsNullOrEmpty(options.OutputFilename))
@@ -1176,6 +1186,12 @@ internal record class ConversionOptions
     public double? TargetFps { get; init; }
     public bool Overwrite { get; init; }
 
+    /// <summary>
+    /// --no-language-suffix: never insert a language code (translation target or container
+    /// track language) between the output stem and its extension.
+    /// </summary>
+    public bool NoLanguageSuffix { get; init; }
+
     /// <summary>--keep-timestamp: copy the source file's creation/last-write time onto every output file.</summary>
     public bool KeepTimestamp { get; init; }
     public List<string> Operations { get; init; } = new();
@@ -1276,6 +1292,14 @@ internal record class ConversionOptions
     /// <see cref="TimeCodesOnly"/> mode.
     /// </summary>
     public bool PgsIsolateColors { get; init; } = true;
+
+    /// <summary>
+    /// OCR only: prefix each recognised text with the ASSA alignment tag (<c>{\an8}</c>, ...)
+    /// matching where its image sits in the video frame - the OCR window's "Auto-detect ASSA
+    /// alignment". Bottom-centre (an2) is the default and gets no tag. Sources that do not
+    /// report a frame size are left untagged. Ignored in <see cref="TimeCodesOnly"/> mode.
+    /// </summary>
+    public bool OcrAutoDetectAssaAlignment { get; init; }
 
     /// <summary>Ollama API endpoint (default <c>http://localhost:11434/api/chat</c>).</summary>
     public string? OllamaUrl { get; init; }

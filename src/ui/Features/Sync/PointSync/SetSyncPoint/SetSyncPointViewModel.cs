@@ -14,7 +14,6 @@ using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Media;
 using Nikse.SubtitleEdit.Logic.VideoPlayers;
-using Nikse.SubtitleEdit.Logic.VideoPlayers.LibMpvDynamic;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -68,6 +67,7 @@ public partial class SetSyncPointViewModel : ObservableObject
     // starts on the file's default track, so it has to be re-applied here or a dubbed track plays
     // while the user syncs against the original (issue #13995).
     private int _audioTrackId = -1;
+    private bool _closed; // set by OnClosing; stops the posted half of Initialize from starting a pump on a disposed player
     private UiTickPump _positionTimer = new(TimeSpan.FromMilliseconds(150)); // posted ticks, not a DispatcherTimer - see UiTickPump
     private List<SubtitleLineViewModel> _subtitleLines = new List<SubtitleLineViewModel>();
     private VideoPreviewSubtitleContext _previewContext = VideoPreviewSubtitleContext.Default;
@@ -144,6 +144,15 @@ public partial class SetSyncPointViewModel : ObservableObject
 
         Dispatcher.UIThread.Post(() =>
         {
+            // Closed before this post ran: OnClosing has already stopped the (placeholder) pump
+            // and disposed the player, so the pump started below would never be stopped and
+            // would poll the dead player for the rest of the session - every poll an
+            // error-log entry.
+            if (_closed)
+            {
+                return;
+            }
+
             if (!string.IsNullOrEmpty(_videoFileName))
             {
                 _ = OpenPlayerAsync(_videoFileName);
@@ -196,6 +205,9 @@ public partial class SetSyncPointViewModel : ObservableObject
         });
 
     }
+
+    /// <summary>Test hook: whether the position pump is ticking.</summary>
+    internal bool IsPositionTimerRunning => _positionTimer.IsRunning;
 
     private void StartTitleTimer()
     {
@@ -389,9 +401,9 @@ public partial class SetSyncPointViewModel : ObservableObject
 
     private void ApplySelectedAudioTrack()
     {
-        if (_audioTrackId > 0 && VideoPlayerControl.VideoPlayer is LibMpvDynamicPlayer mpv)
+        if (_audioTrackId > 0)
         {
-            mpv.SetAudioTrack(_audioTrackId);
+            VideoPlayerControl.VideoPlayer?.SetAudioTrack(_audioTrackId);
         }
     }
 
@@ -506,6 +518,7 @@ public partial class SetSyncPointViewModel : ObservableObject
     internal void OnClosing()
     {
         UiUtil.SaveWindowPosition(Window);
+        _closed = true;
         _positionTimer.Stop();
         VideoPlayerControl.CloseAndDisposePlayer();
 

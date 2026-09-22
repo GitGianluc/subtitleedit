@@ -53,6 +53,7 @@ internal static class HelpDisplay
         ShowParameter(console, "--output-filename-append:<text>", "Text appended to the output file name stem, e.g. _fixed (ignored with --output-filename)");
         ShowParameter(console, "--output-folder:<folder name>", "Output folder path");
         ShowParameter(console, "--overwrite", "Overwrite existing files");
+        ShowParameter(console, "--no-language-suffix", "Do not add the language code to the output name (movie.srt, not movie.en.srt); with --overwrite and --translate-to the file is translated in place");
         ShowParameter(console, "--keep-timestamp", "Give output files the source file's modified/created date instead of the conversion time");
         ShowParameter(console, "--pac-codepage:<code page>", "PAC code page");
         ShowParameter(console, "--profile:<profile name>", "Profile name");
@@ -71,6 +72,7 @@ internal static class HelpDisplay
         ShowParameter(console, "--time-codes-only", "Image sources (.sup/VobSub/PGS/DVB/XSUB) -> text with time codes only; skips OCR");
         ShowParameter(console, "--no-vobsub-isolate-colors", "Disable VobSub OCR colour isolation (on by default; isolation binarises to black-on-white, dropping outline colours)");
         ShowParameter(console, "--no-pgs-isolate-colors", "Disable PGS/DVB-sub OCR colour isolation (on by default, except for applevision; isolation binarises to black-on-white so the white glyph fill survives the OCR canvas)");
+        ShowParameter(console, "--ocr-auto-detect-assa-alignment", "OCR: add an ASSA alignment tag ({\\an8} = top centre, ...) from each image's position in the frame (bottom-centre gets no tag)");
         ShowParameter(console, "--ollama-url:<url>", "Ollama API endpoint (default: http://localhost:11434/api/chat)");
         ShowParameter(console, "--ollama-model:<model>", "Ollama vision model (default: llama3.2-vision)");
         ShowParameter(console, "--translate-to:<lang>", "Auto-translate to this language (code or English name, e.g. de or German)");

@@ -53,5 +53,14 @@ public enum SeWaveformToolbarItemType
     // Not buttons: each forces the toolbar's WrapPanel onto a new row at its position, so the
     // user decides where a toolbar wider than the waveform pane wraps.
     LineBreak1 = 28,
-    LineBreak2 = 29
+    LineBreak2 = 29,
+
+    // Read-only box holding the selected line's text as it was when the line was selected, so a
+    // machine translation stays readable (and copyable) while it is typed over (#14541, #15035).
+    InitialText = 30,
+
+    // Picks how the editor-style layout (layout 14) splits the subtitles over rows - one row, or
+    // a row per layer, actor or style. Only rendered in that layout, like the audio-track picker
+    // only renders for a multi-track video.
+    TimelineTrackGrouping = 31
 }
