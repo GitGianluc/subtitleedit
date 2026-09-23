@@ -73,6 +73,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     [ObservableProperty] private bool _isTranslateVisible;
     [ObservableProperty] private bool _isBackendSelectionVisible;
     [ObservableProperty] private bool _isModelSelectionVisible;
+    [ObservableProperty] private bool _isModelDownloadVisible;
     [ObservableProperty] private bool _isLanguageSelectionVisible;
     [ObservableProperty] private bool _isWhisperCppSelected;
     [ObservableProperty] private ObservableCollection<ISpeechToTextEngine> _whisperCppBackends;
@@ -329,6 +330,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         IsTranslateVisible = IsTranslateAvailable(GetEffectiveSelectedEngine());
         IsBackendSelectionVisible = false;
         IsModelSelectionVisible = true;
+        IsModelDownloadVisible = true;
         IsWhisperCppSelected = false;
         IsCrispAsrSelected = false;
         Parameters = string.Empty;
@@ -2865,22 +2867,46 @@ public partial class SpeechToTextViewModel : ObservableObject
         Se.WriteToolsLog($"{executable} {separateArguments}");
         LogToConsole($"Isolating speech with : {executable} {separateArguments}{Environment.NewLine}");
 
-        // Kept for the tools log only: the separator prints no progress worth showing, but when
-        // it fails its output is the only clue to why.
+        // The output is kept for the tools log - when the separator fails it is the only clue to
+        // why - and its per-chunk lines are the progress (#15176): on a machine without a GPU
+        // the separation takes minutes per minute of audio, so the bar has to move.
         var separateLog = new StringBuilder();
+        var progress = new SpeechIsolationProgress(SpeechIsolationProgress.GetChunkCountFromWaveFile(audioFileName));
+
+        // HasExited does not wait for the async stderr reader, so a last progress line can be
+        // posted after the separator is done - it must not put the bar back up once
+        // transcription has taken it over.
+        var separating = true;
         DataReceivedEventHandler logHandler = (_, args) =>
         {
-            if (!string.IsNullOrWhiteSpace(args.Data))
+            if (string.IsNullOrWhiteSpace(args.Data))
             {
-                lock (separateLog)
+                return;
+            }
+
+            lock (separateLog)
+            {
+                separateLog.AppendLine(args.Data);
+            }
+
+            if (progress.TryUpdate(args.Data) && progress.Percent is { } percent)
+            {
+                Dispatcher.UIThread.Post(() =>
                 {
-                    separateLog.AppendLine(args.Data);
-                }
+                    if (_abort || _windowClosing || !Volatile.Read(ref separating))
+                    {
+                        return;
+                    }
+
+                    ProgressValue = percent;
+                    ProgressText = $"{Se.Language.Video.AudioToText.IsolatingSpeech} {percent}%";
+                });
             }
         };
 
-        using (var separateProcess = StartEngineProcess(executable, separateArguments, logHandler))
+        try
         {
+            using var separateProcess = StartEngineProcess(executable, separateArguments, logHandler);
             if (!await WaitForExitOrAbortAsync(separateProcess))
             {
                 if (!_abort)
@@ -2893,6 +2919,10 @@ public partial class SpeechToTextViewModel : ObservableObject
 
                 return null;
             }
+        }
+        finally
+        {
+            Volatile.Write(ref separating, false);
         }
 
         var stemFileName = SpeechIsolationModel.GetSpeechStemFileName(audioFileName, outputFolder);
@@ -3491,6 +3521,11 @@ public partial class SpeechToTextViewModel : ObservableObject
     [RelayCommand]
     private async Task DownloadModel()
     {
+        if (GetEffectiveSelectedEngine().DownloadsOwnModels)
+        {
+            return;
+        }
+
         var vm = await _windowService.ShowDialogAsync<DownloadSpeechToTextModelsWindow, DownloadSpeechToTextModelsViewModel>(
             Window!, viewModel => { viewModel.SetModels(Models, GetEffectiveSelectedEngine(), SelectedModel); });
 
@@ -3771,7 +3806,10 @@ public partial class SpeechToTextViewModel : ObservableObject
                 RefreshEngineCombo?.Invoke();
             }
 
-            if (!engine.IsModelInstalled(model.Model))
+            // Engines that download their own models (WhisperX) are never routed through SE's
+            // downloader: it would fill a folder the engine does not read and re-prompt on
+            // every run. Their IsModelInstalled only drives the model dot.
+            if (!engine.DownloadsOwnModels && !engine.IsModelInstalled(model.Model))
             {
                 var answer = await MessageBox.Show(
                     Window!,
@@ -4024,7 +4062,10 @@ public partial class SpeechToTextViewModel : ObservableObject
         settings.WhisperChoice = engine.Choice;
         SaveSettings();
 
+        // SetProgressBarPct only moves the bar forward, so a value left by an earlier stage
+        // (speech isolation ends at 100%) would pin it there for the whole transcription.
         _showProgressPct = -1;
+        ProgressValue = 0;
         IsTranscribeEnabled = false;
         ProgressOpacity = 1;
         ProgressText = GetProgressText();
@@ -5147,6 +5188,10 @@ public partial class SpeechToTextViewModel : ObservableObject
         {
             SelectedModel = null;
         }
+
+        // SE's downloader saves into a folder an engine that downloads its own models never
+        // reads (WhisperX: the Hugging Face hub cache), so offering it only wastes gigabytes.
+        IsModelDownloadVisible = IsModelSelectionVisible && !engine.DownloadsOwnModels;
 
         IsLanguageSelectionVisible = !isOnlineSttEngine;
         if (!IsLanguageSelectionVisible)

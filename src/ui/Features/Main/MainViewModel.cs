@@ -721,6 +721,7 @@ public partial class MainViewModel :
     private UiTickPump _positionTimer = new(TimeSpan.FromMilliseconds(50)); // posted ticks, not a DispatcherTimer - see UiTickPump
     private DispatcherTimer _slowTimer = new();
     private UiTickPump? _cursorTimer; // ~60 fps; drives only the waveform/video playhead cursor (a posted tick, not a DispatcherTimer - see UiTickPump)
+    private volatile bool _backgroundWorkRunning; // between StartBackgroundWork and StopBackgroundWork; the tick pumps also need a video
 
     // Playhead interpolation state. When mpv resumes after a paused seek its time-pos stalls
     // for ~one audio-buffer interval (~200 ms) and then resyncs forward, which makes the
@@ -742,6 +743,12 @@ public partial class MainViewModel :
     // "Center video position also while paused": paused centering/selection only reacts to
     // position *changes*, so they track the last seen play-head position between timer ticks.
     private double _pausedCenterLastSeconds = -1;
+
+    // Render-time playhead motion (AudioVisualizer.SetPlayheadMotion): the estimate and wall-clock
+    // stamp of the previous cursor tick, from which the tick measures the estimator's velocity.
+    private double _playheadTickPrevEstimate = -1;
+    private long _playheadTickPrevTimestamp;
+    private double _playheadPlaybackSpeed = 1.0;
     private double _pausedSelectLastSeconds = -1;
 
     // Scrub-seek throttle for waveform-driven position changes (wheel scrubbing in center mode,
@@ -1488,6 +1495,7 @@ public partial class MainViewModel :
             double.TryParse(SelectedSpeed.Trim('x'), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var speed))
         {
             GetVideoPlayerControl()?.SetSpeed(speed);
+            _playheadPlaybackSpeed = speed;
         }
     }
 
@@ -2027,13 +2035,33 @@ public partial class MainViewModel :
     {
         _subtitle.Header = header;
 
+        // Style names are matched on the header's spelling: the writer looks a line's style up
+        // by exact name, so a row must carry the name as the header has it. The SSA "*Name"
+        // convention and case differences are tolerated on the way in (the dialog counts usages
+        // that way too), but never invented on the way out - stripping the star here while the
+        // header kept it made every line "unknown" and sent the whole file to the first style.
+        var styles = AdvancedSubStationAlpha.GetStylesFromHeader(_subtitle.Header);
+        var first = styles.FirstOrDefault() ?? "Default";
+        var styleByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var style in styles)
+        {
+            styleByName.TryAdd(style.TrimStart('*'), style);
+        }
+
+        string Resolve(string? name)
+        {
+            return !string.IsNullOrEmpty(name) && styleByName.TryGetValue(name.TrimStart('*'), out var known)
+                ? known
+                : first;
+        }
+
         if (rowByParagraphId != null)
         {
             foreach (var p in resultSubtitle.Paragraphs)
             {
                 if (p.Id is { } id && !string.IsNullOrEmpty(p.Extra) && rowByParagraphId.TryGetValue(id, out var row))
                 {
-                    row.Style = p.Extra.TrimStart('*');
+                    row.Style = Resolve(p.Extra);
                 }
             }
         }
@@ -2041,13 +2069,11 @@ public partial class MainViewModel :
         // A line whose style was deleted or renamed away in the dialog falls back to the first
         // style in the file. Display-only original rows are not part of the working subtitle
         // and carry no style to repair.
-        var styles = AdvancedSubStationAlpha.GetStylesFromHeader(_subtitle.Header);
-        var first = styles.FirstOrDefault() ?? "Default";
         foreach (var row in Subtitles)
         {
-            if (!row.IsReferenceOnly && (string.IsNullOrEmpty(row.Style) || !styles.Contains(row.Style)))
+            if (!row.IsReferenceOnly)
             {
-                row.Style = first;
+                row.Style = Resolve(row.Style);
             }
         }
 
@@ -4066,17 +4092,13 @@ public partial class MainViewModel :
         }
         else
         {
-            var result = await ShowDialogAsync<OpenSecondarySubtitleWindow, OpenSecondarySubtitleViewModel>(vm =>
-            {
-                vm.Initialize(subtitle, GetUpdateSubtitle(), SelectedSubtitleFormat, _mediaInfo, _videoFileName);
-            });
-
-            if (!result.OkPressed)
+            var styled = await ShowSecondarySubtitleDialog(subtitle, isEditingSettings: false);
+            if (styled == null)
             {
                 return;
             }
 
-            _subtitleSecondary = result.ResultSubtitle;
+            _subtitleSecondary = styled;
         }
 
         _subtitleSecondaryFileName = fileName;
@@ -4085,6 +4107,43 @@ public partial class MainViewModel :
         // Persist the file name on the recent-file entry now rather than at the next save or
         // close, so it survives a crash too (#15044).
         AddToRecentFiles(false);
+    }
+
+    /// <summary>
+    /// Re-opens the style dialog for the second subtitle already on the video player, without
+    /// the file picker (#15110). Always shows the dialog - also with "Do not show this dialog
+    /// again" on, since showing it is the whole point of the command.
+    /// </summary>
+    [RelayCommand]
+    private async Task EditSecondarySubtitleSettings()
+    {
+        if (Window == null || _subtitleSecondary == null)
+        {
+            return;
+        }
+
+        var styled = await ShowSecondarySubtitleDialog(SecondarySubtitleStyler.Unstyle(_subtitleSecondary), isEditingSettings: true);
+        if (styled == null)
+        {
+            return;
+        }
+
+        _subtitleSecondary = styled;
+        PushSecondarySubtitle();
+    }
+
+    /// <summary>
+    /// Shows the second subtitle style dialog for <paramref name="subtitle"/> and returns the
+    /// styled result, or null when it was cancelled.
+    /// </summary>
+    private async Task<Subtitle?> ShowSecondarySubtitleDialog(Subtitle subtitle, bool isEditingSettings)
+    {
+        var result = await ShowDialogAsync<OpenSecondarySubtitleWindow, OpenSecondarySubtitleViewModel>(vm =>
+        {
+            vm.Initialize(subtitle, GetUpdateSubtitle(), SelectedSubtitleFormat, _mediaInfo, _videoFileName, isEditingSettings);
+        });
+
+        return result.OkPressed ? result.ResultSubtitle : null;
     }
 
     /// <summary>
@@ -12557,7 +12616,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<ChangeFrameRateWindow, ChangeFrameRateViewModel>(vm => { vm.Initialize(_videoFileName, _mediaInfo); });
+        var result = await ShowDialogAsync<ChangeFrameRateWindow, ChangeFrameRateViewModel>(vm => { vm.Initialize(_videoFileName, (double)(_mediaInfo?.FramesRate ?? 0), Se.Settings.General.CurrentFrameRate); });
         if (result.OkPressed)
         {
             ChangeFrameRateViewModel.ChangeFrameRate(Subtitles, result.SelectedFromFrameRate, result.SelectedToFrameRate);
@@ -17320,6 +17379,7 @@ public partial class MainViewModel :
                 }
 
                 ShowStatus(string.Format(Se.Language.Main.ReplacedXWithYCountZ, result.SearchText, result.ReplaceText, replaceCount));
+                result.ReportReplaceAll(replaceCount);
                 return;
             }
             else // replace requested
@@ -17357,6 +17417,7 @@ public partial class MainViewModel :
                             nextStartLine = savedFoundLine;
                             nextStartIndex = savedFoundIndex + replaced.Value;
                             nextStartInOriginal = savedFoundInOriginal;
+                            result.ReportReplaced(1);
                         }
                     }
                 }
@@ -20048,6 +20109,7 @@ public partial class MainViewModel :
         }
 
         vp.SetSpeed(1.0);
+        _playheadPlaybackSpeed = 1.0;
         SelectedSpeed = Speeds.FirstOrDefault(p => p == "1.0x") ?? Speeds[2];
         AudioVisualizer.ZoomFactor = 1.0;
         AudioVisualizer.VerticalZoomFactor = 1.0;
@@ -26837,7 +26899,7 @@ public partial class MainViewModel :
 
             // The window can be gone again within that second (a test host, or a New window
             // closed at once); StopBackgroundWork has run then and the poll must stay off.
-            if (_positionTimer.IsRunning)
+            if (_backgroundWorkRunning)
             {
                 _undoRedoManager.StartChangeDetection();
             }
@@ -27981,7 +28043,7 @@ public partial class MainViewModel :
 
         WaveformGeneratingText = Se.Language.Main.ExtractingShotChanges;
 
-        var threshold = Se.Settings.Waveform.ShotChangesSensitivity.ToString(CultureInfo.InvariantCulture);
+        var threshold = Math.Round(Se.Settings.Waveform.ShotChangesSensitivity, 2).ToString(CultureInfo.InvariantCulture);
         var argumentsFormat = Se.Settings.Video.ShowChangesFFmpegArguments;
         var arguments = string.Format(argumentsFormat, videoFileName, threshold);
 
@@ -32415,6 +32477,23 @@ public partial class MainViewModel :
             var isPlaying = vp.IsPlaying;
             var est = UpdatePlayheadEstimate(vp, isPlaying);
 
+            // The estimator's velocity over this tick, for the waveform's render-time motion. 0
+            // when it did not advance (paused, pinned, frozen clock), and bounded to a little over
+            // the playback speed so a forward snap is not extended past where playback really is.
+            var tickTimestamp = Stopwatch.GetTimestamp();
+            var playheadVelocity = 0.0;
+            if (isPlaying && _playheadTickPrevEstimate >= 0 && est > _playheadTickPrevEstimate)
+            {
+                var tickSeconds = (tickTimestamp - _playheadTickPrevTimestamp) / (double)Stopwatch.Frequency;
+                if (tickSeconds > 0 && tickSeconds < 0.2)
+                {
+                    playheadVelocity = Math.Min((est - _playheadTickPrevEstimate) / tickSeconds, Math.Max(1.0, _playheadPlaybackSpeed) * 1.5);
+                }
+            }
+
+            _playheadTickPrevEstimate = est;
+            _playheadTickPrevTimestamp = tickTimestamp;
+
             var av = AudioVisualizer;
             if (av != null)
             {
@@ -32439,12 +32518,14 @@ public partial class MainViewModel :
                                          Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused &&
                                          !av.IsEditingWithPointer &&
                                          Math.Abs(est - _pausedCenterLastSeconds) > 0.001;
-                if (WaveformCenter && av.WavePeaks != null && (isPlaying || centerPausedChange))
+                var centered = WaveformCenter && av.WavePeaks != null && (isPlaying || centerPausedChange);
+                if (centered)
                 {
                     var halfSeconds = (av.EndPositionSeconds - av.StartPositionSeconds) / 2.0;
                     av.StartPositionSeconds = Math.Max(0, est - halfSeconds);
                 }
 
+                av.SetPlayheadMotion(tickTimestamp, playheadVelocity, centered && isPlaying);
                 _pausedCenterLastSeconds = est;
             }
         }, DispatcherPriority.Normal);
@@ -32488,9 +32569,27 @@ public partial class MainViewModel :
     /// </summary>
     internal void StartBackgroundWork()
     {
-        _positionTimer.Start();
-        _cursorTimer?.Start();
+        _backgroundWorkRunning = true;
+        UpdateVideoTickPumps();
         _slowTimer.Start();
+    }
+
+    // Both tick bodies are no-ops without an open video, yet their pumps woke the UI thread
+    // ~80 times a second for the whole session - so they only run while a video is loaded.
+    partial void OnIsVideoLoadedChanged(bool value) => UpdateVideoTickPumps();
+
+    private void UpdateVideoTickPumps()
+    {
+        if (_backgroundWorkRunning && IsVideoLoaded)
+        {
+            _positionTimer.Start();
+            _cursorTimer?.Start();
+        }
+        else
+        {
+            _positionTimer.Stop();
+            _cursorTimer?.Stop();
+        }
     }
 
     /// <summary>
@@ -32502,6 +32601,7 @@ public partial class MainViewModel :
     /// </summary>
     internal void StopBackgroundWork()
     {
+        _backgroundWorkRunning = false;
         _positionTimer.Stop();
         _cursorTimer?.Stop();
         _slowTimer.Stop();
@@ -32578,8 +32678,13 @@ public partial class MainViewModel :
         // allocation across 100/1000/5000-line subtitles.
         var hideLayers = _visibleLayers != null && Se.Settings.Assa.HideLayersFromVideoPreview;
 
-        if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
+        // The mpv lambda captures a branch-local copy: a pattern variable declared in a top-level
+        // `if` is method-scoped, so its closure was allocated on every call - ~60 a second from the
+        // cursor timer, almost all of them taking the early returns above. The `else if` pattern
+        // variables below are scoped to their branch, so they only allocate when that branch runs.
+        if (vp.VideoPlayer is LibMpvDynamicPlayer mpvPlayer)
         {
+            var mpv = mpvPlayer;
             var subtitle = GetVideoPreviewSubtitle();
             _mpvPreviewDirty = false; // clear only after subtitle snapshot is successfully obtained
             if (hideLayers)
