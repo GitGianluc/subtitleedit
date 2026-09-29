@@ -61,31 +61,14 @@ public static class SecondarySubtitleStyler
         subtitle.Header = AdvancedSubStationAlpha.AddTagToHeader("PlayResY", "PlayResY: " + height.ToString(CultureInfo.InvariantCulture), "[Script Info]", subtitle.Header);
     }
 
-    public static Subtitle Build(Subtitle secondarySubtitle, SsaStyle style, int width, int height)
+    public static Subtitle Build(Subtitle secondarySubtitle, SsaStyle style, int width, int height, string justify)
     {
-        var result = new Subtitle(secondarySubtitle);
+        var result = new Subtitle();
+        result.Paragraphs.AddRange(SecondarySubtitleJustifier.Apply(secondarySubtitle.Paragraphs, style, justify, width, height));
         SetHeader(result, style, width, height);
         foreach (var p in result.Paragraphs)
         {
             p.Extra = style.Name;
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// A copy of a styled second subtitle with the styling stripped again, as if it had just been
-    /// parsed from its file: what the dialog expects as input when re-styling the second subtitle
-    /// already on the video player (#15110). A copy, because the dialog's preview mutates the
-    /// paragraphs it is given (style name, layer) and the original stays on the player until OK.
-    /// </summary>
-    public static Subtitle Unstyle(Subtitle styled)
-    {
-        var result = new Subtitle(styled) { Header = string.Empty };
-        foreach (var p in result.Paragraphs)
-        {
-            p.Extra = null;
-            p.Layer = 0;
         }
 
         return result;
@@ -106,7 +89,7 @@ public static class SecondarySubtitleStyler
             video.SecondarySubtitleColor.FromHexToColor(),
             video.SecondarySubtitleBoxType,
             video.SecondarySubtitleAlignment);
-        return Build(secondarySubtitle, style, width, height);
+        return Build(secondarySubtitle, style, width, height, video.SecondarySubtitleJustify);
     }
 
     /// <summary>
@@ -128,7 +111,8 @@ public static class SecondarySubtitleStyler
             Colors.White,
             FontBoxType.None,
             "8"); // Top-center
-        return Build(secondarySubtitle, style, width, height);
+        // "auto": the dialog's own default, which leaves the lines as they are.
+        return Build(secondarySubtitle, style, width, height, "auto");
     }
 
     /// <summary>
@@ -150,7 +134,7 @@ public static class SecondarySubtitleStyler
         return Math.Max(1, (int)Math.Round(fontSize, MidpointRounding.AwayFromZero));
     }
 
-    public static void SaveToSettings(int fontSize, int videoHeight, bool bold, Color color, FontBoxType boxType, string alignment)
+    public static void SaveToSettings(int fontSize, int videoHeight, bool bold, Color color, FontBoxType boxType, string alignment, string justify)
     {
         var video = Se.Settings.Video;
         // Not AssaResampler: it rounds to one decimal, which can drift the size by a pixel on a
@@ -160,6 +144,7 @@ public static class SecondarySubtitleStyler
         video.SecondarySubtitleColor = color.FromColorToHex();
         video.SecondarySubtitleBoxType = boxType;
         video.SecondarySubtitleAlignment = alignment;
+        video.SecondarySubtitleJustify = justify;
     }
 
     private static string GetBorderStyle(FontBoxType boxType)

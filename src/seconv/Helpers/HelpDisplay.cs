@@ -56,6 +56,7 @@ internal static class HelpDisplay
         ShowParameter(console, "--no-language-suffix", "Do not add the language code to the output name (movie.srt, not movie.en.srt); with --overwrite and --translate-to the file is translated in place");
         ShowParameter(console, "--keep-timestamp", "Give output files the source file's modified/created date instead of the conversion time");
         ShowParameter(console, "--pac-codepage:<code page>", "PAC code page");
+        ShowParameter(console, "--pac-secondary-codepage:<code page>", "PAC code page for lines in another script (e.g. Cyrillic lines in a Hebrew file)");
         ShowParameter(console, "--profile:<profile name>", "Profile name");
         ShowParameter(console, "--renumber:<starting number>", "Renumber subtitles from this number");
         ShowParameter(console, "--resolution:<width>x<height>", "Video resolution (e.g., 1920x1080)");
@@ -71,7 +72,7 @@ internal static class HelpDisplay
         ShowParameter(console, "--ocr-url:<url>", "Endpoint of an already-running llama-server for OCR (skips the auto-start)");
         ShowParameter(console, "--time-codes-only", "Image sources (.sup/VobSub/PGS/DVB/XSUB) -> text with time codes only; skips OCR");
         ShowParameter(console, "--no-vobsub-isolate-colors", "Disable VobSub OCR colour isolation (on by default; isolation binarises to black-on-white, dropping outline colours)");
-        ShowParameter(console, "--no-pgs-isolate-colors", "Disable PGS/DVB-sub OCR colour isolation (on by default, except for applevision; isolation binarises to black-on-white so the white glyph fill survives the OCR canvas)");
+        ShowParameter(console, "--no-pgs-isolate-colors", "Disable PGS/DVB-sub OCR colour isolation (on by default, except for applevision, nocr and binaryocr; isolation binarises to black-on-white so the white glyph fill survives the OCR canvas)");
         ShowParameter(console, "--ocr-auto-detect-assa-alignment", "OCR: add an ASSA alignment tag ({\\an8} = top centre, ...) from each image's position in the frame (bottom-centre gets no tag)");
         ShowParameter(console, "--ollama-url:<url>", "Ollama API endpoint (default: http://localhost:11434/api/chat)");
         ShowParameter(console, "--ollama-model:<model>", "Ollama vision model (default: llama3.2-vision)");

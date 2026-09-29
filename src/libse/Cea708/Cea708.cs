@@ -309,6 +309,73 @@ namespace Nikse.SubtitleEdit.Core.Cea708
 
         private static Dictionary<char, byte[]> _textLookupTable;
 
+        private const byte Backspace = 0x08;
+        private const byte FormFeed = 0x0C;
+        private const byte CarriageReturn = 0x0D;
+        private const byte HorizontalCarriageReturn = 0x0E;
+
+        private static bool IsCurrentWindowVisible(CommandState state)
+        {
+            return state.CurrentWindow >= 0 && state.VisibleWindows[state.CurrentWindow];
+        }
+
+        /// <summary>
+        /// Removes the last not yet flushed character (BS).
+        /// </summary>
+        private static void RemoveLastPendingChar(CommandState state)
+        {
+            for (var index = state.Commands.Count - 1; index >= 0; index--)
+            {
+                var command = state.Commands[index];
+                if (command is SetPenLocation)
+                {
+                    return; // the pen moved - nothing to erase on this row
+                }
+
+                if (command is SetText text && !string.IsNullOrEmpty(text.Content))
+                {
+                    if (text.Content == "\r")
+                    {
+                        return;
+                    }
+
+                    text.Content = text.Content.Substring(0, text.Content.Length - 1);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Removes the not yet flushed text of the current row (HCR), or of all rows (FF).
+        /// </summary>
+        private static void RemovePendingText(CommandState state, bool currentRowOnly)
+        {
+            for (var index = state.Commands.Count - 1; index >= 0; index--)
+            {
+                var command = state.Commands[index];
+                if (currentRowOnly && (command is SetPenLocation || command is SetText { Content: "\r" }))
+                {
+                    return;
+                }
+
+                if (command is SetText)
+                {
+                    state.Commands.RemoveAt(index);
+                }
+            }
+        }
+
+        private static void SetWindowsVisible(CommandState state, bool[] windows, bool visible)
+        {
+            for (var w = 0; w < windows.Length && w < state.VisibleWindows.Length; w++)
+            {
+                if (windows[w])
+                {
+                    state.VisibleWindows[w] = visible;
+                }
+            }
+        }
+
         public static string Decode(int lineIndex, byte[] bytes, CommandState state, bool flush)
         {
             var i = 0;
@@ -335,6 +402,7 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     //SetCurrentWindow and the window property commands can be safely ignored. 
                     var currentWindow = new SetCurrentWindow(lineIndex, b - 0x80);
                     state.Commands.Add(currentWindow);
+                    state.CurrentWindow = currentWindow.WindowIndex;
                     if (DebugMode)
                     {
                         debugBuilder.Append("{SetCurrentWindow:" + currentWindow.WindowIndex + "}");
@@ -367,6 +435,7 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     // DisplayWindows displays all the windows specified in the 8 bit window bitmap.
                     var displayWindows = new DisplayWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(displayWindows);
+                    SetWindowsVisible(state, displayWindows.Flags, true);
                     if (DebugMode)
                     {
                         debugBuilder.Append("{DisplayWindows:" + displayWindows.Flags[0] + "," + displayWindows.Flags[1] + "," + displayWindows.Flags[2] + "," + displayWindows.Flags[3] + "," + displayWindows.Flags[4] + "," + displayWindows.Flags[5] + "," + displayWindows.Flags[6] + "," + displayWindows.Flags[7] + "}");
@@ -386,6 +455,7 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     // HideWindows hides all the windows specified in the 8 bit window bitmap.
                     var hideWindows = new HideWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(hideWindows);
+                    SetWindowsVisible(state, hideWindows.Flags, false);
                     if (DebugMode)
                     {
                         debugBuilder.Append("{HideWindows:" + hideWindows.Flags[0] + "," + hideWindows.Flags[1] + "," + hideWindows.Flags[2] + "," + hideWindows.Flags[3] + "," + hideWindows.Flags[4] + "," + hideWindows.Flags[5] + "," + hideWindows.Flags[6] + "," + hideWindows.Flags[7] + "}");
@@ -405,6 +475,13 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     // ToggleWindows hides all displayed windows, and displays all hidden windows specified in the 8 bit window bitmap.
                     var toggleWindows = new ToggleWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(toggleWindows);
+                    for (var w = 0; w < toggleWindows.Flags.Length && w < state.VisibleWindows.Length; w++)
+                    {
+                        if (toggleWindows.Flags[w])
+                        {
+                            state.VisibleWindows[w] = !state.VisibleWindows[w];
+                        }
+                    }
                     if (DebugMode)
                     {
                         debugBuilder.Append("{ToggleWindows:" + toggleWindows.Flags[0] + "," + toggleWindows.Flags[1] + "," + toggleWindows.Flags[2] + "," + toggleWindows.Flags[3] + "," + toggleWindows.Flags[4] + "," + toggleWindows.Flags[5] + "," + toggleWindows.Flags[6] + "," + toggleWindows.Flags[7] + "}");
@@ -424,6 +501,11 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     // DeleteWindows deletes all the windows specified in the 8 bit window bitmap.If the current window, as specified by the last SetCurrentWindow command, is deleted then the current window becomes undefined and the window attribute commands should have no effect until after the next SetCurrentWindow or DefineWindow command.
                     var deleteWindows = new DeleteWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(deleteWindows);
+                    SetWindowsVisible(state, deleteWindows.Flags, false);
+                    if (state.CurrentWindow >= 0 && state.CurrentWindow < deleteWindows.Flags.Length && deleteWindows.Flags[state.CurrentWindow])
+                    {
+                        state.CurrentWindow = -1;
+                    }
                     if (DebugMode)
                     {
                         debugBuilder.Append("{DeleteWindows:" + deleteWindows.Flags[0] + "," + deleteWindows.Flags[1] + "," + deleteWindows.Flags[2] + "," + deleteWindows.Flags[3] + "," + deleteWindows.Flags[4] + "," + deleteWindows.Flags[5] + "," + deleteWindows.Flags[6] + "," + deleteWindows.Flags[7] + "}");
@@ -546,6 +628,8 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     //DefineWindow0-7 creates one of the eight windows used by a caption decoder. This command should be sent periodically by a caption encoder even for pre-existing windows so that a newly tuned in caption decoder can begin displaying captions. When issued on a pre-existing window the pen style and window style can be left null, this tells the decoder not to change the current styles if they exist, and initialize both to style 1 if the window does not exist in its context
                     var defineWindow = new DefineWindow(lineIndex, bytes, i);
                     state.Commands.Add(defineWindow);
+                    state.CurrentWindow = defineWindow.Id - DefineWindow.IdStart;
+                    state.VisibleWindows[state.CurrentWindow] = defineWindow.Visible;
                     if (DebugMode)
                     {
                         debugBuilder.Append($"{{DefineWindow:AnchorId={defineWindow.AnchorId}, AnchorV={defineWindow.AnchorVertical}, AnchorH={defineWindow.AnchorHorizontal}, Id={defineWindow.Id:X2}, Columns={defineWindow.ColumnCount}, Rows={defineWindow.RowCount}, RowLock={defineWindow.RowLock}, ColumnLock={defineWindow.ColumnLock}, PenStyleId={defineWindow.PenStyleId}, Priority={defineWindow.Priority}, RelativePositioning={defineWindow.RelativePositioning}, Visible={defineWindow.Visible}, WindowStyleId={defineWindow.WindowStyleId}}}");
@@ -592,6 +676,64 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     i += 2;
                 }
 
+                else if (b == Backspace)
+                {
+                    // BS erases the character before the pen.
+                    RemoveLastPendingChar(state);
+                    if (DebugMode)
+                    {
+                        debugBuilder.Append("{BS}");
+                    }
+                }
+                else if (b == FormFeed)
+                {
+                    // FF erases the window and moves the pen to its top left corner. On screen
+                    // that ends the caption shown; a caption being built in a hidden window is
+                    // thrown away.
+                    if (IsCurrentWindowVisible(state))
+                    {
+                        FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                    }
+                    else
+                    {
+                        RemovePendingText(state, currentRowOnly: false);
+                    }
+
+                    if (DebugMode)
+                    {
+                        debugBuilder.Append("{FF}");
+                    }
+                }
+                else if (b == HorizontalCarriageReturn)
+                {
+                    // HCR erases the current row and moves the pen to its start - the row is
+                    // rewritten, so its text so far is dropped.
+                    RemovePendingText(state, currentRowOnly: true);
+                    if (DebugMode)
+                    {
+                        debugBuilder.Append("{HCR}");
+                    }
+                }
+                else if (b == CarriageReturn)
+                {
+                    // CR moves the pen to the next row. In a visible window - roll-up and paint-on
+                    // captions - that finishes the line on screen, so it ends the current cue;
+                    // otherwise (a pop-on caption being built in a hidden window) it is a line
+                    // break inside the caption.
+                    if (IsCurrentWindowVisible(state))
+                    {
+                        FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                    }
+                    else
+                    {
+                        state.Commands.Add(new SetText(lineIndex, "\r"));
+                    }
+
+                    if (DebugMode)
+                    {
+                        debugBuilder.Append("{CR}");
+                    }
+                }
                 else if (b <= 0x1F)
                 {
                     // CL Group: C0: Subset of ASCII Control Codes
@@ -661,6 +803,16 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                         continue;
                     }
 
+                    if (textCommand.Content == "\r")
+                    {
+                        if (text.Length > 0)
+                        {
+                            text.AppendLine();
+                        }
+
+                        continue;
+                    }
+
                     if (text.Length == 0)
                     {
                         state.StartLineIndex = textCommand.LineIndex;
@@ -672,7 +824,7 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     }
                     else if (!italicOn && IsItalicOn(text.ToString()))
                     {
-                        text.Append("</i>");
+                        AppendItalicEnd(text);
                     }
                     text.Append(textCommand.Content);
                 }
@@ -693,6 +845,12 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     {
                         italicOn = attributes.Italics;
                     }
+                    else if (command is Reset || (command is DefineWindow defineWindow && defineWindow.PenStyleId > 0))
+                    {
+                        // Both (re)apply a predefined pen style, none of which is italic - without
+                        // this, a retained italic SetPenAttributes leaked into every later caption.
+                        italicOn = false;
+                    }
 
                     commands.Add(command);
                 }
@@ -700,10 +858,24 @@ namespace Nikse.SubtitleEdit.Core.Cea708
 
             if (IsItalicOn(text.ToString()))
             {
-                text.Append("</i>");
+                AppendItalicEnd(text);
             }
 
             state.Commands = commands;
+        }
+
+        /// <summary>
+        /// Closes an italic run right after its last visible char, so "&lt;i&gt;yo " + "ok" becomes "&lt;i&gt;yo&lt;/i&gt; ok".
+        /// </summary>
+        private static void AppendItalicEnd(StringBuilder text)
+        {
+            var index = text.Length;
+            while (index > 0 && text[index - 1] == ' ')
+            {
+                index--;
+            }
+
+            text.Insert(index, "</i>");
         }
 
         private static bool IsItalicOn(string text)

@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.MaterialExchangeFormat;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Spectre.Console;
@@ -31,6 +32,19 @@ internal static class ContainerSubtitleLoader
     public static List<LoadedTrack>? TryLoadTracks(string filePath, ConversionOptions options)
     {
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+        // A Manzanita "private_stream_1" dump can have any extension (.dvbttx, .stl, even .idx,
+        // which the VobSub branch below would take). Teletext dumps are text (the DVB Teletext
+        // format reads them); bitmap dumps need OCR.
+        if (IsManzanitaDvbSubtitle(filePath))
+        {
+            return LoadManzanitaDvbSub(filePath, options);
+        }
+
+        if (IsManzanita(filePath))
+        {
+            return null;
+        }
 
         // .webm is Matroska too - a WebVTT track muxed into one was falling through to the
         // text loader, which then failed to detect a format at all.
@@ -142,7 +156,36 @@ internal static class ContainerSubtitleLoader
             return LoadMxf(filePath, options);
         }
 
+        if (ext is ".vob" or ".mpg" or ".mpeg" or ".m2p" && ProgramStreamClosedCaptionReader.IsProgramStream(filePath))
+        {
+            return LoadProgramStreamClosedCaptions(filePath, options);
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// MPEG program stream (DVD .vob, .mpg): CEA-608 closed captions from the video - DVD style
+    /// Line 21 captions, ATSC A/53 or SCTE 20 user data. The track number is the caption channel
+    /// (1-4 = CC1-CC4).
+    /// </summary>
+    private static List<LoadedTrack>? LoadProgramStreamClosedCaptions(string filePath, ConversionOptions options)
+    {
+        var tracks = new List<LoadedTrack>();
+        foreach (var captionTrack in ProgramStreamClosedCaptionReader.Read(filePath, ProgramStreamClosedCaptionReader.DefaultProbeMilliseconds, null))
+        {
+            if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(captionTrack.Key))
+            {
+                continue;
+            }
+
+            var subtitle = new Subtitle();
+            subtitle.Paragraphs.AddRange(captionTrack.Value);
+            subtitle.Renumber();
+            tracks.Add(new LoadedTrack(subtitle, new SubRip(), $"cea608_cc{captionTrack.Key}", captionTrack.Key));
+        }
+
+        return tracks.Count > 0 ? tracks : null; // null: let the other loaders have a go
     }
 
     /// <summary>
@@ -184,6 +227,33 @@ internal static class ContainerSubtitleLoader
 
         var subtitleTexts = parser.GetSubtitles();
         var images = parser.GetImages();
+
+        // CEA-608/708 closed captions from a SMPTE 436M ANC track (broadcast MXF). The track
+        // number is the caption track key: 1-4 = CC1-CC4, 100 + n = CEA-708 service n.
+        if (subtitleTexts.Count == 0 && parser.ClosedCaptionTracks.Count > 0)
+        {
+            var captionTracks = new List<LoadedTrack>();
+            foreach (var captionTrack in parser.ClosedCaptionTracks)
+            {
+                if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(captionTrack.Key))
+                {
+                    continue;
+                }
+
+                var subtitle = new Subtitle();
+                subtitle.Paragraphs.AddRange(captionTrack.Value);
+                subtitle.Renumber();
+                var trackName = captionTrack.Key > ClosedCaptionExtractor.Cea708TrackKeyOffset
+                    ? $"cea708_s{captionTrack.Key - ClosedCaptionExtractor.Cea708TrackKeyOffset}"
+                    : $"cea608_cc{captionTrack.Key}";
+                captionTracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, captionTrack.Key));
+            }
+
+            if (captionTracks.Count > 0)
+            {
+                return captionTracks;
+            }
+        }
 
         if (subtitleTexts.Count == 0)
         {
@@ -260,6 +330,27 @@ internal static class ContainerSubtitleLoader
         var subtitleTracks = matroska.GetTracks(true);
         if (subtitleTracks.Count == 0)
         {
+            // CEA-608/708 closed captions inside the video track (e.g. a broadcast recording remuxed to .mkv)
+            var videoTrack = MatroskaClosedCaptionReader.GetVideoTrack(matroska);
+            if (videoTrack != null && (options.TrackNumbers.Count == 0 || options.TrackNumbers.Contains(videoTrack.TrackNumber)))
+            {
+                foreach (var captionTrack in MatroskaClosedCaptionReader.Read(matroska, MatroskaClosedCaptionReader.DefaultProbeMilliseconds, null))
+                {
+                    var subtitle = new Subtitle();
+                    subtitle.Paragraphs.AddRange(captionTrack.Value);
+                    subtitle.Renumber();
+                    var trackName = captionTrack.Key > ClosedCaptionExtractor.Cea708TrackKeyOffset
+                        ? $"cea708_{videoTrack.TrackNumber}_s{captionTrack.Key - ClosedCaptionExtractor.Cea708TrackKeyOffset}"
+                        : $"cea608_{videoTrack.TrackNumber}_cc{captionTrack.Key}";
+                    tracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, videoTrack.TrackNumber));
+                }
+            }
+
+            if (tracks.Count > 0)
+            {
+                return tracks;
+            }
+
             throw new InvalidOperationException($"No subtitle tracks in Matroska file: {filePath}");
         }
 
@@ -467,6 +558,38 @@ internal static class ContainerSubtitleLoader
         return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
     }
 
+    private static bool IsManzanita(string filePath)
+    {
+        try
+        {
+            return FileUtil.IsManzanita(filePath);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsManzanitaDvbSubtitle(string filePath)
+    {
+        return IsManzanita(filePath) &&
+               ManzanitaTransportStreamParser.GetStreamType(filePath) == ManzanitaTransportStreamParser.DvbSubtitleStreamType;
+    }
+
+    private static List<LoadedTrack> LoadManzanitaDvbSub(string filePath, ConversionOptions options)
+    {
+        var subtitle = ImageOcrLoader.LoadManzanitaDvbSub(filePath, options);
+        if (subtitle.Paragraphs.Count == 0)
+        {
+            throw new InvalidOperationException($"No subtitles recognised in Manzanita DVB subtitle file: {filePath}");
+        }
+        return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
+    }
+
     private static List<LoadedTrack> LoadVobSub(string subPath, string idxPath, ConversionOptions options)
     {
         var subtitle = ImageOcrLoader.LoadVobSub(subPath, idxPath, options);
@@ -577,6 +700,31 @@ internal static class ContainerSubtitleLoader
                     var trackName = string.IsNullOrEmpty(languageCode)
                         ? $"arib_{pidEntry.Key}"
                         : $"arib_{pidEntry.Key}_{languageCode}";
+                    tracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, pidEntry.Key));
+                }
+            }
+
+            // CEA-608/708 closed captions from the video stream (ATSC/cable broadcasts) — also text
+            foreach (var pidEntry in parser.ClosedCaptionSubtitlesLookup)
+            {
+                if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(pidEntry.Key))
+                {
+                    continue;
+                }
+
+                foreach (var trackEntry in pidEntry.Value)
+                {
+                    if (trackEntry.Value.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var subtitle = new Subtitle();
+                    subtitle.Paragraphs.AddRange(trackEntry.Value);
+                    subtitle.Renumber();
+                    var trackName = trackEntry.Key > ClosedCaptionExtractor.Cea708TrackKeyOffset
+                        ? $"cea708_{pidEntry.Key}_s{trackEntry.Key - ClosedCaptionExtractor.Cea708TrackKeyOffset}"
+                        : $"cea608_{pidEntry.Key}_cc{trackEntry.Key}";
                     tracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, pidEntry.Key));
                 }
             }

@@ -447,10 +447,11 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             item.Subtitle = await RunConvertFunctions(item, imageToImage, cancellationToken);
         }
 
-        // Save text based formats
+        // Save text based formats - binary ones like EBU STL are in the list too (for loading),
+        // but their ToText is just "Not supported!", so they go through the binary save below
         foreach (var format in _subtitleFormats)
         {
-            if (format.Name == _config.TargetFormatName && item.Subtitle != null)
+            if (format.IsTextBased && format.Name == _config.TargetFormatName && item.Subtitle != null)
             {
                 await SaveSubtitleFormat(item, format, cancellationToken);
                 return;
@@ -472,11 +473,16 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             {
                 var format = kvp.Value;
 
-                if (format is Ebu && !string.IsNullOrEmpty(_config.EbuHeader))
+                if (format is Ebu)
                 {
-                    item.Subtitle.Header = _config.EbuHeader;
+                    // Ebu.Save writes nothing without a UI helper, so it is needed even when the
+                    // EBU settings dialog was never opened
                     Ebu.EbuUiHelper ??= new UiEbuSaveHelper();
-                    Ebu.EbuUiHelper.JustificationCode = _config.EbuJustificationCode;
+                    if (!string.IsNullOrEmpty(_config.EbuHeader))
+                    {
+                        item.Subtitle.Header = _config.EbuHeader;
+                        Ebu.EbuUiHelper.JustificationCode = _config.EbuJustificationCode;
+                    }
                 }
 
                 if (format is IBinaryPersistableSubtitle binaryPersistableSubtitle)
@@ -568,6 +574,17 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 if (language.Value.Count > 0)
                 {
                     result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(language.Value) });
+                }
+            }
+        }
+
+        foreach (var tracks in tsParser.ClosedCaptionSubtitlesLookup.Values)
+        {
+            foreach (var paragraphs in tracks.Values)
+            {
+                if (paragraphs.Count > 0)
+                {
+                    result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(paragraphs) });
                 }
             }
         }
@@ -1939,7 +1956,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
             if (s.OriginalFormat != null && s.OriginalFormat.Name != targetFormat.Name)
             {
-                s.OriginalFormat.RemoveNativeFormatting(item.Subtitle, targetFormat);
+                s.OriginalFormat.RemoveNativeFormatting(s, targetFormat);
             }
 
             if (targetFormat.Name == AdvancedSubStationAlpha.NameOfFormat)
@@ -2483,10 +2500,25 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         if (c.RebalanceLongLines)
         {
+            // Same threshold rule as the split/break dialog: at or above the single line max
+            // length means "keep any text that fits on one line", and capping there prevents
+            // merging to a single line that would exceed the max length (#12910).
+            var unbreakLinesShorterThan = c.UnbreakLinesShorterThan > 0
+                ? c.UnbreakLinesShorterThan
+                : Se.Settings.General.UnbreakLinesShorterThan;
+            var mergeLinesShorterThan = unbreakLinesShorterThan >= c.SingleLineMaxLength
+                ? c.SingleLineMaxLength + 1
+                : unbreakLinesShorterThan;
+
             for (var index = 0; index < subtitlesFixed.Count; index++)
             {
                 var item = subtitlesFixed[index];
-                var rebalancedText = Utilities.AutoBreakLine(item.Text, c.SingleLineMaxLength, Se.Settings.General.UnbreakLinesShorterThan, language);
+                if (c.RebalanceOnlyLinesTooLong && !SplitBreakLongLinesViewModel.HasLineTooLong(item.Text, c.SingleLineMaxLength, c.MaxNumberOfLines))
+                {
+                    continue;
+                }
+
+                var rebalancedText = Utilities.AutoBreakLine(item.Text, c.SingleLineMaxLength, mergeLinesShorterThan, language);
                 if (rebalancedText != item.Text)
                 {
                     item.Text = rebalancedText;

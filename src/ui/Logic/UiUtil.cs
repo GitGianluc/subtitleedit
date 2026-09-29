@@ -456,6 +456,15 @@ public static class UiUtil
         return _focusedButtonBackgroundBrush;
     }
 
+    /// <summary>
+    /// The label without its `_` access-key marker, for showing a button caption as plain text
+    /// (e.g. "_Done" as a batch row status, which showed the underscore).
+    /// </summary>
+    public static string RemoveAccessKey(string text)
+    {
+        return ParseAccessKey(text).Display;
+    }
+
     // Parses a single `_` access-key marker out of a button label and returns the visible text plus
     // the matching Avalonia Key. Mirrors the WinForms `&` convention used in the language files
     // (e.g. "_OK" → display "OK", Alt+O; "C_ancel" → display "Cancel", Alt+A).
@@ -2568,6 +2577,7 @@ public static class UiUtil
             Maximum = max,
             Increment = 0.01m,
             FormatString = "F2", // Force two decimals
+            TextConverter = new NumericUpDownDecimalTextConverter("F2"),
             Foreground = GetTextColor(),
         };
 
@@ -2608,7 +2618,8 @@ public static class UiUtil
             Minimum = min,
             Maximum = max,
             Increment = 0.01m,
-            FormatString = "F3" // Force three decimals
+            FormatString = "F3", // Force three decimals
+            TextConverter = new NumericUpDownDecimalTextConverter("F3"),
         };
 
         if (propertyValuePath != null)
@@ -2648,6 +2659,7 @@ public static class UiUtil
             Maximum = max,
             Increment = 0.1m,
             FormatString = "F1",
+            TextConverter = new NumericUpDownDecimalTextConverter("F1"),
         };
 
         if (propertyValuePath != null)
@@ -2971,71 +2983,65 @@ public static class UiUtil
         }
     }
 
+    private static Styles? _uiFontStyles;
+
     public static void SetFontName(string fontName)
     {
-        if (Application.Current == null || string.IsNullOrEmpty(Se.Settings.Appearance.FontName))
+        if (Application.Current == null)
         {
             return;
         }
 
-        Application.Current.Styles.Add(new Style(x => x.OfType<TextBlock>())
+        // Replace (not append) the font styles, so Settings OK/Apply does not pile up styles and
+        // switching back to the default font takes effect without a restart.
+        if (_uiFontStyles != null)
+        {
+            Application.Current.Styles.Remove(_uiFontStyles);
+            _uiFontStyles = null;
+        }
+
+        if (string.IsNullOrEmpty(fontName))
+        {
+            return;
+        }
+
+        var fontFamily = FontFamilyHelper.Make(fontName);
+        var styles = new Styles();
+
+        // Set the font on windows and popup roots only and let it inherit down: CheckBox/RadioButton/
+        // ToggleSwitch/TabItem etc. render plain string content without a TextBlock, so a TextBlock
+        // style alone misses them (#15255). Do not style every TemplatedControl - that also hits
+        // template parts like a TextBox's ScrollViewer and cuts off a font set locally on the control
+        // (e.g. the subtitle text box font), so the TextPresenter fell back to the UI font.
+        styles.Add(new Style(x => x.Is<TopLevel>())
         {
             Setters =
             {
-                new Setter(TextBlock.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
+                new Setter(TopLevel.FontFamilyProperty, fontFamily),
             }
         });
 
-        Application.Current.Styles.Add(new Style(x => x.OfType<TextBox>())
+        styles.Add(new Style(x => x.Is<TextBlock>())
         {
             Setters =
             {
-                new Setter(TextBox.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
-            }
-        });
-
-        Application.Current.Styles.Add(new Style(x => x.OfType<Button>())
-        {
-            Setters =
-            {
-                new Setter(Button.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
-            }
-        });
-
-        Application.Current.Styles.Add(new Style(x => x.OfType<Avalonia.Controls.MenuItem>())
-        {
-            Setters =
-            {
-                new Setter(Avalonia.Controls.MenuItem.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
-            }
-        });
-
-        Application.Current.Styles.Add(new Style(x => x.OfType<Label>())
-        {
-            Setters =
-            {
-                new Setter(Label.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
-            }
-        });
-
-        Application.Current.Styles.Add(new Style(x => x.OfType<ComboBox>())
-        {
-            Setters =
-            {
-                new Setter(ComboBox.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
+                new Setter(TextBlock.FontFamilyProperty, fontFamily),
             }
         });
 
         // The source editor (source view, batch convert ASSA) draws its own text, so it is not
-        // covered by the TextBox style above and would stay in Avalonia's default sans (#14457).
+        // covered by the styles above and would stay in Avalonia's default sans (#14457).
         // The format preview sets a monospace family locally, which wins over this style.
-        Application.Current.Styles.Add(new Style(x => x.OfType<SyntaxTextEditor>())
+        styles.Add(new Style(x => x.OfType<SyntaxTextEditor>())
         {
             Setters =
             {
-                new Setter(SyntaxTextEditor.FontFamilyProperty, FontFamilyHelper.Make(fontName)),
+                new Setter(SyntaxTextEditor.FontFamilyProperty, fontFamily),
             }
         });
+
+        _uiFontStyles = styles;
+        Application.Current.Styles.Add(styles);
     }
 
     public static StackPanel MakeHorizontalPanel(params Control[] controls)
@@ -3168,6 +3174,19 @@ public static class UiUtil
     private static int _subtitleFileNameInTitleSuppressions;
 
     /// <summary>
+    /// Session-only screen privacy mode (#15300), cycled via a shortcut so a screen recording or
+    /// screenshot does not reveal what is being worked on:
+    /// <see cref="ScreenPrivacyLevel.HideFileNames"/> keeps subtitle and video file names out of
+    /// the main window title, dialog titles and the video player;
+    /// <see cref="ScreenPrivacyLevel.HideFileNamesAndTexts"/> also blurs/hides the subtitle text.
+    /// </summary>
+    internal static ScreenPrivacyLevel ScreenPrivacy { get; set; }
+
+    internal static bool HideFileNames => ScreenPrivacy != ScreenPrivacyLevel.Off;
+
+    internal static bool HideTexts => ScreenPrivacy == ScreenPrivacyLevel.HideFileNamesAndTexts;
+
+    /// <summary>
     /// Suppresses the file-name suffix for the dialogs opened inside the returned scope. Batch
     /// convert reuses main-window dialogs as settings editors over a whole list of files - naming
     /// the main window's subtitle in their title bar claims a file they have nothing to do with.
@@ -3203,7 +3222,7 @@ public static class UiUtil
     /// </summary>
     internal static string MakeWindowTitle(string title)
     {
-        if (_subtitleFileNameInTitleSuppressions > 0)
+        if (_subtitleFileNameInTitleSuppressions > 0 || HideFileNames)
         {
             return title;
         }

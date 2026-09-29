@@ -242,6 +242,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private int _splitBreakSingleLineMaxLength;
     [ObservableProperty] private int _splitBreakMaxNumberOfLines;
     [ObservableProperty] private bool _splitBreakRebalanceLongLines;
+    [ObservableProperty] private bool _splitBreakRebalanceOnlyLinesTooLong;
+    [ObservableProperty] private int _splitBreakUnbreakLinesShorterThan;
 
     // ASSA change resolution
     [ObservableProperty] private int _assaChangeResolutionTargetWidth;
@@ -842,6 +844,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         Se.Settings.Tools.SplitRebalanceLongLinesRebalance = SplitBreakRebalanceLongLines;
         Se.Settings.Tools.SplitRebalanceLongLinesSingleLineMaxLength = SplitBreakSingleLineMaxLength;
         Se.Settings.Tools.SplitRebalanceLongLinesMaxNumberOfLines = SplitBreakMaxNumberOfLines;
+        Se.Settings.Tools.SplitRebalanceLongLinesRebalanceOnlyTooLong = SplitBreakRebalanceOnlyLinesTooLong;
+        Se.Settings.Tools.SplitRebalanceLongLinesUnbreakShorterThan = SplitBreakUnbreakLinesShorterThan;
 
         Se.SaveSettings();
     }
@@ -996,6 +1000,10 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             : Se.Settings.General.MaxNumberOfLines;
         SplitBreakSplitLongLines = Se.Settings.Tools.SplitRebalanceLongLinesSplit;
         SplitBreakRebalanceLongLines = Se.Settings.Tools.SplitRebalanceLongLinesRebalance;
+        SplitBreakRebalanceOnlyLinesTooLong = Se.Settings.Tools.SplitRebalanceLongLinesRebalanceOnlyTooLong;
+        SplitBreakUnbreakLinesShorterThan = Se.Settings.Tools.SplitRebalanceLongLinesUnbreakShorterThan > 0
+            ? Se.Settings.Tools.SplitRebalanceLongLinesUnbreakShorterThan
+            : Se.Settings.General.UnbreakLinesShorterThan;
 
         // Offset time codes
         OffsetTimeCodesTime = TimeSpan.FromMilliseconds(Se.Settings.Tools.BatchConvert.OffsetTimeCodesMilliseconds);
@@ -1235,8 +1243,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // could throw mid-run. Status updates still reach the grid per item.
         var itemsToConvert = BatchItems.ToList();
         ProgressMaxValue = itemsToConvert.Count;
+        var preventSleep = Se.Settings.Tools.BatchConvert.PreventSleep;
         _ = Task.Run(async () =>
         {
+            // Long unattended runs (OCR, translate, speech-to-text) otherwise stop when the machine
+            // idles into sleep. Released in the finally below, whatever ends the run. (#15222)
+            IDisposable? sleepInhibitor = null;
             // Nothing in this fire-and-forget task may throw its way out: an unobserved fault
             // leaves IsConverting/IsProgressVisible/AreControlsEnabled set and the dialog frozen
             // at "Converting 1/4..." forever with no error shown (#12288). The per-item catch
@@ -1244,6 +1256,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             // dialog is released even if anything outside the loop fails.
             try
             {
+                if (preventSleep)
+                {
+                    sleepInhibitor = await SleepInhibitor.AcquireAsync(Se.Language.Tools.BatchConvert.Title);
+                }
+
                 var count = 1;
                 foreach (var batchItem in itemsToConvert)
                 {
@@ -1305,6 +1322,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             }
             finally
             {
+                sleepInhibitor?.Dispose();
                 IsProgressVisible = false;
                 IsConverting = false;
                 AreControlsEnabled = true;
@@ -2844,6 +2862,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 IsActive = activeFunctions.Contains(BatchConvertFunctionType.SplitBreakLongLines),
                 SplitLongLines = SplitBreakSplitLongLines,
                 RebalanceLongLines = SplitBreakRebalanceLongLines,
+                RebalanceOnlyLinesTooLong = SplitBreakRebalanceOnlyLinesTooLong,
+                UnbreakLinesShorterThan = SplitBreakUnbreakLinesShorterThan,
                 MaxNumberOfLines = SplitBreakMaxNumberOfLines,
                 SingleLineMaxLength = SplitBreakSingleLineMaxLength,
             },

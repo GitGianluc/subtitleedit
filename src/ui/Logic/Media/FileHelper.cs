@@ -265,6 +265,7 @@ namespace Nikse.SubtitleEdit.Logic.Media
                 AddExt(existingTypes, extensions, ".mkv");
                 AddExt(existingTypes, extensions, ".mp4");
                 AddExt(existingTypes, extensions, ".ts");
+                AddExt(existingTypes, extensions, ".mxf");
                 AddExt(existingTypes, extensions, ".sup");
             }
 
@@ -342,7 +343,7 @@ namespace Nikse.SubtitleEdit.Logic.Media
             for (var attempt = 0; ; attempt++)
             {
                 // Use SaveFilePickerWithResultAsync instead of SaveFilePickerAsync
-                var result = await topLevel.StorageProvider.SaveFilePickerWithResultAsync(options);
+                var result = await NativePickers.SaveFilePickerWithResultAsync(topLevel, options);
 
                 if (result.File == null)
                 {

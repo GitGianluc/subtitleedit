@@ -169,6 +169,13 @@ public class SeGeneral
     public bool ShowColumnTeletext { get; set; }
     public bool TeletextAlignmentPreview { get; set; }
     public bool ShowColumnGap { get; set; }
+
+    /// <summary>
+    /// The "Shot in"/"Shot out" columns: signed distance from the cue to the nearest shot change,
+    /// colored by the beautify time codes profile's zones. Off by default.
+    /// </summary>
+    public bool ShowColumnShotIn { get; set; }
+    public bool ShowColumnShotOut { get; set; }
     public bool ShowColumnDuration { get; set; }
     public bool ShowColumnStyle { get; set; }
     public bool ShowColumnActor { get; set; }
@@ -467,6 +474,23 @@ public class SeGeneral
             SubtitleMaximumDisplayMilliseconds = 5000,
             SubtitleMinimumDisplayMilliseconds = 700,
             SubtitleMaximumWordsPerMinute = 300,
+            CpsLineLengthStrategy = string.Empty,
+            MinimumMillisecondsBetweenLines = 0,
+            DialogStyle = DialogType.DashBothLinesWithSpace,
+            ContinuationStyle = Core.Enums.ContinuationStyle.None
+        });
+        profiles.Add(new RulesProfile
+        {
+            // One to three words per cue, the common Shorts/TikTok caption style (issue #15295).
+            Name = "TikTok/YouTube-shorts (1-3 words)",
+            SubtitleLineMaximumLength = 15,
+            MaxNumberOfLines = 1,
+            MergeLinesShorterThan = 16,
+            SubtitleMaximumCharactersPerSeconds = 30,
+            SubtitleOptimalCharactersPerSeconds = 20,
+            SubtitleMaximumDisplayMilliseconds = 3000,
+            SubtitleMinimumDisplayMilliseconds = 300,
+            SubtitleMaximumWordsPerMinute = 400,
             CpsLineLengthStrategy = string.Empty,
             MinimumMillisecondsBetweenLines = 0,
             DialogStyle = DialogType.DashBothLinesWithSpace,

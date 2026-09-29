@@ -196,4 +196,166 @@ public class RemuxVideoViewModelTests
 
         Assert.False(vm.ShouldLoadOutputOnClose(input));
     }
+
+    private static (RemuxVideoViewModel Vm, RemuxFileItem VideoAudio, RemuxFileItem Narration) BuildMixViewModel(bool mix)
+    {
+        var vm = BuildViewModel();
+        var video = Path.Combine(Path.GetTempPath(), "remux-mix-video-does-not-exist.mp4");
+        vm.VideoFileName = video;
+        vm.OutputFileName = Path.Combine(Path.GetTempPath(), "remux-mix-out.mp4");
+        vm.MixAudio = mix;
+        var videoAudio = new RemuxFileItem(video);
+        var narration = new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-mix-narration-does-not-exist.mp3"));
+        vm.AudioFiles.Add(videoAudio);
+        vm.AudioFiles.Add(narration);
+        return (vm, videoAudio, narration);
+    }
+
+    [AvaloniaFact]
+    public void BuildFfmpegArguments_Mix_MixesEverySourceAtItsVolumeIntoOneTrack()
+    {
+        var (vm, videoAudio, narration) = BuildMixViewModel(true);
+        videoAudio.VolumePercent = 15;
+        narration.VolumePercent = 120;
+
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], []);
+
+        Assert.Contains("-filter_complex \"[0:a:0]volume=0.15[a0];[1:a:0]volume=1.20[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[aout]\"", args);
+        Assert.Contains("-map 0:v:0 -map \"[aout]\" ", args);
+        Assert.DoesNotContain("-map 0:a:", args);
+        Assert.Contains("-c:a aac", args);
+        Assert.Contains("-metadata:s:a:0 title=", args);
+        Assert.DoesNotContain("-metadata:s:a:1", args);
+    }
+
+    [AvaloniaFact]
+    public void BuildFfmpegArguments_NoMix_KeepsOneCopiedTrackPerFile()
+    {
+        var (vm, videoAudio, _) = BuildMixViewModel(false);
+        videoAudio.VolumePercent = 15; // ignored without mixing
+
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], []);
+
+        Assert.DoesNotContain("-filter_complex", args);
+        Assert.Contains("-map 0:v:0 -map 0:a:0 -map 1:a:0 ", args);
+        Assert.Contains("-c:a copy", args);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void BuildFfmpegArguments_FastStart_FollowsCheckBox(bool fastStart)
+    {
+        var (vm, _, _) = BuildMixViewModel(true);
+        var saved = Nikse.SubtitleEdit.Logic.Config.Se.Settings.Video.RemuxFastStart;
+        try
+        {
+            vm.FastStart = fastStart;
+
+            var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], []);
+
+            Assert.Equal(fastStart, args.Contains("-movflags +faststart"));
+            Assert.Equal(fastStart, Nikse.SubtitleEdit.Logic.Config.Se.Settings.Video.RemuxFastStart);
+        }
+        finally
+        {
+            Nikse.SubtitleEdit.Logic.Config.Se.Settings.Video.RemuxFastStart = saved;
+        }
+    }
+
+    [AvaloniaFact]
+    public void MixAudio_TwoFilesStayInMp4_UncheckingSwitchesToMkv()
+    {
+        var (vm, videoAudio, _) = BuildMixViewModel(true);
+        Assert.Equal(".mp4", vm.SelectedOutputFormat);
+        Assert.True(vm.IsMixAudioVisible);
+        Assert.True(videoAudio.ShowVolume);
+
+        vm.MixAudio = false;
+
+        Assert.Equal(".mkv", vm.SelectedOutputFormat);
+        Assert.False(videoAudio.ShowVolume);
+    }
+
+    [AvaloniaFact]
+    public void MixAudio_VolumeIsEnabledOnlyWithASelectedFile()
+    {
+        var (vm, videoAudio, _) = BuildMixViewModel(true);
+        vm.SelectedAudioFile = null;
+        Assert.False(vm.IsVolumeEnabled);
+
+        vm.SelectedAudioFile = videoAudio;
+        Assert.True(vm.IsVolumeEnabled);
+
+        vm.AudioFiles.RemoveAt(1); // one file left - nothing to mix
+        Assert.False(vm.IsMixAudioVisible);
+        Assert.False(vm.IsVolumeEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Scc_SwitchesToMovAndCopiesTheCaptionsAsCea608()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        var srt = new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-srt-does-not-exist.srt"));
+        var scc = new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-scc-does-not-exist.scc"));
+        vm.SubtitleFiles.Add(srt);
+        vm.SubtitleFiles.Add(scc);
+
+        Assert.Equal(".mov", vm.SelectedOutputFormat);
+
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], [.. vm.SubtitleFiles]);
+
+        Assert.Contains("-map 0:v:0 -map 0:a:0 -map 1:a:0 -map 2:s:0 -map 3:s:0 ", args);
+        Assert.Contains("-c:s mov_text -c:s:1 copy", args);
+        Assert.Contains("-c:a copy", args);
+    }
+
+    [AvaloniaFact]
+    public void Subtitles_GetLanguageTagFromFileName()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-does-not-exist.en.scc")));
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-does-not-exist.srt")));
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-does-not-exist.de.srt")));
+
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], [.. vm.SubtitleFiles]);
+
+        Assert.Contains("-metadata:s:s:0 language=eng ", args);
+        Assert.DoesNotContain("-metadata:s:s:1 language=", args);
+        Assert.Contains("-metadata:s:s:2 language=ger ", args);
+    }
+
+    [Theory]
+    [InlineData("movie.en.scc", "eng")]
+    [InlineData("movie.spa.srt", "spa")]
+    [InlineData("movie.fr.forced.srt", "fre")]
+    [InlineData("movie_track3_[dut].srt", "dut")]
+    [InlineData("movie.scc", null)]
+    [InlineData("Dr.No.srt", null)]
+    public void GetSubtitleLanguageFromFileName_ReturnsBibliographicCode(string fileName, string? expected)
+    {
+        Assert.Equal(expected, RemuxVideoViewModel.GetSubtitleLanguageFromFileName(fileName));
+    }
+
+    [AvaloniaFact]
+    public void Mov_KeepsMultipleTracks_ButAssStillSwitchesToMkv()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        vm.SelectedOutputFormat = ".mov";
+        Assert.Equal(".mov", vm.SelectedOutputFormat);
+
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-ass-does-not-exist.ass")));
+
+        Assert.Equal(".mkv", vm.SelectedOutputFormat);
+    }
+
+    [Theory]
+    [InlineData(100, "1.00")]
+    [InlineData(15, "0.15")]
+    [InlineData(250, "2.00")]
+    [InlineData(-5, "0.00")]
+    public void FormatVolumeFactor_ClampsToZeroTo200Percent(int percent, string expected)
+    {
+        Assert.Equal(expected, RemuxVideoViewModel.FormatVolumeFactor(percent));
+    }
 }

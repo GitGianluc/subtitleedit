@@ -28,6 +28,53 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes
         public List<Paragraph> GetParagraphs() => Paragraphs;
 
         /// <summary>
+        /// A QuickTime "c608" sample is a list of atoms: "cdat" holds the field 1 byte pairs
+        /// (CC1/CC2), "cdt2" the field 2 ones (CC3/CC4). Reading the whole sample as byte pairs
+        /// decoded the atom header too, so every caption ended in "cdat" (#15382). Only field 1 is
+        /// decoded; a sample that is not atom-wrapped is read as bare byte pairs.
+        /// </summary>
+        private void AddC608SampleCcData(byte[] sampleData, ulong time)
+        {
+            var pos = 0;
+            var foundAtom = false;
+            while (pos + 8 <= sampleData.Length)
+            {
+                var atomSize = (int)BinaryPrimitives.ReadUInt32BigEndian(sampleData.AsSpan(pos));
+                var atomType = Encoding.ASCII.GetString(sampleData, pos + 4, 4);
+                if (atomSize < 8 || pos + atomSize > sampleData.Length || (atomType != "cdat" && atomType != "cdt2"))
+                {
+                    break;
+                }
+
+                foundAtom = true;
+                if (atomType == "cdat")
+                {
+                    AddCcPairs(sampleData, pos + 8, pos + atomSize, time);
+                }
+
+                pos += atomSize;
+            }
+
+            if (!foundAtom)
+            {
+                AddCcPairs(sampleData, 0, sampleData.Length, time);
+            }
+        }
+
+        private void AddCcPairs(byte[] data, int start, int end, ulong time)
+        {
+            for (var j = start; j + 1 < end; j += 2)
+            {
+                var d1 = data[j];
+                var d2 = data[j + 1];
+                if (d1 != 0 || d2 != 0)
+                {
+                    _cea608CcData.Add(new CcData(0, d1, d2) { Time = time });
+                }
+            }
+        }
+
+        /// <summary>
         /// Color lookup table for <see cref="SubPictures"/>, when the VobSub sample entry
         /// carries one - null means the four default colors are used.
         /// </summary>
@@ -358,15 +405,7 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes
                             fs.Seek((long)sampleOffset, SeekOrigin.Begin);
                             if (fs.Read(sampleData, 0, sampleData.Length) == sampleData.Length)
                             {
-                                for (var j = 0; j + 1 < sampleData.Length; j += 2)
-                                {
-                                    var d1 = sampleData[j];
-                                    var d2 = sampleData[j + 1];
-                                    if (d1 != 0 || d2 != 0)
-                                    {
-                                        _cea608CcData.Add(new CcData(0, d1, d2) { Time = beforeTicks });
-                                    }
-                                }
+                                AddC608SampleCcData(sampleData, beforeTicks);
                             }
                         }
                         else if (stsdCodec == "wvtt") // WebVTT in MP4 (ISO 14496-30)
@@ -505,11 +544,7 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes
                 {
                     var startMs = data.Start / (double)TimeScale * 1000.0;
                     var endMs = data.End / (double)TimeScale * 1000.0;
-                    var text = GetC608Text(data.Screen);
-                    if (!string.IsNullOrEmpty(text))
-                    {
-                        paragraphs.Add(new Paragraph(text, startMs, endMs));
-                    }
+                    Cea608CueBuilder.Add(paragraphs, SerializedScreenText.GetText(data.Screen), startMs, endMs);
                 };
                 foreach (var cc in _cea608CcData)
                 {
@@ -556,20 +591,6 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes
                     }
                 }
             }
-        }
-
-        private static string GetC608Text(SerializedRow[] screen)
-        {
-            var sb = new StringBuilder();
-            foreach (var row in screen)
-            {
-                foreach (var column in row.Columns)
-                {
-                    sb.Append(column.Character);
-                }
-                sb.AppendLine();
-            }
-            return sb.ToString().Trim();
         }
 
         private static string MakeScenaristText(byte[] buffer)
