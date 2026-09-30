@@ -314,6 +314,49 @@ namespace Nikse.SubtitleEdit.Core.Cea708
         private const byte CarriageReturn = 0x0D;
         private const byte HorizontalCarriageReturn = 0x0E;
 
+        private static Encoding _eucKr;
+        private static bool _eucKrUnavailable;
+
+        /// <summary>
+        /// Decodes a P16 character. CEA-708 leaves its coding open; Korean broadcasters (TTA
+        /// standard) send KS X 1001 as EUC-KR, i.e. both bytes 0xA1-0xFE - read as UTF-16 that is
+        /// nonsense Hangul. Anything else is taken as UTF-16.
+        /// </summary>
+        internal static string DecodeP16(byte first, byte second)
+        {
+            if (first >= 0xA1 && first <= 0xFE && second >= 0xA1 && second <= 0xFE)
+            {
+                var eucKr = GetEucKrEncoding();
+                if (eucKr != null)
+                {
+                    var s = eucKr.GetString(new[] { first, second });
+                    if (s.Length == 1 && s[0] != '�' && s[0] != '?')
+                    {
+                        return s;
+                    }
+                }
+            }
+
+            return ((char)((first << 8) | second)).ToString();
+        }
+
+        private static Encoding GetEucKrEncoding()
+        {
+            if (_eucKr == null && !_eucKrUnavailable)
+            {
+                try
+                {
+                    _eucKr = Encoding.GetEncoding(949, EncoderFallback.ReplacementFallback, DecoderFallback.ReplacementFallback);
+                }
+                catch
+                {
+                    _eucKrUnavailable = true; // code pages provider not registered
+                }
+            }
+
+            return _eucKr;
+        }
+
         private static bool IsCurrentWindowVisible(CommandState state)
         {
             return state.CurrentWindow >= 0 && state.VisibleWindows[state.CurrentWindow];
@@ -381,6 +424,9 @@ namespace Nikse.SubtitleEdit.Core.Cea708
             var i = 0;
             var debugBuilder = new StringBuilder();
             var textBuilder = new StringBuilder();
+            state.FlushedTexts.Clear();
+            state.StillVisibleFlushes.Clear();
+            state.ErasedAtFlushCounts.Clear();
 
             while (i < bytes.Length)
             {
@@ -418,6 +464,7 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     // ClearWindows clears all the windows specified in the 8 bit window bitmap.
                     var clearWindows = new ClearWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(clearWindows);
+                    state.ErasedAtFlushCounts.Add(state.FlushedTexts.Count);
                     if (DebugMode)
                     {
                         debugBuilder.Append("{ClearWindows:" + clearWindows.Flags[0] + "," + clearWindows.Flags[1] + "," + clearWindows.Flags[2] + "," + clearWindows.Flags[3] + "," + clearWindows.Flags[4] + "," + clearWindows.Flags[5] + "," + clearWindows.Flags[6] + "," + clearWindows.Flags[7] + "}");
@@ -450,11 +497,12 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                         break;
                     }
 
-                    FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                    Flush(debugBuilder, textBuilder, state);
 
                     // HideWindows hides all the windows specified in the 8 bit window bitmap.
                     var hideWindows = new HideWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(hideWindows);
+                    state.ErasedAtFlushCounts.Add(state.FlushedTexts.Count);
                     SetWindowsVisible(state, hideWindows.Flags, false);
                     if (DebugMode)
                     {
@@ -470,11 +518,12 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                         break;
                     }
 
-                    FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                    Flush(debugBuilder, textBuilder, state);
 
                     // ToggleWindows hides all displayed windows, and displays all hidden windows specified in the 8 bit window bitmap.
                     var toggleWindows = new ToggleWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(toggleWindows);
+                    state.ErasedAtFlushCounts.Add(state.FlushedTexts.Count);
                     for (var w = 0; w < toggleWindows.Flags.Length && w < state.VisibleWindows.Length; w++)
                     {
                         if (toggleWindows.Flags[w])
@@ -496,11 +545,12 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                         break;
                     }
 
-                    FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                    Flush(debugBuilder, textBuilder, state);
 
                     // DeleteWindows deletes all the windows specified in the 8 bit window bitmap.If the current window, as specified by the last SetCurrentWindow command, is deleted then the current window becomes undefined and the window attribute commands should have no effect until after the next SetCurrentWindow or DefineWindow command.
                     var deleteWindows = new DeleteWindows(lineIndex, bytes, i + 1);
                     state.Commands.Add(deleteWindows);
+                    state.ErasedAtFlushCounts.Add(state.FlushedTexts.Count);
                     SetWindowsVisible(state, deleteWindows.Flags, false);
                     if (state.CurrentWindow >= 0 && state.CurrentWindow < deleteWindows.Flags.Length && deleteWindows.Flags[state.CurrentWindow])
                     {
@@ -544,6 +594,7 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                 {
                     // Reset deletes all windows, cancels any active delay, and clears the buffer before the Reset command. Reset should be scanned for during a Delay. 
                     var reset = new Reset(lineIndex);
+                    state.ErasedAtFlushCounts.Add(state.FlushedTexts.Count);
                     state.Commands.Add(reset);
                     if (DebugMode)
                     {
@@ -665,9 +716,8 @@ namespace Nikse.SubtitleEdit.Core.Cea708
 
                 else if (b == 0x18 && i < bytes.Length - 2)
                 {
-                    // Unicode character
-                    char ch = Encoding.BigEndianUnicode.GetChars(bytes, i + 1, 2)[0];
-                    var text = new SetText(lineIndex, ch.ToString());
+                    // P16: a 16-bit character - Unicode, or (Korean broadcasts, TTA) EUC-KR
+                    var text = new SetText(lineIndex, DecodeP16(bytes[i + 1], bytes[i + 2]));
                     state.Commands.Add(text);
                     if (DebugMode)
                     {
@@ -692,7 +742,8 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                     // thrown away.
                     if (IsCurrentWindowVisible(state))
                     {
-                        FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                        Flush(debugBuilder, textBuilder, state);
+                        state.ErasedAtFlushCounts.Add(state.FlushedTexts.Count);
                     }
                     else
                     {
@@ -717,12 +768,18 @@ namespace Nikse.SubtitleEdit.Core.Cea708
                 else if (b == CarriageReturn)
                 {
                     // CR moves the pen to the next row. In a visible window - roll-up and paint-on
-                    // captions - that finishes the line on screen, so it ends the current cue;
-                    // otherwise (a pop-on caption being built in a hidden window) it is a line
+                    // captions - that finishes the line, so it becomes a cue of its own; the line
+                    // stays on screen (scrolling up) until a later line or an erase ends it.
+                    // Otherwise (a pop-on caption being built in a hidden window) it is a line
                     // break inside the caption.
                     if (IsCurrentWindowVisible(state))
                     {
-                        FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                        var flushCount = state.FlushedTexts.Count;
+                        Flush(debugBuilder, textBuilder, state);
+                        if (state.FlushedTexts.Count > flushCount)
+                        {
+                            state.StillVisibleFlushes.Add(state.FlushedTexts.Count - 1);
+                        }
                     }
                     else
                     {
@@ -783,10 +840,44 @@ namespace Nikse.SubtitleEdit.Core.Cea708
 
             if (flush)
             {
-                FlushText(DebugMode ? debugBuilder : textBuilder, state);
+                Flush(debugBuilder, textBuilder, state);
+            }
+
+            if (state.FlushedTexts.Count > 0)
+            {
+                state.StartLineIndex = state.FlushedTexts[0].Key; // start of the returned text
             }
 
             return DebugMode ? debugBuilder.ToString() : textBuilder.ToString();
+        }
+
+        /// <summary>
+        /// Flushes the buffered text as one caption - several flushes in one packet (e.g. roll-up
+        /// lines ended by CR) each become a caption of their own in <see cref="CommandState.FlushedTexts"/>,
+        /// and are separated by a line break in the returned text.
+        /// </summary>
+        private static void Flush(StringBuilder debugBuilder, StringBuilder textBuilder, CommandState state)
+        {
+            if (DebugMode)
+            {
+                FlushText(debugBuilder, state);
+                return;
+            }
+
+            var text = new StringBuilder();
+            FlushText(text, state);
+            if (text.Length == 0)
+            {
+                return;
+            }
+
+            state.FlushedTexts.Add(new KeyValuePair<int, string>(state.StartLineIndex, text.ToString()));
+            if (textBuilder.Length > 0)
+            {
+                textBuilder.AppendLine();
+            }
+
+            textBuilder.Append(text);
         }
 
         private static void FlushText(StringBuilder text, CommandState state)

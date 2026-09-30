@@ -256,9 +256,15 @@ namespace Nikse.SubtitleEdit.Logic.Media
             AddExt(existingTypes, extensions, ".mks");
             AddExt(existingTypes, extensions, ".pac");
             AddExt(existingTypes, extensions, ".890");
+            AddExt(existingTypes, extensions, ".ezt");
             AddExt(existingTypes, extensions, ".sdb");
             AddExt(existingTypes, extensions, ".fpc");
             AddExt(existingTypes, extensions, ".dvbttx");
+            AddExt(existingTypes, extensions, ".1hd");
+            AddExt(existingTypes, extensions, ".2hd");
+            AddExt(existingTypes, extensions, ".1sd");
+            AddExt(existingTypes, extensions, ".2sd");
+            AddExt(existingTypes, extensions, ".prproj");
 
             if (includeVideoFiles)
             {

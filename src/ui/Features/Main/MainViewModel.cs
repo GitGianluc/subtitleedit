@@ -3158,6 +3158,8 @@ public partial class MainViewModel :
                 }
             }
 
+            subtitle ??= LoadOnlyTextFormatLoader.TryLoad(fileName, LanguageAutoDetect.GetEncodingFromFile(fileName));
+
             if (subtitle == null)
             {
                 var message = Se.Language.General.UnknownSubtitleFormat;
@@ -4762,13 +4764,21 @@ public partial class MainViewModel :
         var result = await ShowDialogAsync<CompareWindow, CompareViewModel>(vm =>
         {
             var right = new ObservableCollection<SubtitleLineViewModel>();
-            vm.Initialize(Subtitles, _subtitleFileName ?? string.Empty, right, string.Empty, HasChanges());
+
+            // Display-only reference rows (#15299) are not lines of the subtitle: Compare showed
+            // them as empty differences and could fill in or delete them.
+            var left = new ObservableCollection<SubtitleLineViewModel>(Subtitles.Where(p => !p.IsReferenceOnly));
+            vm.Initialize(left, _subtitleFileName ?? string.Empty, right, string.Empty, HasChanges());
         });
 
         // Lines edited in Compare keep their row ids, so they map back onto the rows they came from.
+        // The reference rows go back in too (ApplyDialogRows drops rows it is not given), and are
+        // then put back at their times.
         if (result.OkPressed && result.IsLeftEditable && result.HasPendingChanges)
         {
-            ApplyDialogRows(result.GetEditedLines(), before);
+            var referenceRows = Subtitles.Where(p => p.IsReferenceOnly).ToList();
+            ApplyDialogRows(result.GetEditedLines().Concat(referenceRows).ToList(), before);
+            RepositionReferenceOnlyRows();
             ShowStatus(string.Format(Se.Language.File.CompareXChangesApplied, result.PendingChangeCount));
         }
     }
@@ -23982,6 +23992,29 @@ public partial class MainViewModel :
                 }
             }
 
+            // Adobe Premiere project (gzipped xml): its text clips, as SE 4 opened them.
+            if (ext == ".prproj")
+            {
+                var prProjSubtitle = TryLoadPremiereProject(fileName);
+                if (prProjSubtitle != null)
+                {
+                    if (!skipLoadVideo)
+                    {
+                        VideoCloseFile();
+                    }
+
+                    ResetSubtitle();
+                    _subtitle.Paragraphs.AddRange(prProjSubtitle.Paragraphs);
+                    SetSubtitles(_subtitle);
+                    _subtitleFileName = Utilities.GetPathAndFileNameWithoutExtension(fileName) +
+                                        SelectedSubtitleFormat.Extension;
+                    ShowStatus(string.Format(Se.Language.General.SubtitleLoadedX, fileName));
+                    SelectAndScrollToRow(0);
+                    _converted = true;
+                    return;
+                }
+            }
+
             if (ext == ".divx" || ext == ".avi")
             {
                 if (ImportSubtitleFromDivX(fileName, skipLoadVideo))
@@ -24068,6 +24101,15 @@ public partial class MainViewModel :
                 }
             }
 
+            // Image-list files (DOST, SON, SpuImage, SubRip with image file names, ...) name an
+            // image per cue - loaded as text the grid would show file names, so OCR them, like SE 4.
+            var imageFileListSubtitle = isAudioFile ? null : ImageListSubtitleLoader.TryLoad(fileName, fileEncoding, subtitle);
+            if (imageFileListSubtitle != null)
+            {
+                ImportAndOcrDost(fileName, imageFileListSubtitle, skipLoadVideo);
+                return;
+            }
+
             if (subtitle == null)
             {
                 // SMPTE-TT with bitmap captions: base64 PNGs in <smpte:image> referenced via
@@ -24083,6 +24125,20 @@ public partial class MainViewModel :
                         base64ImageFormat.LoadSubtitle(base64ImageSubtitle, base64ImageLines, fileName);
                         ImportAndInlineBase64(base64ImageSubtitle, fileName, skipLoadVideo);
                         return;
+                    }
+
+                    // IMSC image profile: the PNGs are files next to the document, named by
+                    // smpte:backgroundImage (or <image src>) - the shape the BDN OCR import reads.
+                    var timedTextImage = new TimedTextImage();
+                    if (timedTextImage.IsMine(base64ImageLines, fileName))
+                    {
+                        var timedTextImageSubtitle = new Subtitle();
+                        timedTextImage.LoadSubtitle(timedTextImageSubtitle, base64ImageLines, fileName);
+                        if (timedTextImageSubtitle.Paragraphs.Count > 0)
+                        {
+                            ImportAndOcrDost(fileName, timedTextImageSubtitle, skipLoadVideo);
+                            return;
+                        }
                     }
                 }
 
@@ -24106,16 +24162,36 @@ public partial class MainViewModel :
                     return;
                 }
 
-                foreach (var f in SubtitleFormat.GetBinaryFormats(false))
+                // PlayStation subs keep their png images inside the file.
+                if (ext == ".subs")
                 {
-                    if (f.IsMine(null, fileName))
+                    var playStationSubs = new PlayStationSubs();
+                    if (playStationSubs.IsMine(null, fileName))
                     {
-                        subtitle = new Subtitle();
-                        f.LoadSubtitle(subtitle, null, fileName);
-                        subtitle.OriginalFormat = f;
-                        break; // format found, exit the loop
+                        var playStationSubtitle = new Subtitle();
+                        playStationSubs.LoadSubtitle(playStationSubtitle, null, fileName);
+                        ImportAndOcrBinaryParagraphList(fileName, playStationSubs, playStationSubtitle, skipLoadVideo);
+                        return;
                     }
                 }
+
+                subtitle = TryLoadAribB36(fileName);
+
+                if (subtitle == null)
+                {
+                    foreach (var f in SubtitleFormat.GetBinaryFormats(false))
+                    {
+                        if (f.IsMine(null, fileName))
+                        {
+                            subtitle = new Subtitle();
+                            f.LoadSubtitle(subtitle, null, fileName);
+                            subtitle.OriginalFormat = f;
+                            break; // format found, exit the loop
+                        }
+                    }
+                }
+
+                subtitle ??= LoadOnlyTextFormatLoader.TryLoad(fileName, fileEncoding);
 
                 if (subtitle == null)
                 {
@@ -24769,11 +24845,69 @@ public partial class MainViewModel :
         }
     }
 
+    /// <summary>
+    /// ARIB STD-B36 caption files (.1hd, .2hd, .1sd, .2sd), as SE 4 opened them. Not one of the
+    /// binary formats: IsMine only looks at the extension and size, so the load decides.
+    /// </summary>
+    private static Subtitle? TryLoadAribB36(string fileName)
+    {
+        try
+        {
+            var arib = new AribB36();
+            if (!arib.IsMine(null, fileName))
+            {
+                return null;
+            }
+
+            var subtitle = new Subtitle();
+            arib.LoadSubtitle(subtitle, null, fileName);
+            subtitle.OriginalFormat = arib;
+            return subtitle.Paragraphs.Count > 0 ? subtitle : null;
+        }
+        catch
+        {
+            return null; // the parser indexes the page blocks without bounds checks
+        }
+    }
+
+    private static Subtitle? TryLoadPremiereProject(string fileName)
+    {
+        try
+        {
+            var xml = AdobePremierePrProj.LoadFromZipFile(fileName);
+            if (string.IsNullOrEmpty(xml))
+            {
+                return null;
+            }
+
+            var subtitle = new Subtitle();
+            new AdobePremierePrProj().LoadSubtitle(subtitle, xml.SplitToLines(), fileName);
+            return subtitle.Paragraphs.Count > 0 ? subtitle : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private void ImportAndOcrDost(string fileName, Subtitle subtitle, bool skipLoadVideo = false)
     {
         Dispatcher.UIThread.Post(async () =>
         {
             var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeBdn(subtitle, fileName, false); });
+
+            if (result.OkPressed)
+            {
+                await FinishOcrImportAsync(fileName, result.OcredSubtitle, skipLoadVideo: skipLoadVideo);
+            }
+        });
+    }
+
+    private void ImportAndOcrBinaryParagraphList(string fileName, IBinaryParagraphList binaryParagraphList, Subtitle subtitle, bool skipLoadVideo = false)
+    {
+        Dispatcher.UIThread.Post(async () =>
+        {
+            var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeBinaryParagraphList(binaryParagraphList, subtitle, fileName); });
 
             if (result.OkPressed)
             {
