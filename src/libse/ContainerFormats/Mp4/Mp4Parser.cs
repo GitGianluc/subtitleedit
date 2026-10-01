@@ -37,6 +37,7 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4
         /// <summary>
         /// CEA-608/708 closed captions from the video track: paragraphs per track key
         /// (1-4 = CC1-CC4, 100 + n = CEA-708 service n, see <see cref="ClosedCaptionDecoder"/>).
+        /// Empty for a progressive file that has a subtitle track - its video is not scanned.
         /// </summary>
         public SortedDictionary<int, List<Paragraph>> ClosedCaptionTracks { get; private set; } = new SortedDictionary<int, List<Paragraph>>();
 
@@ -358,7 +359,15 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4
             }
 
             CheckForTrunCea608();
-            CheckForMoovVideoCea608();
+            CheckForClcpCea708();
+
+            // Finding CEA-608/708 in a progressive file reads every video sample - seconds on a
+            // multi-GB movie - and callers only offer the captions when there is no subtitle
+            // track, so skip the scan when there is one.
+            if (GetSubtitleTracks().Count == 0)
+            {
+                CheckForMoovVideoCea608();
+            }
         }
 
         private void ApplyEditListsToMoovSubtitleTracks()
@@ -447,6 +456,30 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4
 
                 p.StartTime.TotalMilliseconds = start < 0 ? 0 : start;
                 p.EndTime.TotalMilliseconds = end < 0 ? 0 : end;
+            }
+        }
+
+        /// <summary>
+        /// A QuickTime "c708" closed caption track carries both CEA-608 channels and CEA-708
+        /// services; they are decoded into <see cref="ClosedCaptionTracks"/> like the captions
+        /// of a video stream (the video scan then has nothing to add).
+        /// </summary>
+        private void CheckForClcpCea708()
+        {
+            if (Moov?.Tracks == null || TrunCea608Subtitle?.Paragraphs.Count > 0 || TrunCea708Subtitle?.Paragraphs.Count > 0)
+            {
+                return;
+            }
+
+            foreach (var trak in Moov.Tracks)
+            {
+                var stbl = trak?.Mdia?.Minf?.Stbl;
+                if (trak?.Mdia?.IsClosedCaption == true && stbl?.C708CcData.Count > 0)
+                {
+                    var timeScale = stbl.TimeScale > 0 ? stbl.TimeScale : (Moov.Mvhd?.TimeScale ?? 1000UL);
+                    DecodeCcData(stbl.C708CcData, timeScale, trak);
+                    return;
+                }
             }
         }
 
@@ -610,13 +643,17 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4
             }
         }
 
+        private const double MissingMoovVideoTimeScale = 90000.0;
+
         private void CheckForTrunCea608()
         {
             try
             {
                 // Fragment ticks are media-track times, so prefer the video track's mdhd
-                // timescale; the movie (mvhd) timescale is only a fallback.
-                double timeScale = Moov?.Mvhd?.TimeScale ?? 1000.0;
+                // timescale; the movie (mvhd) timescale is only a fallback. A bare media
+                // segment without its init segment (no moov) has neither, so assume the
+                // 90 kHz MPEG clock that DASH/HLS video uses - 1000 made every time ~90x too large.
+                double timeScale = Moov == null ? MissingMoovVideoTimeScale : Moov.Mvhd?.TimeScale ?? 1000.0;
                 var videoTrack = GetVideoTracks().FirstOrDefault();
                 if (videoTrack?.Mdia?.Mdhd?.TimeScale > 0)
                 {
@@ -915,8 +952,8 @@ namespace Nikse.SubtitleEdit.Core.ContainerFormats.Mp4
                         ticks += sample.Duration.Value;
                     }
 
-                    var startMs = startTicks / timeScale * 1000.0;
-                    var durationMs = durationTicks / timeScale * 1000.0;
+                    var startMs = startTicks * 1000.0 / timeScale;
+                    var durationMs = durationTicks * 1000.0 / timeScale;
 
                     if (size > 2 && size <= maxSampleSize && samplePosition + size <= (ulong)fs.Length)
                     {

@@ -65,6 +65,7 @@ using Nikse.SubtitleEdit.Features.Files.FormatProperties.TimedText10Properties;
 using Nikse.SubtitleEdit.Features.Files.FormatProperties.TimedTextImsc11Properties;
 using Nikse.SubtitleEdit.Features.Files.FormatProperties.TmpegEncXmlProperties;
 using Nikse.SubtitleEdit.Features.Files.FormatProperties.WebVttProperties;
+using Nikse.SubtitleEdit.Features.Files.ImportDvd;
 using Nikse.SubtitleEdit.Features.Files.ImportImages;
 using Nikse.SubtitleEdit.Features.Files.ImportCsvXlsxCustomColumns;
 using Nikse.SubtitleEdit.Features.Files.ImportPlainText;
@@ -182,6 +183,7 @@ using Nikse.SubtitleEdit.Features.Video.TextToSpeech.VoiceManager;
 using Nikse.SubtitleEdit.Features.Video.TransparentSubtitles;
 using Nikse.SubtitleEdit.Features.WebVtt;
 using Nikse.SubtitleEdit.Logic;
+using Nikse.SubtitleEdit.UiLogic.SubtitleLoading;
 using Nikse.SubtitleEdit.Logic.Config;
 using static Nikse.SubtitleEdit.Logic.FindService;
 using Nikse.SubtitleEdit.Logic.Config.Language;
@@ -5682,7 +5684,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var fileName = await _fileHelper.PickOpenFile(Window!, Se.Language.General.OpenImageBasedSubtitle, Se.Language.General.ImageBasedSubtitles, "*.sup;*.sub;*.ts;*.m2ts;*.mts;*.rec;*.mkv;*.mks;*.mp4;*.m4v;*.mov;*.3gp;*.avi;*.divx;*.xml;*.ttml;*.dfxp;*.vtt;*.webvtt",
+        var fileName = await _fileHelper.PickOpenFile(Window!, Se.Language.General.OpenImageBasedSubtitle, Se.Language.General.ImageBasedSubtitles, "*.sup;*.sub;*.ifo;*.vob;*.ts;*.m2ts;*.mts;*.rec;*.mkv;*.mks;*.mp4;*.m4v;*.mov;*.3gp;*.avi;*.divx;*.xml;*.ttml;*.dfxp;*.vtt;*.webvtt",
             Se.Language.General.AllFiles, "*.*");
         if (string.IsNullOrEmpty(fileName))
         {
@@ -23722,7 +23724,9 @@ public partial class MainViewModel :
         _ocrImageSourceHolder.Source = null;
         _ocrImageSourceHolder.FileName = null;
 
-        var ext = Path.GetExtension(fileName);
+        // Lower case: every check below compares with lower-case extensions, and DVD/Blu-ray rips
+        // are often upper case (MOVIE.SUP, 00001.M2TS) - those fell through to the text formats.
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
         var fileSize = (long)0;
         try
         {
@@ -23769,7 +23773,9 @@ public partial class MainViewModel :
                 // prompt below (a subtitle-less .mkv is still a video), matching the .mp4 path (#12171).
             }
 
-            if (ext == ".sup" && FileUtil.IsBluRaySup(fileName))
+            // by content too: a Blu-ray .sup saved as .sub fell through to the text formats
+            if ((ext == ".sup" && FileUtil.IsBluRaySup(fileName)) ||
+                (ext != ".sup" && fileSize > 13 && FileUtil.IsBluRaySupByContent(fileName)))
             {
                 var log = new StringBuilder();
                 var subtitles = BluRaySupParser.ParseBluRaySup(fileName, log);
@@ -23835,13 +23841,21 @@ public partial class MainViewModel :
                 return;
             }
 
+            // PSP UMD Video (.MPS) and PSP movies (.PMF), and ".subs" dumps of their subtitles
+            if ((ext == ".mps" || ext == ".pmf" || ext == ".subs") && fileSize > 100 && await ImportUmdVideoSubtitles(fileName, skipLoadVideo))
+            {
+                return;
+            }
+
             // A subtitle-only movie (e.g. AVFoundation writes tx3g-only .mov/.mp4 files)
             // can easily be under 2 KB, so the old 2000-byte floor misrouted those to the
             // text loader; a failed MP4 parse just falls through to the handlers below.
             if ((ext == ".mp4" || ext == ".m4v" || ext == ".3gp" || ext == ".mov" || ext == ".cmaf" || ext == ".m4a" || ext == ".m4b") &&
                 fileSize > 100 || ext == ".m4s")
             {
-                if (!new IsmtDfxp().IsMine(null, fileName))
+                // IsMine parses the whole file (up to 50 MB) - keep it off the UI thread
+                var isIsmt = await Task.Run(() => new IsmtDfxp().IsMine(null, fileName));
+                if (!isIsmt)
                 {
                     var ok = await ImportSubtitleFromMp4(fileName, skipLoadVideo);
                     if (ok)
@@ -23885,6 +23899,25 @@ public partial class MainViewModel :
                 }
             }
 
+            // A transport stream saved under another video extension (e.g. an HLS web rip
+            // renamed to .mp4 - the MP4 parse above finds nothing in it) used to end at the
+            // "open as video?" prompt, so its DVB/teletext/closed captions were never read.
+            if (FileUtil.IsTransportStreamWithOtherVideoExtension(fileName))
+            {
+                await ImportSubtitleFromTransportStream(fileName, skipLoadVideo);
+                return;
+            }
+
+            // DVD IFO: rip the subtitles of a title (program chain) from its VOB files
+            if ((ext == ".ifo" || ext == ".bup") && IfoParser.IsIfo(fileName))
+            {
+                if (await ImportSubtitleFromDvd(fileName, videoFileName, skipLoadVideo))
+                {
+                    SelectAndScrollToRow(0);
+                    return;
+                }
+            }
+
             if (FileUtil.IsVobSub(fileName) && ext == ".sub")
             {
                 var ok = await ImportSubtitleFromVobSubFile(fileName, videoFileName, skipLoadVideo);
@@ -23900,7 +23933,7 @@ public partial class MainViewModel :
             // (SPU) stream directly; a .vob without subtitles falls through to the video handling
             if (ext == ".vob" && FileUtil.IsVobSub(fileName))
             {
-                var ok = await ImportSubtitleFromVobSubFile(fileName, videoFileName, skipLoadVideo);
+                var ok = await ImportSubtitleFromVob(fileName, videoFileName, skipLoadVideo);
                 if (ok)
                 {
                     SelectAndScrollToRow(0);
@@ -23908,10 +23941,12 @@ public partial class MainViewModel :
                 }
             }
 
-            // DVD .vob / program stream .mpg: CEA-608 closed captions in the video (DVD Line 21
-            // captions, ATSC A/53, SCTE 20) - a .vob with subpictures was handled just above
-            if ((ext == ".vob" || ext == ".mpg" || ext == ".mpeg" || ext == ".m2p") && fileSize > 10000 &&
-                ProgramStreamClosedCaptionReader.IsProgramStream(fileName) &&
+            // DVD .vob / program stream .mpg / bare MPEG video .m2v: CEA-608 closed captions in the
+            // video (DVD Line 21 captions, ATSC A/53, SCTE 20) - a .vob with subpictures was handled
+            // just above
+            if (fileSize > 10000 &&
+                ((ext == ".vob" || ext == ".mpg" || ext == ".mpeg" || ext == ".m2p") && ProgramStreamClosedCaptionReader.IsProgramStream(fileName) ||
+                 (ext == ".m2v" || ext == ".m1v" || ext == ".mpv") && ProgramStreamClosedCaptionReader.IsVideoElementaryStream(fileName)) &&
                 await ImportClosedCaptionsFromProgramStream(fileName, skipLoadVideo))
             {
                 return;
@@ -23995,7 +24030,7 @@ public partial class MainViewModel :
             // Adobe Premiere project (gzipped xml): its text clips, as SE 4 opened them.
             if (ext == ".prproj")
             {
-                var prProjSubtitle = TryLoadPremiereProject(fileName);
+                var prProjSubtitle = NonRegisteredFormatLoader.TryLoadPremiereProject(fileName);
                 if (prProjSubtitle != null)
                 {
                     if (!skipLoadVideo)
@@ -24148,7 +24183,7 @@ public partial class MainViewModel :
                 // route through the BDN OCR import like batch convert already does for BDN.
                 if (ext == ".xml")
                 {
-                    var imageListSubtitle = TryLoadImageListXml(fileName);
+                    var imageListSubtitle = ImageListSubtitleLoader.TryLoadImageListXml(fileName);
                     if (imageListSubtitle != null)
                     {
                         ImportAndOcrDost(fileName, imageListSubtitle, skipLoadVideo);
@@ -24162,20 +24197,13 @@ public partial class MainViewModel :
                     return;
                 }
 
-                // PlayStation subs keep their png images inside the file.
-                if (ext == ".subs")
+                if (HdDvdSupParser.IsHdDvdSup(fileName))
                 {
-                    var playStationSubs = new PlayStationSubs();
-                    if (playStationSubs.IsMine(null, fileName))
-                    {
-                        var playStationSubtitle = new Subtitle();
-                        playStationSubs.LoadSubtitle(playStationSubtitle, null, fileName);
-                        ImportAndOcrBinaryParagraphList(fileName, playStationSubs, playStationSubtitle, skipLoadVideo);
-                        return;
-                    }
+                    ImportAndOcrHdDvdSup(fileName, skipLoadVideo);
+                    return;
                 }
 
-                subtitle = TryLoadAribB36(fileName);
+                subtitle = NonRegisteredFormatLoader.TryLoadAribB36(fileName);
 
                 if (subtitle == null)
                 {
@@ -24788,108 +24816,6 @@ public partial class MainViewModel :
         _subtitleMarksDirty = false;
     }
 
-    /// <summary>
-    /// Loads an image-list xml project (BDN xml, or a Final Cut Pro image xmeml where each
-    /// clipitem references a png) whose cues carry image file names for the OCR importer.
-    /// Returns null when the file is neither.
-    /// </summary>
-    private static Subtitle? TryLoadImageListXml(string fileName)
-    {
-        try
-        {
-            var lines = FileUtil.ReadAllLinesShared(fileName, LanguageAutoDetect.GetEncodingFromFile(fileName));
-
-            var bdnXml = new BdnXml();
-            if (bdnXml.IsMine(lines, fileName))
-            {
-                var subtitle = new Subtitle();
-                bdnXml.LoadSubtitle(subtitle, lines, fileName);
-                if (subtitle.Paragraphs.Count > 0)
-                {
-                    subtitle.OriginalFormat = bdnXml;
-                    return subtitle;
-                }
-            }
-
-            var timedImages = new TimedImagesXml();
-            if (timedImages.IsMine(lines, fileName))
-            {
-                var subtitle = new Subtitle();
-                timedImages.LoadSubtitle(subtitle, lines, fileName);
-                if (subtitle.Paragraphs.Count > 0)
-                {
-                    subtitle.OriginalFormat = timedImages;
-                    return subtitle;
-                }
-            }
-
-            // Cheap content gate first - FinalCutProImage has no fast IsMine of its own.
-            if (lines.Any(l => l.Contains("<xmeml", StringComparison.Ordinal)) &&
-                lines.Any(l => l.Contains("<pathurl>", StringComparison.Ordinal)))
-            {
-                var fcpImage = new FinalCutProImage();
-                var subtitle = new Subtitle();
-                fcpImage.LoadSubtitle(subtitle, lines, fileName);
-                if (subtitle.Paragraphs.Count > 0)
-                {
-                    subtitle.OriginalFormat = fcpImage;
-                    return subtitle;
-                }
-            }
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// ARIB STD-B36 caption files (.1hd, .2hd, .1sd, .2sd), as SE 4 opened them. Not one of the
-    /// binary formats: IsMine only looks at the extension and size, so the load decides.
-    /// </summary>
-    private static Subtitle? TryLoadAribB36(string fileName)
-    {
-        try
-        {
-            var arib = new AribB36();
-            if (!arib.IsMine(null, fileName))
-            {
-                return null;
-            }
-
-            var subtitle = new Subtitle();
-            arib.LoadSubtitle(subtitle, null, fileName);
-            subtitle.OriginalFormat = arib;
-            return subtitle.Paragraphs.Count > 0 ? subtitle : null;
-        }
-        catch
-        {
-            return null; // the parser indexes the page blocks without bounds checks
-        }
-    }
-
-    private static Subtitle? TryLoadPremiereProject(string fileName)
-    {
-        try
-        {
-            var xml = AdobePremierePrProj.LoadFromZipFile(fileName);
-            if (string.IsNullOrEmpty(xml))
-            {
-                return null;
-            }
-
-            var subtitle = new Subtitle();
-            new AdobePremierePrProj().LoadSubtitle(subtitle, xml.SplitToLines(), fileName);
-            return subtitle.Paragraphs.Count > 0 ? subtitle : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private void ImportAndOcrDost(string fileName, Subtitle subtitle, bool skipLoadVideo = false)
     {
         Dispatcher.UIThread.Post(async () =>
@@ -24934,6 +24860,65 @@ public partial class MainViewModel :
         Dispatcher.UIThread.Post(async () =>
         {
             var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeSpDvdSup(fileName); });
+
+            if (result.OkPressed)
+            {
+                await FinishOcrImportAsync(fileName, result.OcredSubtitle, skipLoadVideo: skipLoadVideo);
+            }
+        });
+    }
+
+    /// <summary>
+    /// PSP UMD Video subtitles: png images per sub-stream, picked when there are several, then OCR.
+    /// </summary>
+    /// <returns>True if subtitles were found (also when the track picker was cancelled)</returns>
+    private async Task<bool> ImportUmdVideoSubtitles(string fileName, bool skipLoadVideo)
+    {
+        ShowStatus(string.Format(Se.Language.General.ParsingXDotDotDot, fileName));
+        SortedDictionary<int, List<UmdVideoSubtitle>> tracks;
+        try
+        {
+            tracks = await Task.Run(() => UmdVideoSubtitleReader.Read(fileName));
+        }
+        catch (Exception e)
+        {
+            SeLogger.Error(e, "Error while reading PSP UMD Video subtitles from " + fileName);
+            return false;
+        }
+        finally
+        {
+            ShowStatus(string.Empty);
+        }
+
+        if (tracks.Count == 0)
+        {
+            return false;
+        }
+
+        var pictures = tracks.First().Value;
+        if (tracks.Count > 1)
+        {
+            var result = await ShowDialogAsync<PickTsTrackWindow, PickTsTrackViewModel>(vm => vm.InitializeUmdVideo(tracks, fileName));
+            if (!result.OkPressed || result.SelectedTrack == null || !tracks.TryGetValue(result.SelectedTrack.TrackNumber, out pictures))
+            {
+                return true; // picker cancelled
+            }
+        }
+
+        var ocrResult = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeUmdVideo(pictures, fileName); });
+        if (ocrResult.OkPressed)
+        {
+            await FinishOcrImportAsync(fileName, ocrResult.OcredSubtitle, skipLoadVideo: skipLoadVideo);
+        }
+
+        return true;
+    }
+
+    private void ImportAndOcrHdDvdSup(string fileName, bool skipLoadVideo = false)
+    {
+        Dispatcher.UIThread.Post(async () =>
+        {
+            var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeHdDvdSup(fileName); });
 
             if (result.OkPressed)
             {
@@ -25204,7 +25189,18 @@ public partial class MainViewModel :
 
     private async Task<bool> ImportSubtitleFromMp4(string fileName, bool skipLoadVideo = false)
     {
-        var mp4Parser = new MP4Parser(fileName);
+        // Parsing a multi-GB movie takes seconds from a cold disk cache - keep it off the UI thread
+        ShowStatus(string.Format(Se.Language.General.ParsingXDotDotDot, fileName));
+        MP4Parser mp4Parser;
+        try
+        {
+            mp4Parser = await Task.Run(() => new MP4Parser(fileName));
+        }
+        finally
+        {
+            ShowStatus(string.Empty);
+        }
+
         var mp4SubtitleTracks = mp4Parser.GetSubtitleTracks();
         if (mp4SubtitleTracks.Count == 0)
         {
@@ -26032,9 +26028,147 @@ public partial class MainViewModel :
         string idxFileName = Path.ChangeExtension(vobSubFileName, ".idx");
         vobSubParser.OpenSubIdx(vobSubFileName, idxFileName);
         var vobSubMergedPackList = vobSubParser.MergeVobSubPacks();
-        var palette = vobSubParser.IdxPalette;
         vobSubParser.VobSubPacks.Clear();
 
+        // Recover a stream's language code from the idx: Idx.cs formats language entries as
+        // "{LanguageName} ‎(0x{streamId:x})", parallel to IdxLanguageCodes.
+        string? GetLanguageCode(int streamId)
+        {
+            var languageMarker = $"(0x{streamId:x})";
+            var languageIndex = vobSubParser.IdxLanguages.FindIndex(l => l.Contains(languageMarker, StringComparison.OrdinalIgnoreCase));
+            return languageIndex >= 0 && languageIndex < vobSubParser.IdxLanguageCodes.Count
+                ? vobSubParser.IdxLanguageCodes[languageIndex]
+                : null;
+        }
+
+        return await ImportVobSubPacksWithOcr(vobSubMergedPackList, vobSubParser.IdxPalette, vobSubParser.IdxLanguages, GetLanguageCode, vobSubFileName, videoFileName, skipLoadVideo);
+    }
+
+    [RelayCommand]
+    private async Task ImportDvdSubtitles()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        await ImportSubtitleFromDvd(null, null, false);
+        _shortcutManager.ClearKeys();
+    }
+
+    /// <summary>
+    /// The "Import subtitles from DVD" window (optionally started with an IFO or VOB file): pick a
+    /// title, rip it, then pick the language and OCR it.
+    /// </summary>
+    private async Task<bool> ImportSubtitleFromDvd(string? fileName, string? videoFileName, bool skipLoadVideo)
+    {
+        var result = await ShowDialogAsync<ImportDvdWindow, ImportDvdViewModel>(vm => vm.Initialize(fileName));
+        if (!result.OkPressed)
+        {
+            return true; // the file was ours, the user just cancelled
+        }
+
+        // the file was ours even when the user cancels the language pick or the OCR
+        await ImportVobSubPacksWithOcr(result.MergedPacks, result.Palette, result.Languages, result.GetLanguageCode, result.FileName, videoFileName, skipLoadVideo);
+        return true;
+    }
+    /// <summary>
+    /// Opens a single DVD .vob. The PTS restarts are stitched from its NAV packs; palette, languages
+    /// and PAL/NTSC come from the title set's IFO when it is next to the VOB.
+    /// </summary>
+    private async Task<bool> ImportSubtitleFromVob(string vobFileName, string? videoFileName, bool skipLoadVideo)
+    {
+        var ifoFileName = IfoParser.GetIfoFileName(vobFileName);
+        var ifo = ifoFileName == null ? null : new IfoParser(ifoFileName);
+        if (ifo != null && ifo.Type != IfoParser.IfoType.VideoTitleSet)
+        {
+            ifo = null;
+        }
+
+        var vobFileNames = new List<string> { vobFileName };
+        var packs = await RipDvdSubtitlesAsync(vobFileNames, ifo?.IsPal ?? true,
+            (progress, cancellationToken) => DvdSubtitleRipper.Rip(vobFileNames, progress, cancellationToken));
+        if (packs.Count == 0)
+        {
+            return false;
+        }
+
+        return await ImportVobSubPacksWithOcr(packs, ifo?.Palette ?? new List<SkiaSharp.SKColor>(), ifo?.GetLanguages() ?? new List<string>(),
+            streamId => ifo?.GetLanguageCode(streamId), vobFileName, videoFileName, skipLoadVideo);
+    }
+
+    // below this a rip is over before a progress window would even have been drawn
+    private const long DvdRipProgressWindowMinSize = 25 * 1024 * 1024; // 25 MB
+
+    /// <summary>
+    /// Runs a DVD subtitle rip + pack merge on a background thread, with a progress window for
+    /// big inputs.
+    /// </summary>
+    private async Task<List<VobSubMergedPack>> RipDvdSubtitlesAsync(List<string> vobFileNames, bool isPal, Func<Action<long, long>, CancellationToken, List<VobSubPack>> rip)
+    {
+        long size = 0;
+        foreach (var fileName in vobFileNames)
+        {
+            try
+            {
+                size += new FileInfo(fileName).Length;
+            }
+            catch
+            {
+                // ignore - just means no size-based gating
+            }
+        }
+
+        PleaseWaitViewModel? pleaseWaitVm = null;
+        if (size >= DvdRipProgressWindowMinSize)
+        {
+            pleaseWaitVm = _windowService.ShowWindow<PleaseWaitWindow, PleaseWaitViewModel>(Window!);
+            pleaseWaitVm.StatusText = Se.Language.Main.ReadingDvdSubtitles;
+        }
+
+        ShowStatus(Se.Language.Main.ReadingDvdSubtitles);
+        var packCount = 0;
+        var encryptedPackCount = 0;
+        List<VobSubMergedPack> merged;
+        try
+        {
+            var vm = pleaseWaitVm;
+            merged = await Task.Run(() =>
+            {
+                var packs = rip((position, total) => vm?.ReportProgress(position, total), CancellationToken.None);
+                packCount = packs.Count;
+                encryptedPackCount = DvdSubtitleRipper.CountEncrypted(packs);
+                var parser = new VobSubParser(isPal);
+                parser.VobSubPacks.AddRange(packs);
+                return parser.MergeVobSubPacks();
+            });
+        }
+        finally
+        {
+            pleaseWaitVm?.Close();
+        }
+
+        // SE does not decrypt CSS - a VOB copied without decrypting gives garbled images
+        if (merged.Count > 0 && encryptedPackCount > 0)
+        {
+            var answer = await MessageBox.Show(Window!, Se.Language.General.Warning,
+                string.Format(Se.Language.File.Import.DvdEncryptedXOfY, encryptedPackCount, packCount),
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                return new List<VobSubMergedPack>();
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Picks a subpicture stream (language) when there is more than one, then OCRs it.
+    /// </summary>
+    private async Task<bool> ImportVobSubPacksWithOcr(List<VobSubMergedPack> vobSubMergedPackList, List<SkiaSharp.SKColor> palette, List<string> languages,
+        Func<int, string?> getLanguageCode, string fileName, string? videoFileName, bool skipLoadVideo)
+    {
         var languageStreamIds = new List<int>();
         var streamIdDictionary = new Dictionary<int, List<VobSubMergedPack>>();
         foreach (var pack in vobSubMergedPackList)
@@ -26063,7 +26197,7 @@ public partial class MainViewModel :
         if (languageStreamIds.Count > 1)
         {
             var pickResult = await ShowDialogAsync<PickVobSubLanguageWindow, PickVobSubLanguageViewModel>(
-                vm => vm.Initialize(streamIdDictionary, palette, vobSubParser.IdxLanguages, vobSubFileName));
+                vm => vm.Initialize(streamIdDictionary, palette, languages, fileName));
             if (!pickResult.OkPressed)
             {
                 return false;
@@ -26076,24 +26210,14 @@ public partial class MainViewModel :
             streamId = languageStreamIds.First();
         }
 
-        // Recover the picked stream's language code from the idx: Idx.cs formats language
-        // entries as "{LanguageName} ‎(0x{streamId:x})", parallel to IdxLanguageCodes.
-        string? languageCode = null;
-        var languageMarker = $"(0x{streamId:x})";
-        var languageIndex = vobSubParser.IdxLanguages.FindIndex(l => l.Contains(languageMarker, StringComparison.OrdinalIgnoreCase));
-        if (languageIndex >= 0 && languageIndex < vobSubParser.IdxLanguageCodes.Count)
-        {
-            languageCode = vobSubParser.IdxLanguageCodes[languageIndex];
-        }
-
-        var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.Initialize(streamIdDictionary[streamId], palette, vobSubFileName, languageCode); });
+        var languageCode = getLanguageCode(streamId);
+        var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.Initialize(streamIdDictionary[streamId], palette, fileName, languageCode); });
 
         if (result.OkPressed)
         {
-            await FinishOcrImportAsync(vobSubFileName, result.OcredSubtitle, videoFileName: videoFileName, skipLoadVideo: skipLoadVideo);
+            await FinishOcrImportAsync(fileName, result.OcredSubtitle, videoFileName: videoFileName, skipLoadVideo: skipLoadVideo);
             return true;
         }
-
         return false;
     }
 

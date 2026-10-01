@@ -10,6 +10,7 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.Interfaces;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
@@ -2321,6 +2322,11 @@ public partial class OcrViewModel : ObservableObject
     [RelayCommand]
     private void Ok()
     {
+        if (IsOcrRunning)
+        {
+            return; // Enter/Alt+O mid-run closed the window with a partial result while OCR kept running (#15500)
+        }
+
         // A just-finished OCR run may still have line texts in the coalesced UI queue.
         OcrUiUpdates.Flush();
 
@@ -5314,6 +5320,24 @@ public partial class OcrViewModel : ObservableObject
         _sourceFileName = fileName;
         Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleSpDvdSupImages(fileName);
+        SetOcrSubtitleItems();
+        AutoDetectSourceLanguage();
+    }
+
+    public void InitializeUmdVideo(List<UmdVideoSubtitle> pictures, string fileName)
+    {
+        _sourceFileName = fileName;
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
+        _ocrSubtitle = new OcrSubtitleUmdVideo(pictures);
+        SetOcrSubtitleItems();
+        AutoDetectSourceLanguage();
+    }
+
+    public void InitializeHdDvdSup(string fileName)
+    {
+        _sourceFileName = fileName;
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
+        _ocrSubtitle = new OcrSubtitleHdDvdSup(fileName);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
     }

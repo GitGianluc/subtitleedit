@@ -10,7 +10,9 @@ using Nikse.SubtitleEdit.UiLogic.AutoTranslate;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
+using Nikse.SubtitleEdit.Core.VobSub;
 using Nikse.SubtitleEdit.UiLogic.Translate;
 using Nikse.SubtitleEdit.Features.Assa;
 using Nikse.SubtitleEdit.Features.Edit.MultipleReplace;
@@ -37,6 +39,7 @@ using Nikse.SubtitleEdit.Logic.LlamaCpp;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 using Nikse.SubtitleEdit.Logic;
+using Nikse.SubtitleEdit.UiLogic.SubtitleLoading;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.UiLogic.BatchConvert;
@@ -1631,6 +1634,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         }
 
         if (item.Format == BatchConverter.FormatBluRaySup ||
+            item.Format == BatchConverter.FormatHdDvdSup ||
+            item.Format == BatchConverter.FormatUmdVideo ||
+            item.Format == BatchConverter.FormatDvdSup ||
             item.Format == BatchConverter.FormatBdnXml ||
             item.Format == BatchConverter.FormatVobSub)
         {
@@ -2288,9 +2294,18 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         Subtitle? subtitle = null;
         var format = Se.Language.General.Unknown;
-        if (ext == ".sup" && FileUtil.IsBluRaySup(fileName))
+        if ((ext == ".sup" && FileUtil.IsBluRaySup(fileName)) ||
+            (ext != ".sup" && fileInfo.Length > 13 && FileUtil.IsBluRaySupByContent(fileName))) // e.g. a .sup saved as .sub
         {
             format = BatchConverter.FormatBluRaySup;
+        }
+        else if (ext == ".sup" && HdDvdSupParser.IsHdDvdSup(fileName))
+        {
+            format = BatchConverter.FormatHdDvdSup;
+        }
+        else if (ext == ".sup" && FileUtil.IsSpDvdSup(fileName))
+        {
+            format = BatchConverter.FormatDvdSup;
         }
 
         if (ext == ".sub" && FileUtil.IsVobSub(fileName))
@@ -2309,6 +2324,15 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 format = BatchConverter.FormatBdnXml;
                 subtitle = bdnSubtitle;
             }
+        }
+
+        // A transport stream saved under another video extension (e.g. an HLS web rip named .mp4)
+        // - checked first, as the MP4/Matroska parsers below find nothing in it
+        if (FileUtil.IsTransportStreamWithOtherVideoExtension(fileName))
+        {
+            format = "Transport Stream";
+            added.Add(new BatchConvertItem(fileName, fileInfo.Length, format, subtitle));
+            return added;
         }
 
         if (ext == ".mkv" || ext == ".mks")
@@ -2390,6 +2414,21 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             }
 
             return added;
+        }
+        else if (ext == ".mps" || ext == ".pmf" || ext == ".subs")
+        {
+            // PSP UMD Video: one item per subtitle stream (sub-stream 0x80 = #1)
+            foreach (var track in UmdVideoSubtitleReader.Read(fileName))
+            {
+                var umdBatchItem = new BatchConvertItem(fileName, fileInfo.Length, BatchConverter.FormatUmdVideo, subtitle);
+                umdBatchItem.TrackNumber = track.Key.ToString(CultureInfo.InvariantCulture);
+                added.Add(umdBatchItem);
+            }
+
+            if (added.Count > 0)
+            {
+                return added;
+            }
         }
         else if ((ext == ".ts" || ext == ".m2ts" || ext == ".mts" || ext == ".mpg" || ext == ".mpeg") &&
                  (FileUtil.IsTransportStream(fileName) || FileUtil.IsM2TransportStream(fileName)))

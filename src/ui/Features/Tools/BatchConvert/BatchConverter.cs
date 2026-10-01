@@ -5,6 +5,7 @@ using Nikse.SubtitleEdit.Features.Assa.ResolutionResampler;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.Dictionaries;
 using Nikse.SubtitleEdit.Core.Enums;
@@ -56,10 +57,13 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
     public static readonly string FormatCavena890 = new Cavena890().Name;
     public const string FormatDCinemaInterop = "D-Cinema interop/png";
     public const string FormatDCinemaSmpte2014 = "D-Cinema SMPTE 2014/png";
+    public const string FormatDvdSup = "DVD sup";
     public const string FormatCustomTextFormat = "Custom text format";
     public static readonly string FormatDostImage = "DOST/image";
     public static readonly string FormatEbuStl = new Ebu().Name;
     public const string FormatFcpImage = "FCP/image";
+    public const string FormatHdDvdSup = "HD-DVD sup";
+    public const string FormatUmdVideo = "PSP UMD Video";
     public const string FormatImagesWithTimeCodesInFileName = "Images with time codes in file name";
     public static readonly string FormatPac = new Pac().Name;
     public static readonly string FormatPacUnicode = new PacUnicode().Name;
@@ -185,6 +189,24 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             var pcsData = BluRaySupParser.ParseBluRaySup(item.FileName, log);
             imageSubtitle = new OcrSubtitleBluRay(pcsData);
         }
+        else if (item.Format == FormatUmdVideo)
+        {
+            // one item per subtitle stream - TrackNumber is its sub-stream id
+            var tracks = UmdVideoSubtitleReader.Read(item.FileName);
+            if (int.TryParse(item.TrackNumber, NumberStyles.Integer, CultureInfo.InvariantCulture, out var subStreamId) &&
+                tracks.TryGetValue(subStreamId, out var pictures))
+            {
+                imageSubtitle = new OcrSubtitleUmdVideo(pictures);
+            }
+        }
+        else if (item.Format == FormatHdDvdSup)
+        {
+            imageSubtitle = new OcrSubtitleHdDvdSup(item.FileName);
+        }
+        else if (item.Format == FormatDvdSup)
+        {
+            imageSubtitle = new OcrSubtitleSpDvdSupImages(item.FileName);
+        }
         else if (item.Format == FormatBdnXml && item.Subtitle != null)
         {
             imageSubtitle = new OcrSubtitleBdn(item.Subtitle, item.FileName, false);
@@ -301,12 +323,8 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 }
             }
         }
-        else if ((item.FileName.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".m2ts", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".mts", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".mpg", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".mpeg", StringComparison.OrdinalIgnoreCase)) &&
-                 item.Format!.StartsWith("Transport Stream", StringComparison.Ordinal))
+        // no extension check - a transport stream can be named .mp4 (see AddFile)
+        else if (item.Format!.StartsWith("Transport Stream", StringComparison.Ordinal))
         {
             if (item.ImageSubtitle != null)
             {
