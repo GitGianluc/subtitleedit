@@ -78,6 +78,7 @@ using Nikse.SubtitleEdit.Features.Main.GridColumns;
 using Nikse.SubtitleEdit.Features.Main.Layout;
 using Nikse.SubtitleEdit.Features.Main.MainHelpers;
 using Nikse.SubtitleEdit.Features.Ocr;
+using Nikse.SubtitleEdit.Features.Options.Shortcuts.CustomShortcuts;
 using Nikse.SubtitleEdit.Features.Options.Language;
 using Nikse.SubtitleEdit.Features.Options.Plugins;
 using Nikse.SubtitleEdit.Features.Options.Settings;
@@ -11187,7 +11188,7 @@ public partial class MainViewModel :
 
             InitializeWaveformDisplayMode();
 
-            AudioVisualizer.ShotChanges = ShotChangesHelper.FromDisk(_videoFileName);
+            AudioVisualizer.ShotChanges = ShotChangesHelper.FromDisk(_videoFileName, _audioTrack?.FfIndex ?? -1);
             UpdateShotChangesListMenuItem();
             if (AudioVisualizer.ShotChanges.Count == 0)
             {
@@ -12587,6 +12588,7 @@ public partial class MainViewModel :
         }
 
         AudioVisualizer.ShotChanges = newShotChanges;
+        SaveShotChangesToDisk(newShotChanges);
 
         _updateAudioVisualizer = true;
     }
@@ -12622,6 +12624,7 @@ public partial class MainViewModel :
         }
 
         AudioVisualizer.ShotChanges = newShotChanges;
+        SaveShotChangesToDisk(newShotChanges);
 
         _updateAudioVisualizer = true;
     }
@@ -15649,6 +15652,19 @@ public partial class MainViewModel :
         return first < 0 ? selected : Subtitles.Skip(first);
     }
 
+    /// <summary>
+    /// The "keep gap if close" test: a gap counts as close when it is strictly below "minimum gap plus
+    /// one frame" (with half a millisecond of slack for whole-millisecond rounding). That is the
+    /// smallest on-frame gap at or above MinimumBetweenLines, which can be most of a frame above it
+    /// when the minimum is in milliseconds (24 ms at 59.94 fps: 33.4 ms; at 50 fps: 40 ms; 100 ms at
+    /// 23.976 fps: 125.1 ms) - a half-frame tolerance missed those, so the nudge clamped to
+    /// "neighbour + minimum" (off the frame grid) instead of carrying the neighbour along. A gap of
+    /// minimum + 1 frame (issue #15511: 3 frames with a 2-frame minimum) is not close, so walking
+    /// towards the neighbour still settles on the minimum.
+    /// </summary>
+    private static bool IsKeepGapClose(double gapToNeighbourMs, double minGapMs) =>
+        gapToNeighbourMs < minGapMs + FramesToMilliseconds(1) - 0.5;
+
     private void MoveStartByFrames(int frames, bool keepGapPrevIfClose)
     {
         var s = SelectedSubtitle;
@@ -15678,10 +15694,9 @@ public partial class MainViewModel :
         var prev = GetPreviousWorkingRow(idx);
         var prevGapMs = 0.0;
         var prevIsClose = false;
-        var oneFrameMsStart = FramesToMilliseconds(1);
         if (keepGapPrevIfClose && prev != null
             && prev.EndTime.TotalMilliseconds <= s.StartTime.TotalMilliseconds
-            && prev.EndTime.TotalMilliseconds + gapMs + oneFrameMsStart >= s.StartTime.TotalMilliseconds)
+            && IsKeepGapClose(s.StartTime.TotalMilliseconds - prev.EndTime.TotalMilliseconds, gapMs))
         {
             prevIsClose = true;
             prevGapMs = s.StartTime.TotalMilliseconds - prev.EndTime.TotalMilliseconds;
@@ -15752,10 +15767,9 @@ public partial class MainViewModel :
         var next = GetNextWorkingRow(idx);
         var nextGapMs = 0.0;
         var nextIsClose = false;
-        var oneFrameMsEnd = FramesToMilliseconds(1);
         if (keepGapNextIfClose && next != null
             && s.EndTime.TotalMilliseconds <= next.StartTime.TotalMilliseconds
-            && s.EndTime.TotalMilliseconds + gapMs + oneFrameMsEnd >= next.StartTime.TotalMilliseconds)
+            && IsKeepGapClose(next.StartTime.TotalMilliseconds - s.EndTime.TotalMilliseconds, gapMs))
         {
             nextIsClose = true;
             nextGapMs = next.StartTime.TotalMilliseconds - s.EndTime.TotalMilliseconds;
@@ -16660,7 +16674,173 @@ public partial class MainViewModel :
         _colorService.RemoveColorTags(selectedItems, GetUpdateSubtitle(), SelectedSubtitleFormat);
     }
 
-    private void SurroundWith(string surroundLeft, string surroundRight)
+    private bool _isRunningCustomShortcut;
+
+    [RelayCommand]
+    private Task CustomShortcut1()
+    {
+        return RunCustomShortcut(1);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut2()
+    {
+        return RunCustomShortcut(2);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut3()
+    {
+        return RunCustomShortcut(3);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut4()
+    {
+        return RunCustomShortcut(4);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut5()
+    {
+        return RunCustomShortcut(5);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut6()
+    {
+        return RunCustomShortcut(6);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut7()
+    {
+        return RunCustomShortcut(7);
+    }
+
+    [RelayCommand]
+    private Task CustomShortcut8()
+    {
+        return RunCustomShortcut(8);
+    }
+
+    /// <summary>
+    /// Runs the steps of a custom shortcut in order. Commands that open a dialog are awaited, so
+    /// the next step runs after the dialog closes. The text changes of the whole run become a
+    /// single undo step.
+    /// </summary>
+    private async Task RunCustomShortcut(int slotNumber)
+    {
+        var custom = Se.Settings.GetCustomShortcut(slotNumber);
+        if (custom.Steps.Count == 0 || _isRunningCustomShortcut)
+        {
+            return;
+        }
+
+        _isRunningCustomShortcut = true;
+        _undoRedoManager.CheckForChanges(null);
+        _undoRedoManager.StopChangeDetection();
+
+        // Suspend as well as stop: commands run as steps (e.g. via RunWithoutChangeDetection)
+        // restart detection in their own finally, which would split the run into several undo steps.
+        _undoRedoManager.SuspendChangeDetection();
+        try
+        {
+            Dictionary<string, IRelayCommand>? commands = null;
+            foreach (var step in custom.Steps.ToList())
+            {
+                switch (step.GetStepType())
+                {
+                    case CustomShortcutStepType.InsertText:
+                        CustomShortcutInsertText(step);
+                        break;
+                    case CustomShortcutStepType.Replace:
+                        CustomShortcutReplace(step);
+                        break;
+                    default:
+                        commands ??= ShortcutsMain.GetCommandsForCustomShortcuts(this)
+                            .GroupBy(p => p.Name)
+                            .ToDictionary(g => g.Key, g => g.First().RelayCommand);
+                        if (commands.TryGetValue(step.ActionName, out var command))
+                        {
+                            await ExecuteCommandAndWait(command);
+
+                            // Focus (and some other UI) changes are posted to the dispatcher - let
+                            // them land so the next step sees e.g. the newly focused control.
+                            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+                        }
+
+                        break;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Se.LogError(exception, "Custom shortcut " + slotNumber + " failed: " + custom.Name);
+        }
+        finally
+        {
+            _undoRedoManager.ResumeChangeDetection();
+            _undoRedoManager.StartChangeDetection();
+            _isRunningCustomShortcut = false;
+        }
+
+        _updateAudioVisualizer = true;
+    }
+
+    private static async Task ExecuteCommandAndWait(IRelayCommand command)
+    {
+        if (!command.CanExecute(null))
+        {
+            return;
+        }
+
+        if (command is IAsyncRelayCommand asyncCommand)
+        {
+            await asyncCommand.ExecuteAsync(null);
+        }
+        else
+        {
+            command.Execute(null);
+        }
+    }
+
+    private void CustomShortcutInsertText(SeCustomShortcutStep step)
+    {
+        var selectedItems = GetSelectedEditableSubtitles();
+        if (selectedItems.Count == 0 || string.IsNullOrEmpty(step.Text))
+        {
+            return;
+        }
+
+        var position = step.GetPosition();
+        if (position == CustomShortcutInsertPosition.Cursor)
+        {
+            var tb = GetFocusedTextBoxWrapper() ?? EditTextBox;
+            if (!tb.IsReadOnly)
+            {
+                tb.SelectedText = CustomShortcutText.NormalizeNewLines(step.Text);
+                tb.SelectionLength = 0;
+            }
+
+            return;
+        }
+
+        foreach (var item in selectedItems)
+        {
+            item.Text = CustomShortcutText.Insert(item.Text, step.Text, position);
+        }
+    }
+
+    private void CustomShortcutReplace(SeCustomShortcutStep step)
+    {
+        foreach (var item in GetSelectedEditableSubtitles())
+        {
+            item.Text = CustomShortcutText.Replace(item.Text, step);
+        }
+    }
+
+    private void SurroundWith(string surroundLeft, string surroundRight, SurroundWithBehavior behavior, SurroundWithScope scope)
     {
         var selectedItems = GetSelectedEditableSubtitles();
         if (selectedItems.Count == 0)
@@ -16669,30 +16849,29 @@ public partial class MainViewModel :
         }
 
         // Only surround the selected text when editing a single line with part of the text
-        // selected - like SE 4 does (#12873).
-        if (selectedItems.Count == 1 && SurroundTextBoxSelection(surroundLeft, surroundRight))
+        // selected - like SE 4 does (#12873). "Each line" always works on the whole text, line by line.
+        if (scope == SurroundWithScope.SelectionOrText &&
+            selectedItems.Count == 1 &&
+            SurroundTextBoxSelection(surroundLeft, surroundRight, behavior))
         {
             _updateAudioVisualizer = true;
             return;
         }
 
-        var first = selectedItems.First();
-        first.Text = Utilities.ToggleSymbols(surroundLeft, first.Text, surroundRight, out var added);
-
-        foreach (var item in selectedItems.Skip(1))
+        var newTexts = TextBoxSurroundToggler.ApplyToTexts(
+            behavior, scope, surroundLeft, selectedItems.Select(p => p.Text), surroundRight);
+        for (var i = 0; i < selectedItems.Count; i++)
         {
-            item.Text = added
-                ? Utilities.AddSymbols(surroundLeft, item.Text, surroundRight)
-                : Utilities.RemoveSymbols(surroundLeft, item.Text, surroundRight);
+            selectedItems[i].Text = newTexts[i];
         }
 
         _updateAudioVisualizer = true;
     }
 
-    private bool SurroundTextBoxSelection(string surroundLeft, string surroundRight)
+    private bool SurroundTextBoxSelection(string surroundLeft, string surroundRight, SurroundWithBehavior behavior)
     {
         var tb = GetFocusedTextBoxWrapper();
-        return tb != null && TextBoxSurroundToggler.ToggleSelection(tb, surroundLeft, surroundRight);
+        return tb != null && TextBoxSurroundToggler.ToggleSelection(tb, surroundLeft, surroundRight, behavior);
     }
 
     [RelayCommand]
@@ -16745,7 +16924,11 @@ public partial class MainViewModel :
 
     private void SurroundWithSlot(int slotNumber)
     {
-        SurroundWith(Se.Settings.GetSurroundLeft(slotNumber), Se.Settings.GetSurroundRight(slotNumber));
+        SurroundWith(
+            Se.Settings.GetSurroundLeft(slotNumber),
+            Se.Settings.GetSurroundRight(slotNumber),
+            Se.Settings.GetSurroundBehavior(slotNumber),
+            Se.Settings.GetSurroundScope(slotNumber));
     }
 
     /// <summary>
@@ -19782,6 +19965,69 @@ public partial class MainViewModel :
         FocusEditTextBox();
     }
 
+    // Fixed-target focus commands (unlike the "toggle focus" ones), so a custom shortcut step
+    // always lands in the same place.
+    [RelayCommand]
+    private void FocusSubtitleListView()
+    {
+        FocusSubtitleGrid();
+    }
+
+    [RelayCommand]
+    private void FocusWaveform()
+    {
+        FocusAudioVisualizer();
+    }
+
+    [RelayCommand]
+    private void TextBoxGoToStart()
+    {
+        TextBoxMoveCaret(toEnd: false);
+    }
+
+    [RelayCommand]
+    private void TextBoxGoToEnd()
+    {
+        TextBoxMoveCaret(toEnd: true);
+    }
+
+    /// <summary>
+    /// Puts the caret at the start/end of the focused text box (original or main), focusing the
+    /// main text box first when neither has focus - so it also works from the list view.
+    /// </summary>
+    private void TextBoxMoveCaret(bool toEnd)
+    {
+        var tb = GetFocusedTextBoxWrapper() ?? EditTextBox;
+        void MoveCaret()
+        {
+            tb.ClearSelection();
+            tb.CaretIndex = toEnd ? tb.Text?.Length ?? 0 : 0;
+        }
+
+        if (tb.IsFocused)
+        {
+            MoveCaret();
+            return;
+        }
+
+        // Gaining focus can select or reposition text, so place the caret again once it settled.
+        ActivateWindow(Window);
+        tb.Focus();
+        MoveCaret();
+        Dispatcher.UIThread.Post(MoveCaret, DispatcherPriority.Background);
+    }
+
+    [RelayCommand]
+    private void FocusOriginalTextBox()
+    {
+        if (!ShowColumnOriginalText)
+        {
+            return;
+        }
+
+        FocusEditTextBox(true);
+    }
+
     [RelayCommand]
     private void WaveformInsertAtPositionNoFocusTextBox()
     {
@@ -20506,7 +20752,9 @@ public partial class MainViewModel :
             return;
         }
 
-        var upDown = new MoveWordUpDown(lines[0].Trim(), lines[1].Trim());
+        // The user places the line break by hand here, so no auto-break: re-breaking an
+        // over-long line rebalanced the text and undid the move (issue #15496).
+        var upDown = new MoveWordUpDown(lines[0].Trim(), lines[1].Trim()) { AutoBreak = false };
         if (up)
         {
             upDown.MoveWordUp();
@@ -20516,7 +20764,9 @@ public partial class MainViewModel :
             upDown.MoveWordDown();
         }
 
-        SetWordMoveText(s, original, JoinAndCapAtTwoLines(upDown.S1, upDown.S2));
+        // Trim like SE 4: once the last word has moved down, line 1 is empty and the text
+        // collapses to one line, so the next press starts the cycle over.
+        SetWordMoveText(s, original, (upDown.S1 + Environment.NewLine + upDown.S2).Trim());
 
         _updateAudioVisualizer = true;
     }
@@ -20752,17 +21002,6 @@ public partial class MainViewModel :
         }
 
         return lines;
-    }
-
-    private string JoinAndCapAtTwoLines(string s1, string s2)
-    {
-        var result = s1 + Environment.NewLine + s2;
-        if (result.SplitToLines().Count > 2)
-        {
-            result = Utilities.AutoBreakLine(Utilities.UnbreakLine(result), GetDetectedLanguageCode());
-        }
-
-        return result;
     }
 
     [RelayCommand]
@@ -24973,6 +25212,27 @@ public partial class MainViewModel :
         });
     }
 
+    /// <summary>
+    /// Shot changes are kept per video on disk and reloaded with it, so every edit must be written
+    /// back - otherwise it is silently lost the next time the video is opened.
+    /// </summary>
+    private void SaveShotChangesToDisk(List<double> shotChanges)
+    {
+        if (string.IsNullOrEmpty(_videoFileName))
+        {
+            return;
+        }
+
+        if (shotChanges.Count == 0)
+        {
+            ShotChangesHelper.DeleteShotChanges(_videoFileName, _audioTrack?.FfIndex ?? -1);
+        }
+        else
+        {
+            ShotChangesHelper.SaveShotChanges(_videoFileName, shotChanges, _audioTrack?.FfIndex ?? -1);
+        }
+    }
+
     private void RemoveShotChange(int idx)
     {
         if (AudioVisualizer == null || AudioVisualizer.ShotChanges == null)
@@ -27076,6 +27336,13 @@ public partial class MainViewModel :
             }
         }
 
+        // A name taken from the video drops the language tag of the loaded "movie.da.ass", so
+        // converting it to SubRip suggested "movie.srt" instead of "movie.da.srt" (#15530).
+        if (string.IsNullOrEmpty(_saveAsFileNameSuggestion) && !string.IsNullOrEmpty(_subtitleFileName))
+        {
+            newFileName = KeepSubtitleLanguageSuffix(newFileName, GetFileNameWithoutExtension(_subtitleFileName), Se.Settings.General.SaveAsAppendLanguageCode);
+        }
+
         newFileName = AppendLanguageCodeToFileName(newFileName, GetUpdateSubtitle());
 
         newFileName = ApplyDefaultSaveLocation(newFileName);
@@ -27199,6 +27466,50 @@ public partial class MainViewModel :
         }
 
         return string.IsNullOrEmpty(folder) ? fileName : Path.Combine(folder, Path.GetFileName(fileName));
+    }
+
+    /// <summary>
+    /// When the "Save as" suggestion is the video name and the loaded subtitle is that name plus a
+    /// language tag ("movie" vs "movie.da" or "movie.da.forced"), appends that tag so the
+    /// tag survives a format change. The suggestion's folder is kept. Otherwise returns the
+    /// suggestion unchanged. Both names are without extension.
+    /// When "Save as" appends a language code anyway (<paramref name="saveAsAppendLanguageCode"/> is
+    /// not None), the old tag is not kept: the appended code would follow it ("movie.da.forced.da",
+    /// or "movie.en.da" for a translation).
+    /// </summary>
+    internal static string KeepSubtitleLanguageSuffix(string suggestion, string subtitleFileNameWithoutExtension, string? saveAsAppendLanguageCode = nameof(SaveAsLanguageAppendType.None))
+    {
+        if (string.IsNullOrEmpty(suggestion) || string.IsNullOrEmpty(subtitleFileNameWithoutExtension) ||
+            (!string.IsNullOrEmpty(saveAsAppendLanguageCode) && saveAsAppendLanguageCode != nameof(SaveAsLanguageAppendType.None)))
+        {
+            return suggestion;
+        }
+
+        // Compared by file name: the subtitle may sit in another folder than the video.
+        var prefix = Path.GetFileName(suggestion) + ".";
+        var subtitleName = Path.GetFileName(subtitleFileNameWithoutExtension);
+        if (prefix.Length == 1 ||
+            !subtitleName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            subtitleName.Length == prefix.Length)
+        {
+            return suggestion;
+        }
+
+        var suffix = subtitleName.Substring(prefix.Length);
+        var token = suffix.Split('.')[0];
+        var dash = token.IndexOfAny(new[] { '-', '_' });
+        if (dash > 0)
+        {
+            token = token.Substring(0, dash); // "pt-BR", "zh_Hans"
+        }
+
+        var isLanguage = Iso639Dash2LanguageCode.List.Any(l =>
+            string.Equals(l.TwoLetterCode, token, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(l.ThreeLetterCode, token, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(l.BibliographicCode, token, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(l.EnglishName, token, StringComparison.OrdinalIgnoreCase));
+
+        return isLanguage ? suggestion + "." + suffix : suggestion;
     }
 
     private string GetFileNameWithoutExtension(string fileName)
@@ -27779,16 +28090,27 @@ public partial class MainViewModel :
                     // windows so a dialog (or any window the user focused on purpose) keeps the
                     // foreground, and skipped while a modal dialog is open (#13405) or the main
                     // window is minimized, where Activate() would misfire.
+                    //
+                    // Never pull focus away from where the user already put it during that second:
+                    // typing in the text box, or navigating the menu bar, must not be yanked over
+                    // to the grid mid-keystroke.
+                    var userHoldsFocus = IsTextInputFocused() || IsMainMenuFocused() || Menu is { IsOpen: true };
                     if (Window.IsActive)
                     {
-                        TableViewExtras.FocusRow(SubtitleGrid);
+                        if (!userHoldsFocus)
+                        {
+                            TableViewExtras.FocusRow(SubtitleGrid);
+                        }
                     }
                     else if (IsUndockedWindowActive() &&
                              !WindowService.IsModalDialogOpen &&
                              Window.WindowState != WindowState.Minimized)
                     {
                         Window.Activate();
-                        TableViewExtras.FocusRow(SubtitleGrid);
+                        if (!userHoldsFocus)
+                        {
+                            TableViewExtras.FocusRow(SubtitleGrid);
+                        }
                     }
 
                     UpdateSurroundWithMenuItems();
@@ -28137,7 +28459,7 @@ public partial class MainViewModel :
             spectrogramFileName,
             wavePeaks,
             TryLoadCachedSpectrogram(spectrogramFileName),
-            ShotChangesHelper.FromDisk(videoFileName));
+            ShotChangesHelper.FromDisk(videoFileName, trackNumber));
     }
 
     private void ShowClickToGenerateWaveformHint()
@@ -31636,8 +31958,10 @@ public partial class MainViewModel :
                                          (keyEventArgs.KeyModifiers == KeyModifiers.Shift && !NonTypingEditKeys.Contains(key));
                     // Space always types in a text input, even with "allow single-letter shortcuts
                     // in text box" on: bare Space is the default play/pause shortcut, so the option
-                    // made it impossible to type a space (#15028).
-                    if (key == Key.Space && isBareKeyChord)
+                    // made it impossible to type a space (#15028). Only bare Space - Shift+Space has
+                    // no default binding, so it follows the option like Shift+<letter> does and
+                    // stays usable as a user-assigned shortcut (#14990, #15519).
+                    if (key == Key.Space && keyEventArgs.KeyModifiers == KeyModifiers.None)
                     {
                         return;
                     }
@@ -33286,7 +33610,11 @@ public partial class MainViewModel :
                         // wheels through the waveform, keep selecting the line under the centered cursor.
                         // Only react to position *changes* — otherwise this would immediately steal back
                         // the selection when the user picks a different line in the grid while paused.
+                        // Opt-in (default off, like SE 4 which never selected while paused): scrubbing
+                        // backwards would otherwise steal the selection to the previous line, so the
+                        // current line's start can't be pulled back to the cursor (#15513).
                         if (WaveformCenter && Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused &&
+                            Se.Settings.Waveform.SelectCurrentSubtitleWhilePaused &&
                             SelectCurrentSubtitleWhilePlaying &&
                             Math.Abs(mediaPlayerSeconds - _pausedSelectLastSeconds) > 0.001)
                         {

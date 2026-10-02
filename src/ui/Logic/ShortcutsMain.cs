@@ -642,6 +642,14 @@ public static class ShortcutsMain
         { nameof(MainViewModel.SurroundWith6Command), GetSurroundWithTitle(6) },
         { nameof(MainViewModel.SurroundWith7Command), GetSurroundWithTitle(7) },
         { nameof(MainViewModel.SurroundWith8Command), GetSurroundWithTitle(8) },
+        { nameof(MainViewModel.CustomShortcut1Command), GetCustomShortcutTitle(1) },
+        { nameof(MainViewModel.CustomShortcut2Command), GetCustomShortcutTitle(2) },
+        { nameof(MainViewModel.CustomShortcut3Command), GetCustomShortcutTitle(3) },
+        { nameof(MainViewModel.CustomShortcut4Command), GetCustomShortcutTitle(4) },
+        { nameof(MainViewModel.CustomShortcut5Command), GetCustomShortcutTitle(5) },
+        { nameof(MainViewModel.CustomShortcut6Command), GetCustomShortcutTitle(6) },
+        { nameof(MainViewModel.CustomShortcut7Command), GetCustomShortcutTitle(7) },
+        { nameof(MainViewModel.CustomShortcut8Command), GetCustomShortcutTitle(8) },
         { nameof(MainViewModel.InsertLineBeforeCommand), Se.Language.General.InsertBefore },
         { nameof(MainViewModel.InsertLineAfterCommand), Se.Language.General.InsertAfter },
         { nameof(MainViewModel.WaveformInsertNewSelectionCommand), Se.Language.Options.Shortcuts.WaveformInsertNewSelection },
@@ -679,6 +687,11 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ShowSubtitleFormatPickerCommand), Se.Language.Options.Shortcuts.ChooseSubtitleFormat },
         { nameof(MainViewModel.TrimWhitespaceSelectedLinesCommand), Se.Language.Options.Shortcuts.TrimWhitespaceSelectedLines },
         { nameof(MainViewModel.FocusTextBoxCommand), Se.Language.Options.Shortcuts.FocusTextBox },
+        { nameof(MainViewModel.FocusSubtitleListViewCommand), Se.Language.Options.Shortcuts.FocusSubtitleListView },
+        { nameof(MainViewModel.FocusWaveformCommand), Se.Language.Options.Shortcuts.FocusWaveform },
+        { nameof(MainViewModel.FocusOriginalTextBoxCommand), Se.Language.Options.Shortcuts.FocusOriginalTextBox },
+        { nameof(MainViewModel.TextBoxGoToStartCommand), Se.Language.Options.Shortcuts.TextBoxGoToStart },
+        { nameof(MainViewModel.TextBoxGoToEndCommand), Se.Language.Options.Shortcuts.TextBoxGoToEnd },
         { nameof(MainViewModel.SortByNumberCommand), Se.Language.Options.Shortcuts.SortByNumber },
         { nameof(MainViewModel.SortByStartTimeCommand), Se.Language.Options.Shortcuts.SortByStartTime },
         { nameof(MainViewModel.SortByEndTimeCommand), Se.Language.Options.Shortcuts.SortByEndTime },
@@ -721,6 +734,40 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ToggleSubtitlesOnVideoPlayerCommand), Se.Language.Video.ToggleSubtitlesOnVideoPlayer },
         { nameof(MainViewModel.ToggleSmpteTimingCommand), Se.Language.Main.Menu.SmpteTiming },
     };
+    }
+
+    /// <summary>
+    /// The commands a custom shortcut step can run: every shortcut command except the custom
+    /// shortcuts themselves, so one custom shortcut can never start another (or itself).
+    /// </summary>
+    public static List<AvailableShortcut> GetCommandsForCustomShortcuts(MainViewModel vm)
+    {
+        return GetAllAvailableShortcuts(vm)
+            .Where(p => p.Group != ShortcutGroup.Custom)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Display name for a custom shortcut slot: the slot number, plus the user's name for it.
+    /// </summary>
+    public static string GetCustomShortcutTitle(int slotNumber)
+    {
+        return GetCustomShortcutTitle(slotNumber, Se.Settings.GetCustomShortcut(slotNumber).Name);
+    }
+
+    public static string GetCustomShortcutTitle(int slotNumber, string? name)
+    {
+        var language = Se.Language.Options.Shortcuts;
+        return string.IsNullOrWhiteSpace(name)
+            ? string.Format(language.CustomShortcutNumberX, slotNumber)
+            : string.Format(language.CustomShortcutNumberXY, slotNumber, name.Trim());
+    }
+
+    public static string GetCommandDisplayName(string actionName)
+    {
+        return CommandTranslationLookup.TryGetValue(actionName, out var displayName)
+            ? displayName
+            : actionName;
     }
 
     private static List<AvailableShortcut> GetAllAvailableShortcuts(MainViewModel vm)
@@ -1167,6 +1214,11 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ShowSubtitleFormatPickerCommand, nameof(vm.ShowSubtitleFormatPickerCommand), ShortcutCategory.General, ShortcutGroup.File);
         AddShortcut(shortcuts, vm.TrimWhitespaceSelectedLinesCommand, nameof(vm.TrimWhitespaceSelectedLinesCommand), ShortcutCategory.SubtitleGrid);
         AddShortcut(shortcuts, vm.FocusTextBoxCommand, nameof(vm.FocusTextBoxCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.FocusSubtitleListViewCommand, nameof(vm.FocusSubtitleListViewCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.FocusWaveformCommand, nameof(vm.FocusWaveformCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.FocusOriginalTextBoxCommand, nameof(vm.FocusOriginalTextBoxCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.TextBoxGoToStartCommand, nameof(vm.TextBoxGoToStartCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.TextBoxGoToEndCommand, nameof(vm.TextBoxGoToEndCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.SortByNumberCommand, nameof(vm.SortByNumberCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.SortByStartTimeCommand, nameof(vm.SortByStartTimeCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.SortByEndTimeCommand, nameof(vm.SortByEndTimeCommand), ShortcutCategory.General);
@@ -1218,6 +1270,17 @@ public static class ShortcutsMain
             CommandTranslationLookup[entry.ActionName] = entry.Plugin.Manifest.Name;
             AddShortcut(shortcuts, entry.Command, entry.ActionName, ShortcutCategory.General, ShortcutGroup.Plugins);
         }
+
+        // User-built shortcut slots: steps run by MainViewModel.RunCustomShortcut. The user picks
+        // where each one is active, unlike the built-in commands whose area is fixed.
+        AddShortcut(shortcuts, vm.CustomShortcut1Command, nameof(vm.CustomShortcut1Command), Se.Settings.GetCustomShortcut(1).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut2Command, nameof(vm.CustomShortcut2Command), Se.Settings.GetCustomShortcut(2).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut3Command, nameof(vm.CustomShortcut3Command), Se.Settings.GetCustomShortcut(3).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut4Command, nameof(vm.CustomShortcut4Command), Se.Settings.GetCustomShortcut(4).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut5Command, nameof(vm.CustomShortcut5Command), Se.Settings.GetCustomShortcut(5).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut6Command, nameof(vm.CustomShortcut6Command), Se.Settings.GetCustomShortcut(6).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut7Command, nameof(vm.CustomShortcut7Command), Se.Settings.GetCustomShortcut(7).GetActiveIn(), ShortcutGroup.Custom);
+        AddShortcut(shortcuts, vm.CustomShortcut8Command, nameof(vm.CustomShortcut8Command), Se.Settings.GetCustomShortcut(8).GetActiveIn(), ShortcutGroup.Custom);
 
         return shortcuts;
     }

@@ -1039,7 +1039,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// was the crispasr v0.8.29 GPU packages, built with AVX-512 against a CI runner that had it
     /// (CrispASR #374) - every CPU without AVX-512 got this on the CUDA/Vulkan build while the CPU
     /// build ran fine, so naming the installed package is most of the answer. That build flaw is
-    /// fixed from v0.8.30 (SE now pins v0.8.39), but the message still earns its keep: a pre-AVX2 CPU
+    /// fixed from v0.8.30 (SE now pins v0.8.40), but the message still earns its keep: a pre-AVX2 CPU
     /// hits the same silent death on the AVX2 CPU package, and an install predating the pin bump
     /// keeps the broken GPU binary until the user downloads the engine again.
     /// </summary>
@@ -3262,11 +3262,38 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
     }
 
-    private static bool IsModelEnglishOnly(WhisperModel model)
+    /// <summary>
+    /// Crisp ASR Parakeet models trained on English only. They ignore any other language and
+    /// still output English - Phonon-2 with a warning in the log, the NVIDIA ones silently.
+    /// </summary>
+    private static readonly string[] EnglishOnlyParakeetPrefixes =
+    {
+        "phonon2-",
+        "parakeet-tdt-0.6b-v2",
+        "parakeet-tdt-1.1b",
+        "parakeet-rnnt-",
+        "parakeet-tdt_ctc-",
+    };
+
+    /// <summary>
+    /// Whether to ask before running an English-only model with <paramref name="languageCode"/>.
+    /// Auto detect is left alone: the engines simply transcribe English then (crispasr skips
+    /// language detection for an English-only model), so nothing is lost.
+    /// </summary>
+    internal static bool ShouldWarnEnglishOnlyModel(WhisperModel model, string languageCode)
+    {
+        return languageCode != "en" && languageCode != "auto" && IsModelEnglishOnly(model);
+    }
+
+    /// <summary>
+    /// Models that only transcribe English.
+    /// </summary>
+    internal static bool IsModelEnglishOnly(WhisperModel model)
     {
         return model.Name.EndsWith(".en", StringComparison.InvariantCulture) ||
                model.Name == "distil-large-v2" ||
-               model.Name == "distil-large-v3";
+               model.Name == "distil-large-v3" ||
+               EnglishOnlyParakeetPrefixes.Any(p => model.Name.StartsWith(p, StringComparison.Ordinal));
     }
 
     [RelayCommand]
@@ -4090,7 +4117,7 @@ public partial class SpeechToTextViewModel : ObservableObject
                 return;
             }
 
-            if (language.Code != "en" && IsModelEnglishOnly(model.Model))
+            if (ShouldWarnEnglishOnlyModel(model.Model, language.Code))
             {
                 var answer = await MessageBox.Show(
                     Window!,

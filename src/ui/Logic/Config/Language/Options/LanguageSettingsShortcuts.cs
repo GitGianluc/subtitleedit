@@ -14,6 +14,28 @@ public class LanguageSettingsShortcuts
     public string CategoryVideo { get; set; }
     public string CategorySync { get; set; }
     public string CategoryAi { get; set; }
+    public string CategoryCustom { get; set; }
+    public string EditCustomShortcut { get; set; }
+    public string CustomShortcutTextBoxKeyHint { get; set; }
+    public string CustomShortcutNumberX { get; set; }
+    public string CustomShortcutNumberXY { get; set; }
+    public string CustomShortcutStep { get; set; }
+    public string CustomShortcutSteps { get; set; }
+    public string CustomShortcutStepRunCommand { get; set; }
+    public string CustomShortcutStepInsertText { get; set; }
+    public string CustomShortcutStepReplace { get; set; }
+    public string CustomShortcutInsertAtCursor { get; set; }
+    public string CustomShortcutInsertAtStart { get; set; }
+    public string CustomShortcutInsertAtEnd { get; set; }
+    public string CustomShortcutSummaryRunCommandX { get; set; }
+    public string CustomShortcutSummaryInsertXY { get; set; }
+    public string CustomShortcutSummaryReplaceXY { get; set; }
+    public string CustomShortcutSummaryReplaceRegexXY { get; set; }
+    public string CustomShortcutPickCommand { get; set; }
+    public string CustomShortcutEnterText { get; set; }
+    public string CustomShortcutEnterFind { get; set; }
+    public string CustomShortcutInvalidRegexX { get; set; }
+    public string CustomShortcutStepsHint { get; set; }
     public string ActiveIn { get; set; }
     public string ActiveInEverywhere { get; set; }
 
@@ -208,6 +230,13 @@ public class LanguageSettingsShortcuts
     public string SurroundWith { get; set; }
     public string SurroundWithXY { get; set; }
     public string SurroundWithNumberX { get; set; }
+    public string SurroundWithBehavior { get; set; }
+    public string SurroundWithBehaviorToggle { get; set; }
+    public string SurroundWithBehaviorAdd { get; set; }
+    public string SurroundWithBehaviorRemove { get; set; }
+    public string SurroundWithWorksOn { get; set; }
+    public string SurroundWithScopeSelectionOrText { get; set; }
+    public string SurroundWithScopeEachLine { get; set; }
     public string SearchVia { get; set; }
     public string SearchViaX { get; set; }
     public string SearchViaNumberX { get; set; }
@@ -235,6 +264,11 @@ public class LanguageSettingsShortcuts
     public string CopySubtitlePathToClipboard { get; set; }
     public string CopySubtitleOriginalPathToClipboard { get; set; }
     public string FocusTextBox { get; set; }
+    public string FocusSubtitleListView { get; set; }
+    public string FocusWaveform { get; set; }
+    public string FocusOriginalTextBox { get; set; }
+    public string TextBoxGoToStart { get; set; }
+    public string TextBoxGoToEnd { get; set; }
     public string SortByNumber { get; set; }
     public string SortByStartTime { get; set; }
     public string SortByEndTime { get; set; }
@@ -310,6 +344,28 @@ public class LanguageSettingsShortcuts
         CategoryVideo = "Video";
         CategorySync = "Synchronization";
         CategoryAi = "AI";
+        CategoryCustom = "Custom";
+        EditCustomShortcut = "Edit custom shortcut";
+        CustomShortcutTextBoxKeyHint = "Use a key with Ctrl/Alt here - a plain key would no longer type in the text box.";
+        CustomShortcutNumberX = "Custom shortcut #{0}";
+        CustomShortcutNumberXY = "Custom shortcut #{0}: {1}";
+        CustomShortcutStep = "Step";
+        CustomShortcutSteps = "Steps";
+        CustomShortcutStepRunCommand = "Run command";
+        CustomShortcutStepInsertText = "Insert text";
+        CustomShortcutStepReplace = "Find and replace";
+        CustomShortcutInsertAtCursor = "At cursor";
+        CustomShortcutInsertAtStart = "At start of text";
+        CustomShortcutInsertAtEnd = "At end of text";
+        CustomShortcutSummaryRunCommandX = "Run: {0}";
+        CustomShortcutSummaryInsertXY = "Insert \"{0}\" ({1})";
+        CustomShortcutSummaryReplaceXY = "Replace \"{0}\" with \"{1}\"";
+        CustomShortcutSummaryReplaceRegexXY = "Replace regex \"{0}\" with \"{1}\"";
+        CustomShortcutPickCommand = "Please select a command to run.";
+        CustomShortcutEnterText = "Please enter the text to insert.";
+        CustomShortcutEnterFind = "Please enter the text to find.";
+        CustomShortcutInvalidRegexX = "Invalid regular expression: {0}";
+        CustomShortcutStepsHint = "Steps run from top to bottom. Text steps work on the selected lines; commands that open a window continue after it closes.";
         ActiveIn = "Active in";
         ActiveInEverywhere = "Everywhere";
 
@@ -509,6 +565,13 @@ public class LanguageSettingsShortcuts
         SurroundWith = "Surround with...";
         SurroundWithXY = "Surround with {0}/{1}";
         SurroundWithNumberX = "Surround with #{0}";
+        SurroundWithBehavior = "Behavior";
+        SurroundWithBehaviorToggle = "Toggle (add, or remove if present)";
+        SurroundWithBehaviorAdd = "Add (every time)";
+        SurroundWithBehaviorRemove = "Remove";
+        SurroundWithWorksOn = "Works on";
+        SurroundWithScopeSelectionOrText = "Selection, else whole text";
+        SurroundWithScopeEachLine = "Each line";
         SearchVia = "Search via";
         SearchViaX = "Search via {0}";
         SearchViaNumberX = "Search via #{0}";
@@ -536,6 +599,11 @@ public class LanguageSettingsShortcuts
         CopySubtitlePathToClipboard = "Copy subtitle path to clipboard";
         CopySubtitleOriginalPathToClipboard = "Copy subtitle path of original to clipboard";
         FocusTextBox = "Focus text box";
+        FocusSubtitleListView = "Focus subtitle list view";
+        FocusWaveform = "Focus waveform";
+        FocusOriginalTextBox = "Focus original text box";
+        TextBoxGoToStart = "Text box, go to start";
+        TextBoxGoToEnd = "Text box, go to end";
         SortByNumber = "Sort by number";
         SortByStartTime = "Sort by \"Show\" time";
         SortByEndTime = "Sort by \"Hide\" time";

@@ -263,6 +263,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _waveformFocusOnMouseOver;
     [ObservableProperty] private bool _waveformCenterVideoPosition;
     [ObservableProperty] private bool _waveformCenterVideoPositionAlsoWhenPaused;
+    [ObservableProperty] private bool _waveformSelectCurrentSubtitleWhilePaused;
 
     [ObservableProperty] private ObservableCollection<string> _waveformDrawStyles;
     [ObservableProperty] private string _selectedWaveformDrawStyle;
@@ -502,7 +503,11 @@ public partial class SettingsViewModel : ObservableObject
         Themes = [Se.Language.General.System, Se.Language.General.Light, Se.Language.General.Dark, Se.Language.General.Classic, "Pastel"];
         SelectedTheme = Themes[0];
 
-        var iconFolders = Directory.GetDirectories(Se.ThemesFolder).Select(p => Path.GetFileName(p)).ToList();
+        // Themes.zip is unpacked into the data folder at start-up; if that failed (or has not run)
+        // the folder is missing, which must not take the whole Settings window down with it.
+        var iconFolders = Directory.Exists(Se.ThemesFolder)
+            ? Directory.GetDirectories(Se.ThemesFolder).Select(p => Path.GetFileName(p)).ToList()
+            : new List<string>();
         iconFolders.Insert(0, Se.Language.General.Auto);
         IconThemes = new ObservableCollection<string>(iconFolders);
         SelectedIconTheme = IconThemes[0];
@@ -955,6 +960,7 @@ public partial class SettingsViewModel : ObservableObject
         WaveformFocusOnMouseOver = Se.Settings.Waveform.FocusOnMouseOver;
         WaveformCenterVideoPosition = Se.Settings.Waveform.CenterVideoPosition;
         WaveformCenterVideoPositionAlsoWhenPaused = Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused;
+        WaveformSelectCurrentSubtitleWhilePaused = Se.Settings.Waveform.SelectCurrentSubtitleWhilePaused;
         WaveformShowToolbar = Se.Settings.Waveform.ShowToolbar;
         WaveformShowOriginalSubtitle = Se.Settings.Waveform.ShowOriginalSubtitle;
 
@@ -1829,6 +1835,7 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Waveform.FocusOnMouseOver = WaveformFocusOnMouseOver;
         Se.Settings.Waveform.CenterVideoPosition = WaveformCenterVideoPosition;
         Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused = WaveformCenterVideoPositionAlsoWhenPaused;
+        Se.Settings.Waveform.SelectCurrentSubtitleWhilePaused = WaveformSelectCurrentSubtitleWhilePaused;
         Se.Settings.Waveform.FocusTextBoxAfterInsertNew = WaveformFocusTextboxAfterInsertNew;
 
         if (SelectedWaveformDrawStyle == Se.Language.General.Classic)
