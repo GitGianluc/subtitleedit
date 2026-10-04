@@ -16,10 +16,13 @@ using Nikse.SubtitleEdit.Core.VobSub;
 using Nikse.SubtitleEdit.UiLogic.Translate;
 using Nikse.SubtitleEdit.Features.Assa;
 using Nikse.SubtitleEdit.Features.Edit.MultipleReplace;
+using Nikse.SubtitleEdit.Features.Files.ExportCavena890;
 using Nikse.SubtitleEdit.Features.Files.ExportCustomTextFormat;
+using Nikse.SubtitleEdit.Features.Files.ExportDvbTeletext;
 using Nikse.SubtitleEdit.Features.Files.ExportEbuStl;
 using Nikse.SubtitleEdit.Features.Files.Export.ExportEbuStl;
 using Nikse.SubtitleEdit.Features.Files.ExportImageBased;
+using Nikse.SubtitleEdit.Features.Files.ExportPac;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Ocr;
 using Nikse.SubtitleEdit.Features.Ocr.Download;
@@ -164,6 +167,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private TranslationPair? _selectedSourceLanguage;
     [ObservableProperty] private ObservableCollection<TranslationPair> _targetLanguages = new();
     [ObservableProperty] private TranslationPair? _selectedTargetLanguage;
+    // More "To" languages - each gives its own output file ("movie.da.srt", "movie.sv.srt")
+    [ObservableProperty] private ObservableCollection<ExtraTargetLanguageItem> _extraTargetLanguages = new();
     [ObservableProperty] private string _autoTranslateModel;
     [ObservableProperty] private string _autoTranslateUrl;
     [ObservableProperty] private string _autoTranslateApiKey;
@@ -295,9 +300,6 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     public bool OkPressed { get; private set; }
     public ScrollViewer FunctionContainer { get; internal set; }
 
-    public string EbuHeader { get; private set; } = string.Empty;
-    public byte EbuJustificationCode { get; private set; } = 2;
-
     private List<BatchConvertItem> _allBatchItems;
     private readonly System.Timers.Timer _filesTimer;
     private bool _isFilesDirty;
@@ -343,6 +345,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             BatchConverter.FormatBdnXml8Bit,
             BatchConverter.FormatBluRaySup,
             BatchConverter.FormatCavena890,
+            CapMakerPlus.NameOfFormat,
+            CheetahCaption.NameOfFormat,
+            CheetahCaptionOld.NameOfFormat,
             BatchConverter.FormatCustomTextFormat,
             BatchConverter.FormatDCinemaInterop,
             BatchConverter.FormatDCinemaSmpte2014,
@@ -350,6 +355,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             BatchConverter.FormatFcpImage,
             BatchConverter.FormatImagesWithTimeCodesInFileName,
             BatchConverter.FormatPac,
+            BatchConverter.FormatPacUnicode,
             BatchConverter.FormatPlainText,
             BatchConverter.FormatVobSub
         };
@@ -493,11 +499,16 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             BatchConverter.FormatBdnXml,
             BatchConverter.FormatBdnXml8Bit,
             BatchConverter.FormatBluRaySup,
+            BatchConverter.FormatCavena890,
             BatchConverter.FormatCustomTextFormat,
+            BatchConverter.FormatDCinemaInterop,
+            BatchConverter.FormatDCinemaSmpte2014,
             BatchConverter.FormatDostImage,
+            DvbTeletext.NameOfFormat,
             BatchConverter.FormatEbuStl,
             BatchConverter.FormatFcpImage,
             BatchConverter.FormatImagesWithTimeCodesInFileName,
+            BatchConverter.FormatPac,
             BatchConverter.FormatVobSub,
             new AdvancedSubStationAlpha().Name,
         };
@@ -691,6 +702,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         Se.Settings.Tools.BatchConvert.AutoTranslateEngine = SelectedAutoTranslator.Name;
         Se.Settings.Tools.BatchConvert.AutoTranslateSourceLanguage = SelectedSourceLanguage?.TwoLetterIsoLanguageName ?? "auto";
         Se.Settings.Tools.BatchConvert.AutoTranslateTargetLanguage = SelectedTargetLanguage?.TwoLetterIsoLanguageName ?? "en";
+        Se.Settings.Tools.BatchConvert.AutoTranslateExtraTargetLanguages = string.Join(",", GetExtraTargetLanguages().Select(p => p.Code));
         Se.Settings.Tools.BatchConvert.LlamaCppUseRemoteServer = LlamaCppUseRemoteServer;
 
         // Change casing
@@ -907,6 +919,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         {
             SelectedTargetLanguage = targetLanguage;
         }
+
+        SetExtraTargetLanguages((Se.Settings.Tools.BatchConvert.AutoTranslateExtraTargetLanguages ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
         // Change casing
         if (Se.Settings.Tools.BatchConvert.ChangeCasingType == "Normal")
@@ -1155,6 +1170,58 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         _ = await _windowService
             .ShowDialogAsync<RemoveTextForHearingImpairedWindow, RemoveTextForHearingImpairedViewModel>(
                 Window!, vm => { vm.Initialize(new Subtitle()); });
+    }
+
+    /// <summary>
+    /// Rebuilds the extra "To" combo boxes from language codes - codes the current engine does
+    /// not have are dropped (each engine has its own language list).
+    /// </summary>
+    private void SetExtraTargetLanguages(IEnumerable<string?> codes)
+    {
+        ExtraTargetLanguages.Clear();
+        foreach (var code in codes)
+        {
+            var language = TargetLanguages.FirstOrDefault(p => p.Code.Equals(code, StringComparison.OrdinalIgnoreCase));
+            if (language != null)
+            {
+                ExtraTargetLanguages.Add(new ExtraTargetLanguageItem { SelectedLanguage = language });
+            }
+        }
+    }
+
+    internal List<TranslationPair> GetExtraTargetLanguages()
+    {
+        return ExtraTargetLanguages
+            .Select(p => p.SelectedLanguage)
+            .OfType<TranslationPair>()
+            .Distinct()
+            .ToList();
+    }
+
+    [RelayCommand]
+    private void AddExtraTargetLanguage()
+    {
+        // Start on a language not picked yet, so a new combo box is not just a duplicate
+        var used = GetExtraTargetLanguages();
+        if (SelectedTargetLanguage != null)
+        {
+            used.Add(SelectedTargetLanguage);
+        }
+
+        var language = TargetLanguages.FirstOrDefault(p => !used.Contains(p)) ?? TargetLanguages.FirstOrDefault();
+        if (language != null)
+        {
+            ExtraTargetLanguages.Add(new ExtraTargetLanguageItem { SelectedLanguage = language });
+        }
+    }
+
+    [RelayCommand]
+    private void RemoveExtraTargetLanguage(ExtraTargetLanguageItem? item)
+    {
+        if (item != null)
+        {
+            ExtraTargetLanguages.Remove(item);
+        }
     }
 
     [RelayCommand]
@@ -1881,13 +1948,62 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (targetFormat == BatchConverter.FormatEbuStl)
         {
+            // Start from the saved header, so reopening shows the previous choice.
             var result = await _windowService.ShowDialogAsync<ExportEbuStlWindow, ExportEbuStlViewModel>(Window,
-                vm => { vm.Initialize(new Subtitle()); });
+                vm => { vm.Initialize(new Subtitle { Header = Se.Settings.Tools.BatchConvert.EbuHeader ?? string.Empty }); });
 
             if (result.OkPressed)
             {
-                EbuHeader = result.Subtitle.Header ?? string.Empty;
-                EbuJustificationCode = result.JustificationCode;
+                Se.Settings.Tools.BatchConvert.EbuHeader = result.Subtitle.Header ?? string.Empty;
+                Se.Settings.Tools.BatchConvert.EbuJustificationCode = result.JustificationCode;
+            }
+            return;
+        }
+
+        if (targetFormat == BatchConverter.FormatPac)
+        {
+            // The main window's Export PAC dialog - it starts from, and saves, the shared code page.
+            await _windowService.ShowDialogAsync<ExportPacWindow, ExportPacViewModel>(Window);
+            return;
+        }
+
+        if (targetFormat == BatchConverter.FormatCavena890)
+        {
+            var settings = Se.Settings.Tools.BatchConvert;
+            var result = await _windowService.ShowDialogAsync<ExportCavena890Window, ExportCavena890ViewModel>(Window, vm =>
+            {
+                vm.TranslatedTitle = settings.Cavena890TranslatedTitle ?? string.Empty;
+                vm.OriginalTitle = settings.Cavena890OriginalTitle ?? string.Empty;
+                vm.Translator = settings.Cavena890Translator ?? string.Empty;
+                vm.Comment = settings.Cavena890Comment ?? string.Empty;
+                vm.StartOfProgramme = settings.Cavena890StartOfProgrammeMs > 0
+                    ? TimeSpan.FromMilliseconds(settings.Cavena890StartOfProgrammeMs)
+                    : TimeSpan.FromHours(10);
+            });
+
+            if (result.OkPressed)
+            {
+                settings.Cavena890TranslatedTitle = result.TranslatedTitle ?? string.Empty;
+                settings.Cavena890OriginalTitle = result.OriginalTitle ?? string.Empty;
+                settings.Cavena890Translator = result.Translator ?? string.Empty;
+                settings.Cavena890Comment = result.Comment ?? string.Empty;
+                settings.Cavena890StartOfProgrammeMs = result.StartOfProgramme.TotalMilliseconds;
+            }
+            return;
+        }
+
+        if (targetFormat == DvbTeletext.NameOfFormat)
+        {
+            // Same settings as the main window's Export DVB Teletext.
+            var fileSettings = Se.Settings.File;
+            var result = await _windowService.ShowDialogAsync<ExportDvbTeletextWindow, ExportDvbTeletextViewModel>(Window, vm =>
+                vm.Initialize(fileSettings.ExportDvbTeletextPageNumber, fileSettings.ExportDvbTeletextLanguageCode, fileSettings.ExportDvbTeletextHearingImpaired));
+
+            if (result.OkPressed)
+            {
+                fileSettings.ExportDvbTeletextPageNumber = result.PageNumber;
+                fileSettings.ExportDvbTeletextLanguageCode = result.LanguageCode;
+                fileSettings.ExportDvbTeletextHearingImpaired = result.HearingImpaired;
             }
             return;
         }
@@ -1905,6 +2021,14 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         else if (targetFormat == BatchConverter.FormatBluRaySup)
         {
             exportHandler = new ExportHandlerBluRaySup();
+        }
+        else if (targetFormat == BatchConverter.FormatDCinemaInterop)
+        {
+            exportHandler = new ExportHandlerDCinemaInteropPng();
+        }
+        else if (targetFormat == BatchConverter.FormatDCinemaSmpte2014)
+        {
+            exportHandler = new ExportHandlerDCinemaSmpte2014Png();
         }
         else if (targetFormat == BatchConverter.FormatDostImage)
         {
@@ -2766,8 +2890,22 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AssaUseSourceStylesIfPossible = Se.Settings.Tools.BatchConvert.AssaUseSourceStylesIfPossible,
             AssaHeader = Se.Settings.Tools.BatchConvert.AssaHeader,
             AssaFooter = Se.Settings.Tools.BatchConvert.AssaFooter,
-            EbuHeader = EbuHeader,
-            EbuJustificationCode = EbuJustificationCode,
+            AssaKeepSourceEmbeddedFonts = Se.Settings.Tools.BatchConvert.AssaKeepSourceEmbeddedFonts,
+            EbuHeader = Se.Settings.Tools.BatchConvert.EbuHeader ?? string.Empty,
+            EbuJustificationCode = (byte)Math.Clamp(Se.Settings.Tools.BatchConvert.EbuJustificationCode, 0, 3),
+            PacCodePage = Se.Settings.File.ExportPacCodePage,
+            PacSecondaryCodePage = Se.Settings.File.ExportPacSecondaryCodePage,
+            Cavena890TranslatedTitle = Se.Settings.Tools.BatchConvert.Cavena890TranslatedTitle ?? string.Empty,
+            Cavena890OriginalTitle = Se.Settings.Tools.BatchConvert.Cavena890OriginalTitle ?? string.Empty,
+            Cavena890Translator = Se.Settings.Tools.BatchConvert.Cavena890Translator ?? string.Empty,
+            Cavena890Comment = Se.Settings.Tools.BatchConvert.Cavena890Comment ?? string.Empty,
+            Cavena890StartOfMessage = Se.Settings.Tools.BatchConvert.Cavena890StartOfProgrammeMs > 0
+                ? new TimeCode(Se.Settings.Tools.BatchConvert.Cavena890StartOfProgrammeMs).ToHHMMSSFF()
+                : string.Empty,
+            DvbTeletextPageNumber = Se.Settings.File.ExportDvbTeletextPageNumber,
+            DvbTeletextLanguageCode = Se.Settings.File.ExportDvbTeletextLanguageCode ?? "eng",
+            DvbTeletextHearingImpaired = Se.Settings.File.ExportDvbTeletextHearingImpaired,
+            ForceCrLf = Se.Settings.General.ForceCrLfOnSave,
 
             AdjustDuration = new BatchConvertConfig.AdjustDurationSettings
             {
@@ -2786,6 +2924,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 Translator = SelectedAutoTranslator,
                 SourceLanguage = SelectedSourceLanguage ?? SourceLanguages.First(),
                 TargetLanguage = SelectedTargetLanguage ?? TargetLanguages.First(),
+                ExtraTargetLanguages = GetExtraTargetLanguages(),
             },
 
             ChangeCasing = new BatchConvertConfig.ChangeCasingSettings
@@ -3568,6 +3707,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
     private void UpdateTargetLanguages(IAutoTranslator autoTranslator)
     {
+        // Read before clearing: emptying the list the combo boxes show resets their selection
+        var extraCodes = ExtraTargetLanguages.Select(p => p.SelectedLanguage?.Code).ToList();
         TargetLanguages.Clear();
         if (autoTranslator == null)
         {
@@ -3578,6 +3719,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         {
             TargetLanguages.Add(language);
         }
+
+        // Each engine has its own language list - keep only the extra languages this one has
+        SetExtraTargetLanguages(extraCodes);
 
         SelectedTargetLanguage = AutoTranslateViewModel.FindDefaultTargetLanguage(
             TargetLanguages,

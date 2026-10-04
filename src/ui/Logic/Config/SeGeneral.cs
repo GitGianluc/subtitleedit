@@ -59,6 +59,17 @@ public class SeGeneral
         set => UseFrameModePersisted = value;
     }
 
+    /// <summary>
+    /// In frame mode, show time codes as absolute frame numbers ("15230") instead of
+    /// hh:mm:ss:ff, so a sync offset is a plain subtraction (#15603). Read
+    /// <see cref="UseFrameNumbers"/> instead, which is only on while frame mode is.
+    /// </summary>
+    [JsonPropertyName("UseFrameNumbers")]
+    public bool UseFrameNumbersPersisted { get; set; }
+
+    [JsonIgnore]
+    public bool UseFrameNumbers => UseFrameMode && UseFrameNumbersPersisted;
+
     public double DefaultFrameRate { get; set; }
     public double CurrentFrameRate { get; set; }
     public string DefaultSubtitleFormat { get; set; }
@@ -83,11 +94,16 @@ public class SeGeneral
     public int NewEmptyDefaultMs { get; set; }
 
     /// <summary>How much the time up/down controls change per step when the caret is on the
-    /// milliseconds part. Frame mode always steps one frame (#12506).</summary>
+    /// milliseconds part, and how much the duration up/down changes per step. Frame mode always
+    /// steps one frame (#12506).</summary>
     public int TimeCodeUpDownStepMs { get; set; }
     /// <summary>How far the "move selected lines X ms back/forward" shortcuts shift, in
     /// milliseconds (SE 4 had fixed 100 ms variants; #14789 asks for repeatable drift fixes).</summary>
     public int MoveSelectedLinesStepMs { get; set; }
+    /// <summary>How far the "move start/end X ms back/forward" shortcuts move a line's start or
+    /// end, in milliseconds - finer than a frame for hitting waveform edges. Visual Sync uses the
+    /// same keys and step to move its video.</summary>
+    public int MoveStartEndStepMs { get; set; }
     /// <summary>"Move selected lines (and following) X ms": when the move would run into the line
     /// before/after, shorten that line instead of overlapping it, like VisualSubSync (#15098).</summary>
     public bool MoveLinesShortenNeighbor { get; set; }
@@ -295,6 +311,7 @@ public class SeGeneral
         NewEmptyDefaultMs = 2000;
         TimeCodeUpDownStepMs = 100;
         MoveSelectedLinesStepMs = 100;
+        MoveStartEndStepMs = 10;
         MoveSelectedLinesCustom1Ms = 10;
         MoveSelectedLinesCustom2Ms = 1000;
         MoveSelectedLinesAndForwardCustom1Ms = 10;

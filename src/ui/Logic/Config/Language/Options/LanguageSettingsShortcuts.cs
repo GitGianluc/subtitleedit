@@ -64,6 +64,7 @@ public class LanguageSettingsShortcuts
     public string FileOpenKeepVideo { get; set; }
     public string FileSave { get; set; }
     public string FileSaveAs { get; set; }
+    public string FileSaveOriginal { get; set; }
     public string FileCompare { get; set; }
     public string FileStatistics { get; set; }
     public string FileImportPlainText { get; set; }
@@ -87,6 +88,7 @@ public class LanguageSettingsShortcuts
     public string DetectKey { get; set; }
     public string Control { get; set; }
     public string Alt { get; set; }
+    public string AltGr { get; set; }
     public string Win { get; set; }
     public string Shift { get; set; }
     public string ControlMac { get; set; }
@@ -98,6 +100,7 @@ public class LanguageSettingsShortcuts
     public string ResetShortcutsDetail { get; set; }
     public string TogglePlayPause { get; set; }
     public string ToggleLockTimeCodes { get; set; }
+    public string ToggleTimeCodeMode { get; set; }
     public string ToggleScreenPrivacy { get; set; }
     public string ScreenPrivacyFileNamesHidden { get; set; }
     public string ScreenPrivacyFileNamesAndTextsHidden { get; set; }
@@ -150,6 +153,7 @@ public class LanguageSettingsShortcuts
     public string ListViewColumnTextUp { get; set; }
     public string ListViewColumnTextDown { get; set; }
     public string AutoTranslateSelectedLines { get; set; }
+    public string AutoTranslateSelectedLinesNoPrompt { get; set; }
     public string SetAssaResolution { get; set; }
     public string SetShortcutForX { get; set; }
     public string CommandFileNewKeepVideo { get; set; }
@@ -321,6 +325,10 @@ public class LanguageSettingsShortcuts
     public string MoveStartOneFrameForwardKeepGapPrev { get; set; }
     public string MoveEndOneFrameBackKeepGapNext { get; set; }
     public string MoveEndOneFrameForwardKeepGapNext { get; set; }
+    public string MoveStartXMsBack { get; set; }
+    public string MoveStartXMsForward { get; set; }
+    public string MoveEndXMsBack { get; set; }
+    public string MoveEndXMsForward { get; set; }
     public string MoveSelectedLinesXMsBack { get; set; }
     public string MoveSelectedLinesXMsForward { get; set; }
     public string MoveSelectedLinesAndForwardXMsBack { get; set; }
@@ -395,6 +403,7 @@ public class LanguageSettingsShortcuts
         FileOpenKeepVideo = "Open (keep video)";
         FileSave = "Save";
         FileSaveAs = "Save as";
+        FileSaveOriginal = "Save original";
         FileStatistics = "Statistics";
         FileCompare = "Compare";
         FileImportPlainText = "Import plain text";
@@ -423,6 +432,7 @@ public class LanguageSettingsShortcuts
         
         Control = "Control";
         Alt = "Alt";
+        AltGr = "AltGr";
         Win = "Win";
         Shift = "Shift";
 
@@ -434,6 +444,7 @@ public class LanguageSettingsShortcuts
         ResetShortcuts = "Reset shortcuts";
         ResetShortcutsDetail = "Do you want to reset all shortcuts to default values?";
         ToggleLockTimeCodes = "Toggle lock time codes";
+        ToggleTimeCodeMode = "Toggle time code mode (time/frames/frame numbers)";
         ToggleScreenPrivacy = "Toggle screen privacy (hide file names, then also texts)";
         ScreenPrivacyFileNamesHidden = "Screen privacy: file names hidden";
         ScreenPrivacyFileNamesAndTextsHidden = "Screen privacy: file names and texts hidden";
@@ -486,6 +497,7 @@ public class LanguageSettingsShortcuts
         ListViewColumnTextUp = "Column, text up";
         ListViewColumnTextDown = "Column, text down";
         AutoTranslateSelectedLines = "Auto-translate selected lines...";
+        AutoTranslateSelectedLinesNoPrompt = "Auto-translate selected lines (no prompt, use last engine/languages)";
         SetAssaResolution = "Set ASSA resolution (PlayResX/PlayResY)";
         SetShortcutForX = "Set shortcut for \"{0}\"";
         CommandFileNewKeepVideo = "New (keep video)";
@@ -657,6 +669,10 @@ public class LanguageSettingsShortcuts
         MoveStartOneFrameForwardKeepGapPrev = "Move start one frame forward (keep gap to previous if close)";
         MoveEndOneFrameBackKeepGapNext = "Move end one frame back (keep gap to next if close)";
         MoveEndOneFrameForwardKeepGapNext = "Move end one frame forward (keep gap to next if close)";
+        MoveStartXMsBack = "Move start X ms back (X set in Settings, also in Visual Sync)";
+        MoveStartXMsForward = "Move start X ms forward (X set in Settings, also in Visual Sync)";
+        MoveEndXMsBack = "Move end X ms back (X set in Settings, also in Visual Sync)";
+        MoveEndXMsForward = "Move end X ms forward (X set in Settings, also in Visual Sync)";
         MoveSelectedLinesXMsBack = "Move selected lines X ms back (X set in Settings)";
         MoveSelectedLinesXMsForward = "Move selected lines X ms forward (X set in Settings)";
         MoveSelectedLinesAndForwardXMsBack = "Move selected lines and all following X ms back (X set in Settings)";

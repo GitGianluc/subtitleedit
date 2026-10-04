@@ -124,6 +124,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private int? _newEmptyDefaultMs;
     [ObservableProperty] private int? _timeCodeUpDownStepMs;
     [ObservableProperty] private int? _moveSelectedLinesStepMs;
+    [ObservableProperty] private int? _moveStartEndStepMs;
     [ObservableProperty] private bool _moveLinesShortenNeighbor;
     [ObservableProperty] private bool _promptBeforeDelete;
     [ObservableProperty] private bool _lockTimeCodes;
@@ -134,6 +135,16 @@ public partial class SettingsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsMsMode))]
     [NotifyPropertyChangedFor(nameof(MinGapLabel))]
     private bool _useFrameMode;
+
+    [ObservableProperty] private ObservableCollection<TimeCodeModeDisplay> _timeCodeModes;
+    [ObservableProperty] private TimeCodeModeDisplay _selectedTimeCodeMode;
+
+    // Frames and frame numbers are both frame mode (frame stepping, snapping, min gap in frames);
+    // frame numbers only changes how a time code is shown and typed.
+    partial void OnSelectedTimeCodeModeChanged(TimeCodeModeDisplay value)
+    {
+        UseFrameMode = value != null && value.Mode != TimeCodeMode.Time;
+    }
 
     public bool IsMsMode => !UseFrameMode;
     public string MinGapLabel => UseFrameMode
@@ -480,6 +491,8 @@ public partial class SettingsViewModel : ObservableObject
         Profiles = new ObservableCollection<string>();
         SelectedProfile = "Default";
         DialogStyles = new ObservableCollection<DialogStyleDisplay>(DialogStyleDisplay.List());
+        TimeCodeModes = new ObservableCollection<TimeCodeModeDisplay>(TimeCodeModeDisplay.List());
+        SelectedTimeCodeMode = TimeCodeModes.First();
         ContinuationStyles = new ObservableCollection<ContinuationStyleDisplay>(ContinuationStyleDisplay.List());
         CpsLineLengthStrategies = new ObservableCollection<CpsLineLengthStrategyDisplay>(CpsLineLengthStrategyDisplay.List());
         SubtitleTextBoxAndGridFontName = "Default";
@@ -797,11 +810,15 @@ public partial class SettingsViewModel : ObservableObject
 
         // The persisted choice, not the effective value - EBU STL may have frame mode forced on
         // temporarily, and that must not stick just because the settings dialog was OK'ed.
-        UseFrameMode = general.UseFrameModePersisted;
+        var timeCodeMode = !general.UseFrameModePersisted
+            ? TimeCodeMode.Time
+            : general.UseFrameNumbersPersisted ? TimeCodeMode.FrameNumbers : TimeCodeMode.Frames;
+        SelectedTimeCodeMode = TimeCodeModes.First(p => p.Mode == timeCodeMode);
         TextBoxLimitNewLines = general.SubtitleTextBoxLimitNewLines;
         NewEmptyDefaultMs = general.NewEmptyDefaultMs;
         TimeCodeUpDownStepMs = general.TimeCodeUpDownStepMs;
         MoveSelectedLinesStepMs = general.MoveSelectedLinesStepMs;
+        MoveStartEndStepMs = general.MoveStartEndStepMs;
         MoveLinesShortenNeighbor = general.MoveLinesShortenNeighbor;
         PromptBeforeDelete = general.PromptBeforeDelete;
         LockTimeCodes = general.LockTimeCodes;
@@ -1698,10 +1715,12 @@ public partial class SettingsViewModel : ObservableObject
         general.CpsLineLengthStrategy = CpsLineLengthStrategy.Code;
 
         general.UseFrameMode = UseFrameMode;
+        general.UseFrameNumbersPersisted = SelectedTimeCodeMode.Mode == TimeCodeMode.FrameNumbers;
         general.SubtitleTextBoxLimitNewLines = TextBoxLimitNewLines;
         general.NewEmptyDefaultMs = NewEmptyDefaultMs ?? general.NewEmptyDefaultMs;
         general.TimeCodeUpDownStepMs = TimeCodeUpDownStepMs ?? general.TimeCodeUpDownStepMs;
         general.MoveSelectedLinesStepMs = MoveSelectedLinesStepMs ?? general.MoveSelectedLinesStepMs;
+        general.MoveStartEndStepMs = MoveStartEndStepMs ?? general.MoveStartEndStepMs;
         general.MoveLinesShortenNeighbor = MoveLinesShortenNeighbor;
         general.PromptBeforeDelete = PromptBeforeDelete;
         general.LockTimeCodes = LockTimeCodes;

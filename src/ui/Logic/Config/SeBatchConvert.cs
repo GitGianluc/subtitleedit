@@ -96,6 +96,8 @@ public class SeBatchConvert
     public string AutoTranslateEngine { get; set; }
     public string AutoTranslateSourceLanguage { get; set; }
     public string AutoTranslateTargetLanguage { get; set; }
+    /// <summary>Codes of the extra languages to translate into besides the "To" language, comma separated.</summary>
+    public string AutoTranslateExtraTargetLanguages { get; set; }
 
     /// <summary>
     /// Batch convert's own "use external server" switch for the llama.cpp engines - independent of
@@ -114,8 +116,24 @@ public class SeBatchConvert
     public bool AssaUseSourceStylesIfPossible { get; set; }
     public string AssaHeader { get; set; }
     public string AssaFooter { get; set; }
+    /// <summary>When the ASSA header template replaces a source file's header, keep the source's embedded fonts (footer).</summary>
+    public bool AssaKeepSourceEmbeddedFonts { get; set; }
 
     public bool AssaEmbedFontsTrim { get; set; }
+
+    /// <summary>The EBU STL header (GSI block) chosen in the EBU STL settings, empty = defaults.</summary>
+    public string EbuHeader { get; set; } = string.Empty;
+    public int EbuJustificationCode { get; set; } = 2;
+
+    // Cavena 890 header fields - batch convert's own, so a run never picks up the title of
+    // whatever file was last exported from the main window. An empty title = file name.
+    public string Cavena890TranslatedTitle { get; set; } = string.Empty;
+    public string Cavena890OriginalTitle { get; set; } = string.Empty;
+    public string Cavena890Translator { get; set; } = string.Empty;
+    public string Cavena890Comment { get; set; } = string.Empty;
+
+    /// <summary>Start of programme in milliseconds, 0 = the format's default (10:00:00:00).</summary>
+    public double Cavena890StartOfProgrammeMs { get; set; }
 
     public int MergeShortLinesMaxCharacters { get; set; }
     public int MergeShortLinesMaxMillisecondsBetweenLines { get; set; }
@@ -233,6 +251,7 @@ public class SeBatchConvert
         AutoTranslateEngine = new OllamaTranslate().Name;
         AutoTranslateSourceLanguage = "auto";
         AutoTranslateTargetLanguage = "en";
+        AutoTranslateExtraTargetLanguages = string.Empty;
         ChangeCasingType = "Normal";
         NormalCasingFixNames = true;
         FixRtlMode = "ReverseStartEnd";
@@ -241,6 +260,7 @@ public class SeBatchConvert
         AssaUseSourceStylesIfPossible = true;
         AssaHeader = string.Empty;
         AssaFooter = string.Empty;
+        AssaKeepSourceEmbeddedFonts = false;
 
         MergeShortLinesMaxCharacters = 55;
         MergeShortLinesMaxMillisecondsBetweenLines = 250;

@@ -789,6 +789,11 @@ public static class InitMenu
                 },
                 new MenuItem
                 {
+                    Header = Se.Language.Video.TextToSpeech.SpeakFromCurrentLineDotDotDot,
+                    Command = vm.SpeakFromCurrentLineCommand,
+                },
+                new MenuItem
+                {
                     Header = Se.Language.Video.TextToSpeech.VoiceManagerMenuItem,
                     Command = vm.ShowVideoVoiceManagerCommand,
                 },
@@ -1285,6 +1290,13 @@ public static class InitMenu
 
             var k = key.Trim();
             var kLower = k.ToLowerInvariant();
+
+            // AltGr is how Windows delivers Ctrl+Alt from the right Alt key
+            if (kLower == "altgr")
+            {
+                modifiers |= KeyModifiers.Control | KeyModifiers.Alt;
+                continue;
+            }
 
             // Support combined tokens like "CtrlShift"
             if (kLower.Contains("ctrl") || kLower.Contains("control"))

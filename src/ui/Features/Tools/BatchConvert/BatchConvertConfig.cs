@@ -6,6 +6,7 @@ using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.UiLogic.Translate;
 using Nikse.SubtitleEdit.UiLogic.AdjustDuration;
 using Nikse.SubtitleEdit.Logic.Config;
+using System.Collections.Generic;
 
 namespace Nikse.SubtitleEdit.Features.Tools.BatchConvert;
 
@@ -20,8 +21,24 @@ public class BatchConvertConfig
     public bool AssaUseSourceStylesIfPossible { get; set; }
     public string AssaHeader { get; set; }
     public string AssaFooter { get; set; }
+    public bool AssaKeepSourceEmbeddedFonts { get; set; }
     public string EbuHeader { get; set; } = string.Empty;
     public byte EbuJustificationCode { get; set; } = 2;
+    public int PacCodePage { get; set; } = Pac.CodePageLatin;
+    public int PacSecondaryCodePage { get; set; } = -1;
+    public string Cavena890TranslatedTitle { get; set; } = string.Empty;
+    public string Cavena890OriginalTitle { get; set; } = string.Empty;
+    public string Cavena890Translator { get; set; } = string.Empty;
+    public string Cavena890Comment { get; set; } = string.Empty;
+
+    /// <summary>"HH:MM:SS:FF", empty = the format's default (10:00:00:00).</summary>
+    public string Cavena890StartOfMessage { get; set; } = string.Empty;
+    public int DvbTeletextPageNumber { get; set; } = 888;
+    public string DvbTeletextLanguageCode { get; set; } = "eng";
+    public bool DvbTeletextHearingImpaired { get; set; }
+
+    /// <summary>"Force CR+LF on save" (Settings) - text subtitle formats get CR+LF line breaks.</summary>
+    public bool ForceCrLf { get; set; }
     public AddFormattingSettings AddFormatting { get; set; }
     public RemoveFormattingSettings RemoveFormatting { get; set; }
     public OffsetTimeCodesSettings OffsetTimeCodes { get; set; }
@@ -63,6 +80,7 @@ public class BatchConvertConfig
         AssaUseSourceStylesIfPossible = false;
         AssaHeader = string.Empty;
         AssaFooter = string.Empty;
+        AssaKeepSourceEmbeddedFonts = false;
         TargetFormatName = SubRip.NameOfFormat;
         TargetEncoding = TextEncoding.Utf8WithBom;
         AddFormatting = new AddFormattingSettings();
@@ -105,7 +123,9 @@ public class BatchConvertConfig
         TargetFormatName == BatchConverter.FormatBdnXml ||
         TargetFormatName == BatchConverter.FormatBdnXml8Bit ||
         TargetFormatName == BatchConverter.FormatFcpImage ||
-        TargetFormatName == BatchConverter.FormatImagesWithTimeCodesInFileName;
+        TargetFormatName == BatchConverter.FormatImagesWithTimeCodesInFileName ||
+        TargetFormatName == BatchConverter.FormatDCinemaInterop ||
+        TargetFormatName == BatchConverter.FormatDCinemaSmpte2014;
 
     public class AddFormattingSettings
     {
@@ -212,12 +232,18 @@ public class BatchConvertConfig
         public bool IsActive { get; set; }
         public TranslationPair SourceLanguage { get; internal set; }
         public TranslationPair TargetLanguage { get; internal set; }
+
+        /// <summary>More languages to translate into besides <see cref="TargetLanguage"/> - each
+        /// gives its own output file.</summary>
+        public List<TranslationPair> ExtraTargetLanguages { get; internal set; }
+
         public IAutoTranslator Translator { get; internal set; }
 
         public AutoTranslateSettings()
         {
             SourceLanguage = new TranslationPair("English", "en");
             TargetLanguage = new TranslationPair("Spanish", "es");
+            ExtraTargetLanguages = new List<TranslationPair>();
             Translator = new OllamaTranslate();
         }
     }

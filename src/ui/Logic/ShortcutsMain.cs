@@ -291,6 +291,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.CommandFileNewKeepVideoCommand), Se.Language.Options.Shortcuts.CommandFileNewKeepVideo },
         { nameof(MainViewModel.CommandFileSaveCommand), Se.Language.Options.Shortcuts.FileSave },
         { nameof(MainViewModel.CommandFileSaveAsCommand), Se.Language.Options.Shortcuts.FileSaveAs },
+        { nameof(MainViewModel.CommandFileSaveOriginalCommand), Se.Language.Options.Shortcuts.FileSaveOriginal },
         { nameof(MainViewModel.ShowStatisticsCommand), Se.Language.Options.Shortcuts.FileStatistics },
         { nameof(MainViewModel.ShowCompareCommand), Se.Language.Options.Shortcuts.FileCompare },
         { nameof(MainViewModel.ShowRestoreAutoBackupCommand), Se.Language.Options.Shortcuts.RestoreAutoBackup },
@@ -353,6 +354,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ShowSpeechToTextWhisperCommand), Se.Language.Options.Shortcuts.SpeechToText },
         { nameof(MainViewModel.ShowVideoTextToSpeechCommand), Se.Language.Options.Shortcuts.TextToSpeech },
         { nameof(MainViewModel.ShowVideoVoiceManagerCommand), Se.Language.Video.TextToSpeech.VoiceManagerTitle },
+        { nameof(MainViewModel.SpeakFromCurrentLineCommand), Se.Language.Video.TextToSpeech.SpeakFromCurrentLineTitle },
         { nameof(MainViewModel.ShowVideoOcrCommand), Se.Language.Options.Shortcuts.VideoOcr },
         { nameof(MainViewModel.ShowVideoBurnInCommand), Se.Language.Options.Shortcuts.BurnIn },
         { nameof(MainViewModel.ShowVideoTransparentSubtitlesCommand), Se.Language.Options.Shortcuts.GenerateTransparent },
@@ -505,6 +507,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ExtendPreviousEndToSelectedStartCommand),  Se.Language.General.ExtendPreviousEndToSelectedStart },
         { nameof(MainViewModel.ExtendNextStartToSelectedEndCommand),  Se.Language.General.ExtendNextStartToSelectedEnd },
         { nameof(MainViewModel.ToggleLockTimeCodesCommand), Se.Language.Options.Shortcuts.ToggleLockTimeCodes },
+        { nameof(MainViewModel.ToggleTimeCodeModeCommand), Se.Language.Options.Shortcuts.ToggleTimeCodeMode },
         { nameof(MainViewModel.ToggleScreenPrivacyCommand), Se.Language.Options.Shortcuts.ToggleScreenPrivacy },
         { nameof(MainViewModel.ShowHelpCommand), Se.Language.General.Help },
         { nameof(MainViewModel.ShowSourceViewCommand), Se.Language.Options.Shortcuts.SourceView },
@@ -524,6 +527,10 @@ public static class ShortcutsMain
         { nameof(MainViewModel.MoveStartOneFrameForwardKeepGapPrevCommand), Se.Language.Options.Shortcuts.MoveStartOneFrameForwardKeepGapPrev },
         { nameof(MainViewModel.MoveEndOneFrameBackKeepGapNextCommand), Se.Language.Options.Shortcuts.MoveEndOneFrameBackKeepGapNext },
         { nameof(MainViewModel.MoveEndOneFrameForwardKeepGapNextCommand), Se.Language.Options.Shortcuts.MoveEndOneFrameForwardKeepGapNext },
+        { nameof(MainViewModel.MoveStartXMsBackCommand), Se.Language.Options.Shortcuts.MoveStartXMsBack },
+        { nameof(MainViewModel.MoveStartXMsForwardCommand), Se.Language.Options.Shortcuts.MoveStartXMsForward },
+        { nameof(MainViewModel.MoveEndXMsBackCommand), Se.Language.Options.Shortcuts.MoveEndXMsBack },
+        { nameof(MainViewModel.MoveEndXMsForwardCommand), Se.Language.Options.Shortcuts.MoveEndXMsForward },
         { nameof(MainViewModel.MoveSelectedLinesXMsBackCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesXMsBack },
         { nameof(MainViewModel.MoveSelectedLinesXMsForwardCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesXMsForward },
         { nameof(MainViewModel.MoveSelectedLinesAndForwardXMsBackCommand), Se.Language.Options.Shortcuts.MoveSelectedLinesAndForwardXMsBack },
@@ -586,6 +593,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ShowToolsRenumberCommand), Se.Language.Main.Menu.Renumber },
         { nameof(MainViewModel.EvenlyDistributeSelectedLinesCommand), Se.Language.Main.Menu.EvenlyDistributeLines },
         { nameof(MainViewModel.AutoTranslateSelectedLinesCommand), Se.Language.Options.Shortcuts.AutoTranslateSelectedLines },
+        { nameof(MainViewModel.AutoTranslateSelectedLinesNoPromptCommand), Se.Language.Options.Shortcuts.AutoTranslateSelectedLinesNoPrompt },
         { nameof(MainViewModel.ShowAssaChangeResolutionCommand), Se.Language.Options.Shortcuts.SetAssaResolution },
         { nameof(MainViewModel.ShowChooseProfileCommand), Se.Language.Options.Shortcuts.ChooseRuleProfile },
         { nameof(MainViewModel.TogglePlaybackSpeedCommand), Se.Language.Options.Shortcuts.TogglePlaybackSpeed },
@@ -818,6 +826,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.CommandFileNewKeepVideoCommand, nameof(vm.CommandFileNewKeepVideoCommand), ShortcutCategory.General, ShortcutGroup.File);
         AddShortcut(shortcuts, vm.CommandFileSaveCommand, nameof(vm.CommandFileSaveCommand), ShortcutCategory.General, ShortcutGroup.File);
         AddShortcut(shortcuts, vm.CommandFileSaveAsCommand, nameof(vm.CommandFileSaveAsCommand), ShortcutCategory.General, ShortcutGroup.File);
+        AddShortcut(shortcuts, vm.CommandFileSaveOriginalCommand, nameof(vm.CommandFileSaveOriginalCommand), ShortcutCategory.General, ShortcutGroup.File);
         AddShortcut(shortcuts, vm.ShowStatisticsCommand, nameof(vm.ShowStatisticsCommand), ShortcutCategory.General, ShortcutGroup.File);
         AddShortcut(shortcuts, vm.ShowCompareCommand, nameof(vm.ShowCompareCommand), ShortcutCategory.General, ShortcutGroup.File);
         AddShortcut(shortcuts, vm.ShowRestoreAutoBackupCommand, nameof(vm.ShowRestoreAutoBackupCommand), ShortcutCategory.General, ShortcutGroup.File);
@@ -947,6 +956,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ShowSpeechToTextWhisperCommand, nameof(vm.ShowSpeechToTextWhisperCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoTextToSpeechCommand, nameof(vm.ShowVideoTextToSpeechCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoVoiceManagerCommand, nameof(vm.ShowVideoVoiceManagerCommand), ShortcutCategory.General, ShortcutGroup.Ai);
+        AddShortcut(shortcuts, vm.SpeakFromCurrentLineCommand, nameof(vm.SpeakFromCurrentLineCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoOcrCommand, nameof(vm.ShowVideoOcrCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.ShowVideoBurnInCommand, nameof(vm.ShowVideoBurnInCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ShowVideoTransparentSubtitlesCommand, nameof(vm.ShowVideoTransparentSubtitlesCommand), ShortcutCategory.General, ShortcutGroup.Video);
@@ -1043,6 +1053,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ExtendPreviousEndToSelectedStartCommand, nameof(vm.ExtendPreviousEndToSelectedStartCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ExtendNextStartToSelectedEndCommand, nameof(vm.ExtendNextStartToSelectedEndCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ToggleLockTimeCodesCommand, nameof(vm.ToggleLockTimeCodesCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.ToggleTimeCodeModeCommand, nameof(vm.ToggleTimeCodeModeCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ToggleScreenPrivacyCommand, nameof(vm.ToggleScreenPrivacyCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ShowHelpCommand, nameof(vm.ShowHelpCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ShowSourceViewCommand, nameof(vm.ShowSourceViewCommand), ShortcutCategory.General);
@@ -1063,6 +1074,10 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.MoveStartOneFrameForwardKeepGapPrevCommand, nameof(vm.MoveStartOneFrameForwardKeepGapPrevCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveEndOneFrameBackKeepGapNextCommand, nameof(vm.MoveEndOneFrameBackKeepGapNextCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveEndOneFrameForwardKeepGapNextCommand, nameof(vm.MoveEndOneFrameForwardKeepGapNextCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveStartXMsBackCommand, nameof(vm.MoveStartXMsBackCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveStartXMsForwardCommand, nameof(vm.MoveStartXMsForwardCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveEndXMsBackCommand, nameof(vm.MoveEndXMsBackCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MoveEndXMsForwardCommand, nameof(vm.MoveEndXMsForwardCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveSelectedLinesXMsBackCommand, nameof(vm.MoveSelectedLinesXMsBackCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveSelectedLinesXMsForwardCommand, nameof(vm.MoveSelectedLinesXMsForwardCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MoveSelectedLinesAndForwardXMsBackCommand, nameof(vm.MoveSelectedLinesAndForwardXMsBackCommand), ShortcutCategory.General);
@@ -1119,6 +1134,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ShowToolsRenumberCommand, nameof(vm.ShowToolsRenumberCommand), ShortcutCategory.General, ShortcutGroup.Tools);
         AddShortcut(shortcuts, vm.EvenlyDistributeSelectedLinesCommand, nameof(vm.EvenlyDistributeSelectedLinesCommand), ShortcutCategory.SubtitleGrid);
         AddShortcut(shortcuts, vm.AutoTranslateSelectedLinesCommand, nameof(vm.AutoTranslateSelectedLinesCommand), ShortcutCategory.General, ShortcutGroup.Translate);
+        AddShortcut(shortcuts, vm.AutoTranslateSelectedLinesNoPromptCommand, nameof(vm.AutoTranslateSelectedLinesNoPromptCommand), ShortcutCategory.General, ShortcutGroup.Translate);
         AddShortcut(shortcuts, vm.ShowAssaChangeResolutionCommand, nameof(vm.ShowAssaChangeResolutionCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ShowChooseProfileCommand, nameof(vm.ShowChooseProfileCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.TogglePlaybackSpeedCommand, nameof(vm.TogglePlaybackSpeedCommand), ShortcutCategory.General, ShortcutGroup.Video);

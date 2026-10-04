@@ -420,9 +420,10 @@ public class SettingsPage : UserControl
             MakeNumericSettingInt(Se.Language.Options.Settings.NewEmptyDefaultMs, nameof(_vm.NewEmptyDefaultMs)),
             MakeNumericSettingInt(Se.Language.Options.Settings.TimeCodeUpDownStepMs, nameof(_vm.TimeCodeUpDownStepMs), 1, 5000),
             MakeNumericSettingInt(Se.Language.Options.Settings.MoveSelectedLinesStepMs, nameof(_vm.MoveSelectedLinesStepMs), 1, 60000),
+            MakeNumericSettingInt(Se.Language.Options.Settings.MoveStartEndStepMs, nameof(_vm.MoveStartEndStepMs), 1, 5000),
             MakeCheckboxSetting(Se.Language.Options.Settings.MoveLinesShortenNeighbor, nameof(_vm.MoveLinesShortenNeighbor)),
             MakeCheckboxSetting(Se.Language.Options.Settings.PromptBeforeDelete, nameof(_vm.PromptBeforeDelete)),
-            MakeCheckboxSetting(Se.Language.Options.Settings.UseFrameMode, nameof(_vm.UseFrameMode)),
+            new SettingsItem(Se.Language.Options.Settings.TimeCodeMode, () => MakeComboBoxTimeCodeMode()),
             MakeCheckboxSetting(Se.Language.Options.Settings.TextBoxLimitNewLines, nameof(_vm.TextBoxLimitNewLines)),
             MakeCheckboxSetting(Se.Language.General.LockTimeCodes, nameof(_vm.LockTimeCodes)),
             MakeCheckboxSetting(Se.Language.Options.Settings.RememberPositionAndSize, nameof(_vm.RememberPositionAndSize)),
@@ -1436,6 +1437,20 @@ public class SettingsPage : UserControl
         };
         comboBoxCpsLineLengthStyle.SelectionChanged += (s, e) => _vm.RuleValueChanged();
         return comboBoxCpsLineLengthStyle;
+    }
+
+    private ComboBox MakeComboBoxTimeCodeMode()
+    {
+        return new ComboBox
+        {
+            Width = 250,
+            DataContext = _vm,
+            [!ItemsControl.ItemsSourceProperty] = new Binding(nameof(_vm.TimeCodeModes)),
+            [!SelectingItemsControl.SelectedItemProperty] =
+                new Binding(nameof(_vm.SelectedTimeCodeMode)) { Mode = BindingMode.TwoWay },
+            ItemTemplate = new FuncDataTemplate<TimeCodeModeDisplay>((f, _) =>
+                new TextBlock { Text = f?.Name }, true)
+        };
     }
 
     private ComboBox MakeComboBoxDialogStyle()

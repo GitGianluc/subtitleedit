@@ -85,6 +85,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
     /// <summary>Output paths handed out while converting the current item - stamped with the source timestamp afterwards.</summary>
     private readonly List<string> _currentItemOutputFileNames = new();
 
+    // The target language being produced right now - one file can be translated into several
+    // languages in one run, each saved as its own output.
+    private TranslationPair? _currentTargetLanguage;
+    private int _currentTargetNumber;
+    private int _targetLanguageCount = 1;
+
     public SubtitleFormat Format { get; set; } = new SubRip();
 
     public Encoding Encoding { get; set; } = Encoding.UTF8;
@@ -460,11 +466,110 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         // Run convert functions (remove formatting, etc.)
         var imageToImage = _config.IsTargetFormatImageBased && imageSubtitle != null;
-        if (item.Subtitle != null)
+        var targetLanguages = imageToImage || item.Subtitle == null
+            ? new List<TranslationPair>()
+            : GetTargetLanguages();
+        if (targetLanguages.Count <= 1)
         {
-            item.Subtitle = await RunConvertFunctions(item, imageToImage, cancellationToken);
+            _currentTargetLanguage = targetLanguages.FirstOrDefault();
+            _currentTargetNumber = 1;
+            _targetLanguageCount = 1;
+            if (item.Subtitle != null)
+            {
+                item.Subtitle = await RunConvertFunctions(item, imageToImage, cancellationToken);
+            }
+
+            await SaveConverted(item, imageSubtitle, cancellationToken);
+            return;
         }
 
+        // Several target languages: loading/OCR above ran once, now each language starts from
+        // the untranslated text and is saved as its own file ("movie.da.srt", "movie.sv.srt").
+        // A language that fails does not stop the others.
+        var source = new Subtitle(item.Subtitle, false);
+        var errors = new List<string>();
+        _targetLanguageCount = targetLanguages.Count;
+        try
+        {
+            for (var i = 0; i < targetLanguages.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _currentTargetLanguage = targetLanguages[i];
+                _currentTargetNumber = i + 1;
+                item.Subtitle = new Subtitle(source, false);
+                try
+                {
+                    item.Subtitle = await RunConvertFunctions(item, imageToImage, cancellationToken);
+                    var statusBeforeSave = item.Status;
+                    await SaveConverted(item, imageSubtitle, cancellationToken);
+
+                    // The save methods catch their own exceptions and only leave an error status
+                    // behind - the next language's save would overwrite it with "Converted" and
+                    // hide that this language's file was never written.
+                    if (TryGetErrorStatusMessage(item.Status, out var saveError))
+                    {
+                        SeLogger.Error($"Batch convert save to {targetLanguages[i].Code} failed for: {item.FileName}: {saveError}");
+                        errors.Add(targetLanguages[i].Code + ": " + saveError);
+                        item.Status = statusBeforeSave;
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    SeLogger.Error(exception, $"Batch convert to {targetLanguages[i].Code} failed for: {item.FileName}");
+                    errors.Add(targetLanguages[i].Code + ": " + exception.Message);
+                }
+            }
+        }
+        finally
+        {
+            _currentTargetLanguage = null;
+            _targetLanguageCount = 1;
+        }
+
+        if (errors.Count == targetLanguages.Count)
+        {
+            throw new InvalidOperationException(string.Join("; ", errors));
+        }
+
+        if (errors.Count > 0)
+        {
+            item.Status = string.Format(Se.Language.General.ErrorX, string.Join("; ", errors));
+        }
+    }
+
+    /// <summary>
+    /// The languages to translate into: the "To" language plus any extra ones, without
+    /// duplicates. When the source language is set explicitly, an extra target equal to it is
+    /// skipped - it would only produce a copy of the source.
+    /// </summary>
+    internal List<TranslationPair> GetTargetLanguages()
+    {
+        var result = new List<TranslationPair>();
+        if (!_config.AutoTranslate.IsActive)
+        {
+            return result;
+        }
+
+        result.Add(_config.AutoTranslate.TargetLanguage);
+        var sourceCode = _config.AutoTranslate.SourceLanguage?.Code ?? string.Empty;
+        foreach (var language in _config.AutoTranslate.ExtraTargetLanguages)
+        {
+            if (result.Any(p => p.Code.Equals(language.Code, StringComparison.OrdinalIgnoreCase)) ||
+                language.Code.Equals(sourceCode, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            result.Add(language);
+        }
+
+        return result;
+    }
+
+    private TranslationPair CurrentTargetLanguage => _currentTargetLanguage ?? _config.AutoTranslate.TargetLanguage;
+
+    private async Task SaveConverted(BatchConvertItem item, IOcrSubtitle? imageSubtitle, CancellationToken cancellationToken)
+    {
         // Save text based formats - binary ones like EBU STL are in the list too (for loading),
         // but their ToText is just "Not supported!", so they go through the binary save below
         foreach (var format in _subtitleFormats)
@@ -479,11 +584,24 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         // Save binary formats
         var binaryFormats = new Dictionary<string, SubtitleFormat>
         {
-            { FormatPac, new Pac() },
+            // The code page from the PAC settings (shared with the main window's Export PAC) -
+            // without one Pac.Save falls back to Latin (Czech).
+            { FormatPac, new Pac { CodePage = _config.PacCodePage, SecondaryCodePage = _config.PacSecondaryCodePage } },
             { FormatPacUnicode, new PacUnicode() },
             { FormatCavena890, new Cavena890() },
             { FormatEbuStl, new Ebu() },
             { FormatAyato, new Ayato() },
+            { CheetahCaption.NameOfFormat, new CheetahCaption() },
+            { CheetahCaptionOld.NameOfFormat, new CheetahCaptionOld() },
+            { CapMakerPlus.NameOfFormat, new CapMakerPlus() },
+            {
+                DvbTeletext.NameOfFormat, new DvbTeletext
+                {
+                    PageNumber = _config.DvbTeletextPageNumber,
+                    LanguageCode = _config.DvbTeletextLanguageCode,
+                    HearingImpaired = _config.DvbTeletextHearingImpaired,
+                }
+            },
         };
         foreach (var kvp in binaryFormats)
         {
@@ -501,6 +619,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                         item.Subtitle.Header = _config.EbuHeader;
                         Ebu.EbuUiHelper.JustificationCode = _config.EbuJustificationCode;
                     }
+                }
+
+                if (format is Cavena890 cavena)
+                {
+                    SaveCavena890(item, cavena, format, cancellationToken);
+                    return;
                 }
 
                 if (format is IBinaryPersistableSubtitle binaryPersistableSubtitle)
@@ -535,7 +659,17 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 sb.AppendLine(HtmlUtil.RemoveHtmlTags(p.Text, true));
             }
 
-            await File.WriteAllTextAsync(path, sb.ToString(), cancellationToken);
+            try
+            {
+                var encoding = EncodingHelper.ResolveEncoding(_config.TargetEncoding, item.FileName);
+                await File.WriteAllTextAsync(path, sb.ToString(), encoding, cancellationToken);
+                item.Status = Se.Language.General.Converted;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                item.Status = string.Format(Se.Language.General.ErrorX, exception.Message);
+            }
+
             return;
         }
 
@@ -749,12 +883,53 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         var paragraphs = item.Subtitle.Paragraphs;
         if (IsAssaOrSsa(item.Subtitle))
         {
-            paragraphs = paragraphs.Select(p => new Paragraph(p, false) { Text = AdvancedSubStationAlpha.RemoveCommentBlocks(p.Text) }).ToList();
+            paragraphs = AdvancedSubStationAlpha.RemoveCommentBlocks(paragraphs);
         }
 
         var text = Nikse.SubtitleEdit.UiLogic.Export.CustomTextFormatter.GenerateCustomText(selectedCustomFormat.ToTemplate(), paragraphs, item.FileName, string.Empty);
-        var path = MakeOutputFileName(item, selectedCustomFormat.Extension);
-        await File.WriteAllTextAsync(path, text, cancellationToken);
+        try
+        {
+            var path = MakeOutputFileName(item, selectedCustomFormat.Extension);
+            var encoding = EncodingHelper.ResolveEncoding(_config.TargetEncoding, item.FileName);
+            await File.WriteAllTextAsync(path, text, encoding, cancellationToken);
+            item.Status = Se.Language.General.Converted;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            item.Status = string.Format(Se.Language.General.ErrorX, exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// True when the status is an "Error; {0}" value the save methods leave behind when they
+    /// fail (they catch their own exceptions), with the message in <paramref name="message"/>.
+    /// </summary>
+    internal static bool TryGetErrorStatusMessage(string? status, out string message)
+    {
+        message = string.Empty;
+        if (string.IsNullOrEmpty(status))
+        {
+            return false;
+        }
+
+        var format = Se.Language.General.ErrorX;
+        var placeholder = format.IndexOf("{0}", StringComparison.Ordinal);
+        if (placeholder < 0)
+        {
+            return false;
+        }
+
+        var prefix = format.Substring(0, placeholder);
+        var suffix = format.Substring(placeholder + "{0}".Length);
+        if (status.Length < prefix.Length + suffix.Length ||
+            !status.StartsWith(prefix, StringComparison.Ordinal) ||
+            !status.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        message = status.Substring(prefix.Length, status.Length - prefix.Length - suffix.Length);
+        return true;
     }
 
     /// <summary>
@@ -1913,6 +2088,33 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         item.Status = Se.Language.General.Converted;
     }
 
+    /// <summary>
+    /// The footer (embedded fonts etc.) to write when the header template replaces the source's
+    /// header. Replacing it outright used to strip a source .ass file's embedded fonts; with
+    /// "keep source embedded fonts" the source footer is kept, and the template's fonts are added
+    /// first so the template wins when both have a font file with the same name.
+    /// </summary>
+    internal static string MakeAssaFooter(string? templateFooter, string? sourceFooter, bool keepSourceEmbeddedFonts)
+    {
+        if (!keepSourceEmbeddedFonts || string.IsNullOrWhiteSpace(sourceFooter))
+        {
+            return templateFooter ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(templateFooter))
+        {
+            return sourceFooter;
+        }
+
+        var footer = templateFooter;
+        foreach (var (fileName, bytes) in AssaFontEmbedder.GetEmbeddedFonts(sourceFooter))
+        {
+            footer = AssaFontEmbedder.AddFontToFooter(footer, fileName, bytes);
+        }
+
+        return footer;
+    }
+
     private async Task SaveSubtitleFormat(BatchConvertItem item, SubtitleFormat targetFormat, CancellationToken cancellationToken)
     {
         try
@@ -1931,7 +2133,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                     if (!string.IsNullOrEmpty(_config.AssaHeader))
                     {
                         s.Header = _config.AssaHeader;
-                        s.Footer = _config.AssaFooter;
+                        s.Footer = MakeAssaFooter(_config.AssaFooter, s.Footer, _config.AssaKeepSourceEmbeddedFonts);
                     }
                 }
 
@@ -1943,7 +2145,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 }
             }
 
-            var converted = targetFormat.ToText(s, Path.GetFileNameWithoutExtension(item.FileName));
+            var converted = ToTextWithFreshDCinemaIdentity(targetFormat, s, Path.GetFileNameWithoutExtension(item.FileName));
+            if (_config.ForceCrLf)
+            {
+                converted = EncodingHelper.ForceCrLf(converted);
+            }
+
             var path = MakeOutputFileName(item, targetFormat.Extension);
             var encoding = EncodingHelper.ResolveEncoding(_config.TargetEncoding, item.FileName);
             await File.WriteAllTextAsync(path, converted, encoding, cancellationToken);
@@ -1952,6 +2159,78 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         catch (Exception exception)
         {
             item.Status = string.Format(Se.Language.General.ErrorX, exception.Message);
+        }
+    }
+
+    internal static bool IsDCinemaTextFormat(SubtitleFormat? format) =>
+        format is DCinemaInterop or DCinemaSmpte2007 or DCinemaSmpte2010 or DCinemaSmpte2014;
+
+    /// <summary>
+    /// D-Cinema formats write the global current movie title/subtitle id and only fill them when
+    /// empty, so every file in a batch got the first file's title and the same UUID. Each output
+    /// gets a new id, and the title comes from the file name unless the source was D-Cinema (its
+    /// loaded title is kept). The previous values are restored afterwards so the main window's
+    /// D-Cinema properties are not changed by a batch run.
+    /// </summary>
+    internal static string ToTextWithFreshDCinemaIdentity(SubtitleFormat targetFormat, Subtitle subtitle, string title)
+    {
+        if (!IsDCinemaTextFormat(targetFormat))
+        {
+            return targetFormat.ToText(subtitle, title);
+        }
+
+        var ss = Configuration.Settings.SubtitleSettings;
+        var oldId = ss.CurrentDCinemaSubtitleId;
+        var oldTitle = ss.CurrentDCinemaMovieTitle;
+        try
+        {
+            ss.CurrentDCinemaSubtitleId = "urn:uuid:" + Guid.NewGuid();
+            if (!IsDCinemaTextFormat(subtitle.OriginalFormat))
+            {
+                ss.CurrentDCinemaMovieTitle = string.Empty;
+            }
+
+            return targetFormat.ToText(subtitle, title);
+        }
+        finally
+        {
+            ss.CurrentDCinemaSubtitleId = oldId;
+            ss.CurrentDCinemaMovieTitle = oldTitle;
+        }
+    }
+
+    /// <summary>
+    /// Cavena890.Save reads its header fields from the global libse settings, which the main
+    /// window's Export Cavena 890 fills for the file it exports - so batch convert used to write
+    /// that file's title, translator and start time into every file. Apply batch convert's own
+    /// Cavena settings for the save and restore the main window's afterwards.
+    /// </summary>
+    private void SaveCavena890(BatchConvertItem item, IBinaryPersistableSubtitle format, SubtitleFormat f, CancellationToken cancellationToken)
+    {
+        var ss = Configuration.Settings.SubtitleSettings;
+        var oldTitle = ss.CurrentCavena89Title;
+        var oldOriginalTitle = ss.CurrentCavena890riginalTitle;
+        var oldTranslator = ss.CurrentCavena890Translator;
+        var oldComment = ss.CurrentCavena89Comment;
+        var oldStartOfMessage = ss.Cavena890StartOfMessage;
+        try
+        {
+            ss.CurrentCavena89Title = _config.Cavena890TranslatedTitle ?? string.Empty; // empty = file name
+            ss.CurrentCavena890riginalTitle = _config.Cavena890OriginalTitle ?? string.Empty;
+            ss.CurrentCavena890Translator = _config.Cavena890Translator ?? string.Empty;
+            ss.CurrentCavena89Comment = _config.Cavena890Comment ?? string.Empty;
+            ss.Cavena890StartOfMessage = string.IsNullOrEmpty(_config.Cavena890StartOfMessage)
+                ? "10:00:00:00"
+                : _config.Cavena890StartOfMessage;
+            SaveSubtitleFormat(item, format, f, cancellationToken);
+        }
+        finally
+        {
+            ss.CurrentCavena89Title = oldTitle;
+            ss.CurrentCavena890riginalTitle = oldOriginalTitle;
+            ss.CurrentCavena890Translator = oldTranslator;
+            ss.CurrentCavena89Comment = oldComment;
+            ss.Cavena890StartOfMessage = oldStartOfMessage;
         }
     }
 
@@ -2035,11 +2314,15 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             ? parsedPreset
             : TextEffectPreset.SoftShadow;
 
-        var removeAssaCommentBlocks = IsAssaOrSsa(item.Subtitle);
+        // ASSA renderers never draw a {comment} block: strip them, and skip the lines that held
+        // nothing else instead of rendering an empty image for them.
+        var paragraphs = IsAssaOrSsa(item.Subtitle)
+            ? AdvancedSubStationAlpha.RemoveCommentBlocks(item.Subtitle.Paragraphs)
+            : item.Subtitle.Paragraphs;
         var imageParameters = new List<ImageParameter>();
-        for (var i = 0; i < item.Subtitle.Paragraphs.Count; i++)
+        for (var i = 0; i < paragraphs.Count; i++)
         {
-            Paragraph? subtitle = item.Subtitle.Paragraphs[i];
+            Paragraph? subtitle = paragraphs[i];
             var imageParameter = new ImageParameter
             {
                 // "{\an8}" & co. were stripped from the text but not honored, so top-positioned
@@ -2051,9 +2334,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 PaddingLeftRight = profile.PaddingLeftRight,
                 PaddingTopBottom = profile.PaddingTopBottom,
                 Index = i,
-                Text = ExportTextTags.ToRenderableText(removeAssaCommentBlocks
-                    ? AdvancedSubStationAlpha.RemoveCommentBlocks(subtitle.Text)
-                    : subtitle.Text),
+                Text = ExportTextTags.ToRenderableText(subtitle.Text),
                 StartTime = subtitle.StartTime.TimeSpan,
                 EndTime = subtitle.EndTime.TimeSpan,
                 FontColor = profile.FontColor.FromHexToColor().ToSKColor(),
@@ -2111,6 +2392,28 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         return new OcrSubtitleImageParameter(imageParameters);
     }
 
+    /// <summary>
+    /// "en" for a translator code like "en", "pt-BR", "zho_Hans" or "eng", or null when it
+    /// cannot be mapped.
+    /// </summary>
+    internal static string? GetTwoLetterLanguageCode(string? languageCode)
+    {
+        if (string.IsNullOrEmpty(languageCode))
+        {
+            return null;
+        }
+
+        var primary = languageCode.Split('-', '_')[0].ToLowerInvariant();
+        var code = primary.Length switch
+        {
+            2 => primary,
+            3 => Iso639Dash2LanguageCode.GetTwoLetterCodeFromThreeLetterCode(primary),
+            _ => Iso639Dash2LanguageCode.GetTwoLetterCodeFromEnglishName(languageCode),
+        };
+
+        return code?.Length == 2 ? code.ToLowerInvariant() : null;
+    }
+
     private async Task<Subtitle> RunConvertFunctions(BatchConvertItem item, bool imageToImage, CancellationToken cancellationToken)
     {
         var s = new Subtitle(item.Subtitle, false);
@@ -2136,6 +2439,14 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             s = SplitBreakLongLines(s, Language);
             s = AdjustDisplayDuration(s);
             s = await AutoTranslate(s, item, cancellationToken);
+            if (_config.AutoTranslate.IsActive)
+            {
+                // The steps below (casing, auto balance, remove text for HI, fix common errors,
+                // right-to-left, ...) work on the translated text, so they need the target
+                // language's rules, not the source's.
+                Language = GetTwoLetterLanguageCode(CurrentTargetLanguage.Code) ?? Language;
+            }
+
             s = ChangeCasing(s, Language);
             s = OffsetTimeCodes(s);
             s = ChangeFrameRate(s);
@@ -3351,11 +3662,14 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 if (percent != lastPercent)
                 {
                     lastPercent = percent;
-                    item.Status = string.Format(Se.Language.General.TranslatePercentX, percent);
+                    var status = string.Format(Se.Language.General.TranslatePercentX, percent);
+                    item.Status = _targetLanguageCount > 1
+                        ? $"{CurrentTargetLanguage.Code} ({_currentTargetNumber}/{_targetLanguageCount}) {status}"
+                        : status;
                 }
             },
         };
-        var translatedSubtitle = await doAutoTranslate.DoTranslate(subtitle, _config.AutoTranslate.SourceLanguage, _config.AutoTranslate.TargetLanguage,
+        var translatedSubtitle = await doAutoTranslate.DoTranslate(subtitle, _config.AutoTranslate.SourceLanguage, CurrentTargetLanguage,
             _config.AutoTranslate.Translator, cancellationToken);
 
         // Translating is only one step of the run - the item still goes through the remaining
@@ -3645,7 +3959,24 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         // A Transport Stream track named by the file name ending template already carries its
         // language/track token - the regular post fix would double it ("video.eng.en.srt").
-        var languagePart = item.OutputFileNameIncludesLanguage ? string.Empty : GetLanguagePostFix(item);
+        var includesLanguage = item.OutputFileNameIncludesLanguage;
+        if (includesLanguage && _config.AutoTranslate.IsActive && !string.IsNullOrEmpty(item.OutputFileNameEndingTemplate))
+        {
+            // Translated: the template's language token is the target language, not the track's
+            // ("video.eng.srt" for German, and "video.eng_2.srt" for the next target language).
+            var template = item.OutputFileNameEndingTemplate;
+            if (HasTransportStreamLanguagePlaceholder(template))
+            {
+                fileName = Path.GetFileNameWithoutExtension(item.FileName) +
+                           TransportStreamFileNameEnding.Format(template, GetTargetLanguageTokenForTemplate(), item.OutputFileNameTrackId);
+            }
+            else
+            {
+                includesLanguage = false;
+            }
+        }
+
+        var languagePart = includesLanguage ? string.Empty : GetLanguagePostFix(item);
         if (languagePart.Length > 0 && fileName.EndsWith(languagePart, StringComparison.InvariantCultureIgnoreCase))
         {
             languagePart = string.Empty; // base name already carries the language token
@@ -3715,7 +4046,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
     private string GetLanguagePostFix(BatchConvertItem item)
     {
         var languageCode = _config.AutoTranslate.IsActive
-            ? _config.AutoTranslate.TargetLanguage.Code
+            ? CurrentTargetLanguage.Code
             : item.LanguageCode;
 
         if (string.IsNullOrEmpty(languageCode))
@@ -3723,12 +4054,30 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             return string.Empty;
         }
 
+        // Two regional variants of one language as targets ("zh-CN" + "zh-TW") would both map
+        // to ".zh" and only differ by a counter ("movie_2.zh.srt") - use the full code for them.
+        if (_targetLanguageCount > 1 && _config.AutoTranslate.IsActive && SharesLanguageWithOtherTarget(languageCode))
+        {
+            return "." + languageCode;
+        }
+
         // Translator codes can be regional ("zh-CN", "pt-BR") or NLLB-style ("zho_Hans");
         // the primary subtag carries the language for the two/three-letter mappings.
         var primary = languageCode.Split('-', '_')[0];
 
+        // With several target languages the outputs only differ by their language token, so
+        // "No language code" falls back to two-letter codes instead of "movie.srt", "movie_2.srt".
+        var postFixSetting = Se.Settings.Tools.BatchConvert.LanguagePostFix;
+        if (_targetLanguageCount > 1 &&
+            postFixSetting != Se.Language.General.TwoLetterLanguageCode &&
+            postFixSetting != Se.Language.General.ThreeLetterLanguageCode &&
+            postFixSetting != Se.Language.General.ThreeLetterLanguageCodeBibliographic)
+        {
+            postFixSetting = Se.Language.General.TwoLetterLanguageCode;
+        }
+
         var code = string.Empty;
-        if (Se.Settings.Tools.BatchConvert.LanguagePostFix == Se.Language.General.TwoLetterLanguageCode)
+        if (postFixSetting == Se.Language.General.TwoLetterLanguageCode)
         {
             if (primary.Length == 2)
             {
@@ -3748,7 +4097,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 code = string.Empty;
             }
         }
-        else if (Se.Settings.Tools.BatchConvert.LanguagePostFix == Se.Language.General.ThreeLetterLanguageCode)
+        else if (postFixSetting == Se.Language.General.ThreeLetterLanguageCode)
         {
             if (primary.Length == 2)
             {
@@ -3769,7 +4118,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 code = string.Empty;
             }
         }
-        else if (Se.Settings.Tools.BatchConvert.LanguagePostFix == Se.Language.General.ThreeLetterLanguageCodeBibliographic)
+        else if (postFixSetting == Se.Language.General.ThreeLetterLanguageCodeBibliographic)
         {
             var twoLetter = primary;
             if (primary.Length == 3)
@@ -3801,6 +4150,39 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         }
 
         return code.Length == 0 ? string.Empty : "." + code;
+    }
+
+    private static bool HasTransportStreamLanguagePlaceholder(string template)
+    {
+        return template.Contains(TransportStreamExportSettings.PlaceholderTwoLetter, StringComparison.Ordinal) ||
+               template.Contains(TransportStreamExportSettings.PlaceholderTwoLetterUppercase, StringComparison.Ordinal) ||
+               template.Contains(TransportStreamExportSettings.PlaceholderThreeLetter, StringComparison.Ordinal) ||
+               template.Contains(TransportStreamExportSettings.PlaceholderThreeLetterUppercase, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The target language for the Transport Stream file name template: two-letter so the
+    /// template's two/three-letter tokens map, or the full code for regional variants of one
+    /// language ("zh-CN" + "zh-TW") so they do not collide.
+    /// </summary>
+    private string GetTargetLanguageTokenForTemplate()
+    {
+        var code = CurrentTargetLanguage.Code;
+        if (_targetLanguageCount > 1 && SharesLanguageWithOtherTarget(code))
+        {
+            return code;
+        }
+
+        return GetTwoLetterLanguageCode(code) ?? code;
+    }
+
+    /// <summary>True when another selected target language is the same language ("pt-BR" and "pt-PT").</summary>
+    private bool SharesLanguageWithOtherTarget(string languageCode)
+    {
+        var language = GetTwoLetterLanguageCode(languageCode) ?? languageCode.Split('-', '_')[0];
+        return GetTargetLanguages().Any(p =>
+            !p.Code.Equals(languageCode, StringComparison.OrdinalIgnoreCase) &&
+            (GetTwoLetterLanguageCode(p.Code) ?? p.Code.Split('-', '_')[0]).Equals(language, StringComparison.OrdinalIgnoreCase));
     }
 
     public bool AllowFix(Paragraph p, string action)

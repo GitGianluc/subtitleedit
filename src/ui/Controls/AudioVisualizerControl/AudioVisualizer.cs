@@ -2500,7 +2500,13 @@ public class AudioVisualizer : Control
         double AnchorPixel,
         double ZoomFactor,
         int SampleRate,
-        double VideoOffsetMs);
+        double VideoOffsetMs,
+        double FrameNumbersFrameRate);
+
+    // Zero unless the ruler shows frame numbers; else the frame rate they are counted at, so a
+    // mode or frame rate change rebuilds the cached labels.
+    private protected static double TimeLabelFrameNumbersFrameRate =>
+        Se.Settings.General.UseFrameNumbers ? Configuration.Settings.General.CurrentFrameRate : 0;
 
     private void DrawTimeLine(DrawingContext context, ref RenderContext renderCtx)
     {
@@ -2528,7 +2534,8 @@ public class AudioVisualizer : Control
             anchorPixel,
             renderCtx.ZoomFactor,
             renderCtx.SampleRate,
-            Se.Settings.General.CurrentVideoOffsetInMs);
+            Se.Settings.General.CurrentVideoOffsetInMs,
+            TimeLabelFrameNumbersFrameRate);
 
         if (!_timeLineCacheValid || !_timeLineCacheKey.Equals(cacheKey))
         {
@@ -2605,6 +2612,12 @@ public class AudioVisualizer : Control
         if (Math.Abs(Se.Settings.General.CurrentVideoOffsetInMs) > 0.00001)
         {
             seconds = seconds + Se.Settings.General.CurrentVideoOffsetInMs / 1000.0;
+        }
+
+        // The ticks stay on whole seconds; each is labeled with the frame it falls on (#15603).
+        if (Se.Settings.General.UseFrameNumbers)
+        {
+            return FrameNumbers.Format(seconds * 1000.0);
         }
 
         // SE 4 parity: zero-pad minutes/hours so the labels keep a stable width across the
@@ -3559,7 +3572,18 @@ public class AudioVisualizer : Control
     // interpolations, and the CPS label another format - per visible paragraph per frame, only
     // to look up an already-shaped FormattedText. Keyed on the values so a hit allocates nothing;
     // the frame-mode flag is part of the key because ToShortDisplayString switches on it.
-    private readonly Dictionary<(int Number, long DurationMs, bool FrameMode, double FrameRate), string> _footerNumberDurationCache = new(512);
+    private readonly Dictionary<(int Number, long DurationMs, bool FrameMode, bool FrameNumbers, double FrameRate), string> _footerNumberDurationCache = new(512);
+
+    /// <summary>
+    /// A duration as the waveform labels show it: a frame count in frame numbers mode, else
+    /// the short time code ("2,500" or "02:12").
+    /// </summary>
+    private protected static string FormatDurationLabel(double milliseconds)
+    {
+        return Se.Settings.General.UseFrameNumbers
+            ? FrameNumbers.Format(milliseconds)
+            : new TimeCode(milliseconds).ToShortDisplayString();
+    }
     private readonly Dictionary<double, string> _footerCpsCache = new(256);
 
     private protected string GetCachedNumberAndDurationLabel(SubtitleLineViewModel paragraph)
@@ -3571,6 +3595,7 @@ public class AudioVisualizer : Control
         var key = (paragraph.Number,
                    (long)paragraph.Duration.TotalMilliseconds,
                    frameMode,
+                   Se.Settings.General.UseFrameNumbers,
                    frameMode ? Configuration.Settings.General.CurrentFrameRate : 0);
         if (!_footerNumberDurationCache.TryGetValue(key, out var label))
         {
@@ -3581,11 +3606,8 @@ public class AudioVisualizer : Control
                 _footerNumberDurationCache.Clear();
             }
 
-            // ToShortDisplayString consults the libse UseTimeFormatHHMMSSFF flag, which SE 5
-            // mirrors from Se.Settings.General.UseFrameMode (Se.cs:409). So flipping frame
-            // mode on automatically switches this label between the time form ("2,500") and
-            // the frame form ("00:00:02:12") without an explicit branch here.
-            label = $"#{paragraph.Number}  {new TimeCode(paragraph.Duration.TotalMilliseconds).ToShortDisplayString()}";
+            // See FormatDurationLabel - the time code mode is part of the key.
+            label = $"#{paragraph.Number}  {FormatDurationLabel(paragraph.Duration.TotalMilliseconds)}";
             _footerNumberDurationCache[key] = label;
         }
 
@@ -3701,6 +3723,7 @@ public class AudioVisualizer : Control
         var startIndex = FindFirstIndexAfterTime(_originalSubtitleCueMaxEnds, start, static maxEnd => maxEnd);
         var lastStart = -1d;
         var count = 0;
+        var sortedRunEnd = -1;
         var minSpacing = GetThinnedSpacingSeconds(end > start ? renderCtx.Width / (end - start) : 0);
 
         var i = startIndex;
@@ -3723,7 +3746,12 @@ public class AudioVisualizer : Control
             {
                 if (cue.StartSeconds - lastStart < minSpacing)
                 {
-                    i = FindFirstIndexAtOrAfterStart(_originalSubtitleCues, i + 1, lastStart + minSpacing, static c => c.StartSeconds);
+                    if (i >= sortedRunEnd)
+                    {
+                        sortedRunEnd = FindSortedRunEnd(_originalSubtitleCues, i, end, static c => c.StartSeconds);
+                    }
+
+                    i = FindFirstIndexAtOrAfterStart(_originalSubtitleCues, i + 1, sortedRunEnd, lastStart + minSpacing, static c => c.StartSeconds);
                     continue;
                 }
 
@@ -3866,10 +3894,7 @@ public class AudioVisualizer : Control
             }
             else
             {
-                // ToShortDisplayString consults the libse UseTimeFormatHHMMSSFF flag, which SE 5
-                // mirrors from Se.Settings.General.UseFrameMode (Se.cs:409). So flipping frame
-                // mode on automatically switches this label between the time form ("2,500") and
-                // the frame form ("00:00:02:12") without an explicit branch here.
+                // Follows the time code mode (time, frames or frame count) - see FormatDurationLabel.
                 var withDuration = GetCachedNumberAndDurationLabel(paragraph);
                 var probe = GetCachedParagraphText(withDuration);
 
@@ -4168,9 +4193,8 @@ public class AudioVisualizer : Control
             return;
         }
 
-        // ToShortDisplayString mirrors Se.Settings.General.UseFrameMode, so this label follows the
-        // same time/frame formatting as the existing paragraph footer (see DrawParagraphFooter).
-        var durationText = GetCachedParagraphText(new TimeCode(durationMs).ToShortDisplayString());
+        // Same time code mode formatting as the paragraph footer (see DrawParagraphFooter).
+        var durationText = GetCachedParagraphText(FormatDurationLabel(durationMs));
         if (durationText.Width >= currentRegionWidth - 4)
         {
             return;
@@ -4369,6 +4393,7 @@ public class AudioVisualizer : Control
 
         var lastStartTime = -1d;
         var count = 0;
+        var sortedRunEnd = -1;
         var viewSeconds = EndPositionSeconds - StartPositionSeconds;
         var minSpacing = GetThinnedSpacingSeconds(viewSeconds > 0 ? Bounds.Width / viewSeconds : 0) * TimeCode.BaseUnit;
 
@@ -4400,7 +4425,12 @@ public class AudioVisualizer : Control
             {
                 if (pStart - lastStartTime < minSpacing)
                 {
-                    i = FindFirstIndexAtOrAfterStart(subtitle, i + 1, lastStartTime + minSpacing,
+                    if (i >= sortedRunEnd)
+                    {
+                        sortedRunEnd = FindSortedRunEnd(subtitle, i, endThreshold, static paragraph => paragraph.StartTime.TotalMilliseconds);
+                    }
+
+                    i = FindFirstIndexAtOrAfterStart(subtitle, i + 1, sortedRunEnd, lastStartTime + minSpacing,
                         static paragraph => paragraph.StartTime.TotalMilliseconds);
                     continue;
                 }
@@ -4452,11 +4482,39 @@ public class AudioVisualizer : Control
         return pixelsPerSecond > 0 ? Math.Max(minSpacingSeconds, minSpacingPixels / pixelsPerSecond) : minSpacingSeconds;
     }
 
-    /// <summary>First index at or after <paramref name="low"/> whose start is at or after <paramref name="time"/> (items sorted by start), or <c>items.Count</c>.</summary>
-    private protected static int FindFirstIndexAtOrAfterStart<T>(IReadOnlyList<T> items, int low, double time, Func<T, double> getStartTime)
+    /// <summary>
+    /// End (exclusive) of the run of items from <paramref name="from"/> that is sorted by start. The
+    /// list is not always sorted - ASSA files often have typesetting lines appended after the
+    /// dialogue - and a binary search across an unsorted stretch can jump past lines on screen.
+    /// The scan stops at the first start after <paramref name="stopAfter"/>, where the caller's
+    /// scan of the view stops too.
+    /// </summary>
+    private protected static int FindSortedRunEnd<T>(IReadOnlyList<T> items, int from, double stopAfter, Func<T, double> getStartTime)
     {
-        var high = items.Count - 1;
-        var result = items.Count;
+        var previous = getStartTime(items[from]);
+        for (var k = from + 1; k < items.Count; k++)
+        {
+            var start = getStartTime(items[k]);
+            if (start < previous || start > stopAfter)
+            {
+                return k;
+            }
+
+            previous = start;
+        }
+
+        return items.Count;
+    }
+
+    /// <summary>
+    /// First index in [<paramref name="low"/>, <paramref name="end"/>) whose start is at or after
+    /// <paramref name="time"/>, or <paramref name="end"/>. The range must be sorted by start - see
+    /// <see cref="FindSortedRunEnd{T}"/>.
+    /// </summary>
+    private protected static int FindFirstIndexAtOrAfterStart<T>(IReadOnlyList<T> items, int low, int end, double time, Func<T, double> getStartTime)
+    {
+        var high = end - 1;
+        var result = end;
 
         while (low <= high)
         {

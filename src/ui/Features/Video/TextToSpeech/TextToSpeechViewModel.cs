@@ -307,7 +307,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
         else if (SelectedEngine is MistralSpeech)
         {
-            ApiKey = Se.Settings.Video.TextToSpeech.MistralApiKey;
+            ApiKey = Se.Settings.Providers.MistralApiKey;
         }
         else if (SelectedEngine is OpenAiCompatibleSpeech)
         {
@@ -347,7 +347,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
         else if (SelectedEngine is MistralSpeech)
         {
-            Se.Settings.Video.TextToSpeech.MistralApiKey = ApiKey;
+            Se.Settings.Providers.MistralApiKey = ApiKey;
             Se.Settings.Video.TextToSpeech.MistralModel = SelectedModel ?? "voxtral-mini-tts-2603";
         }
         else if (SelectedEngine is OpenAiCompatibleSpeech)
@@ -410,6 +410,14 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppModel = SelectedModel ?? FireRedTts3AudioCpp.DefaultModelKey;
             Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppLanguage = SelectedLanguage?.Name ?? string.Empty;
+        }
+        else if (SelectedEngine is KugelAudioAudioCpp)
+        {
+            Se.Settings.Video.TextToSpeech.KugelAudioAudioCppModel = SelectedModel ?? KugelAudioAudioCpp.DefaultModelKey;
+            if (SelectedVoice?.EngineVoice is KugelAudioVoice kugelVoice && !string.IsNullOrEmpty(kugelVoice.Voice))
+            {
+                Se.Settings.Video.TextToSpeech.KugelAudioAudioCppVoice = kugelVoice.Voice;
+            }
         }
         else if (SelectedEngine is CosyVoice3CrispAsr)
         {
@@ -1496,6 +1504,10 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             FireRedTts3AudioCpp.StopServer();
         }
+        if (keepAlive is not KugelAudioAudioCpp)
+        {
+            KugelAudioAudioCpp.StopServer();
+        }
         if (keepAlive is not CosyVoice3CrispAsr)
         {
             CosyVoice3CrispAsr.StopServer();
@@ -1825,6 +1837,9 @@ public partial class TextToSpeechViewModel : ObservableObject
             case FireRedTts3AudioCpp:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadFireRedTts3AudioCppModels(FireRedTts3AudioCpp.ResolveModelKey(SelectedModel)));
                 break;
+            case KugelAudioAudioCpp:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadKugelAudioAudioCppModels(KugelAudioAudioCpp.ResolveModelKey(SelectedModel)));
+                break;
             case CosyVoice3CrispAsr:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadCosyVoice3CrispAsrModels(CosyVoice3CrispAsr.ResolveModelKey(SelectedModel)));
                 break;
@@ -1917,6 +1932,9 @@ public partial class TextToSpeechViewModel : ObservableObject
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
             FireRedTts3AudioCpp => FireRedTts3AudioCpp.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
+            KugelAudioAudioCpp => KugelAudioAudioCpp.AreModelsInstalled(modelKey)
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
             CosyVoice3CrispAsr => CosyVoice3CrispAsr.AreModelsInstalled(modelKey)
@@ -3374,7 +3392,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             ProgressValue = 0;
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Merging audio: segment {index + 1} of {previousStepResult.Length}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.MergingAudioSegmentXOfY, index + 1, previousStepResult.Length);
 
                 var item = previousStepResult[index];
 
@@ -3554,7 +3572,7 @@ public partial class TextToSpeechViewModel : ObservableObject
 
             for (var index = 0; index < _subtitle.Paragraphs.Count; index++)
             {
-                ProgressText = $"Generating speech: segment {index + 1} of {_subtitle.Paragraphs.Count}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.GeneratingSpeechSegmentXOfY, index + 1, _subtitle.Paragraphs.Count);
                 var paragraph = _subtitle.Paragraphs[index];
 
                 // A line the user chose to leave silent gets no step result at all - exactly like
@@ -4289,7 +4307,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             ProgressValue = 0;
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Adjusting speed: segment {index + 1} of {_subtitle.Paragraphs.Count}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.AdjustingSpeedSegmentXOfY, index + 1, _subtitle.Paragraphs.Count);
                 ProgressValue = (double)index / _subtitle.Paragraphs.Count * 100;
 
                 var item = previousStepResult[index];
@@ -4549,7 +4567,7 @@ public partial class TextToSpeechViewModel : ObservableObject
 
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Post-processing: segment {index + 1} of {previousStepResult.Length}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.PostProcessingSegmentXOfY, index + 1, previousStepResult.Length);
                 var item = previousStepResult[index];
 
                 if (string.IsNullOrEmpty(item.CurrentFileName) || !File.Exists(item.CurrentFileName))
@@ -4958,7 +4976,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             }
             else if (SelectedEngine is MistralSpeech)
             {
-                ApiKey = Se.Settings.Video.TextToSpeech.MistralApiKey;
+                ApiKey = Se.Settings.Providers.MistralApiKey;
                 SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.MistralModel);
                 if (string.IsNullOrEmpty(SelectedModel))
                 {
@@ -5134,6 +5152,24 @@ public partial class TextToSpeechViewModel : ObservableObject
             {
                 // Minimal engine: single fixed quant (no model dropdown) and no settings
                 // dialog. Show only the model-download button so the user can fetch the GGUFs.
+                IsModelDownloadVisible = true;
+            }
+            else if (SelectedEngine is KugelAudioAudioCpp)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.KugelAudioAudioCppModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+
+                var savedVoice = Se.Settings.Video.TextToSpeech.KugelAudioAudioCppVoice;
+                var match = Voices.FirstOrDefault(v => v.EngineVoice is KugelAudioVoice kv && kv.Voice == savedVoice);
+                if (match != null)
+                {
+                    SelectedVoice = match;
+                }
+
+                IsEngineSettingsVisible = true;
                 IsModelDownloadVisible = true;
             }
             else if (SelectedEngine is SupertonicCrispAsr)
