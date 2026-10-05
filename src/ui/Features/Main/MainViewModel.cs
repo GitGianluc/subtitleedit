@@ -17461,11 +17461,19 @@ public partial class MainViewModel :
             return;
         }
 
+        var focusedTextBox = selectedItems.Count == 1 ? GetFocusedTextBoxWrapper() : null;
+        var reselectAll = TextBoxSurroundToggler.IsWholeTextSelected(focusedTextBox);
+
         var newTexts = TextBoxSurroundToggler.ApplyToTexts(
             behavior, scope, surroundLeft, selectedItems.Select(p => p.Text), surroundRight);
         for (var i = 0; i < selectedItems.Count; i++)
         {
             selectedItems[i].Text = newTexts[i];
+        }
+
+        if (reselectAll)
+        {
+            TextBoxSurroundToggler.SelectAllAfterTextChange(focusedTextBox!);
         }
 
         _updateAudioVisualizer = true;
@@ -19748,6 +19756,31 @@ public partial class MainViewModel :
         foreach (var s in selectedItems)
         {
             s.Text = Utilities.AutoBreakLine(s.Text, language);
+        }
+
+        _updateAudioVisualizer = true;
+    }
+
+    [RelayCommand]
+    private void ToggleBreak()
+    {
+        // Unbreaks when any selected line has a line break, otherwise breaks
+        // them - so repeated presses flip the selection back and forth (#15681).
+        var selectedItems = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().ToList();
+        if (selectedItems.Count == 0)
+        {
+            return;
+        }
+
+        var hasBreak = selectedItems.Any(s => s.Text.Contains('\n') || s.Text.Contains('\r'));
+        var language = GetDetectedLanguageCode();
+        foreach (var s in selectedItems)
+        {
+            // Merge threshold 0 so short lines get broken too - plain auto break
+            // leaves lines shorter than "Unbreak subtitles shorter than" as is.
+            s.Text = hasBreak
+                ? Utilities.UnbreakLine(s.Text)
+                : Utilities.AutoBreakLine(s.Text, Se.Settings.General.SubtitleLineMaximumLength, 0, language);
         }
 
         _updateAudioVisualizer = true;

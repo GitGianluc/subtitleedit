@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.3.0-beta21",
+  "version": "v5.3.0-beta22",
   "translatedBy": "",
   "cultureName": "en-US",
   "general": {
@@ -3645,6 +3645,7 @@
       "generalMergeSelectedLinesAndUnbreak": "Merge selected lines and unbreak",
       "generalMergeSelectedLinesAndUnbreakCjk": "Merge selected lines and unbreak without space (CJK)",
       "generalUnbreakNoSpaceCjk": "Unbreak without space (CJK)",
+      "generalToggleBreak": "Toggle break/unbreak",
       "generalMergeSelectedLinesBilingual": "Merge selected lines bilingual",
       "generalToggleTranslationMode": "Toggle translation mode",
       "generalToggleTranslationAndOriginalInPreviews": "Toggle translation and original in video/audio preview",
@@ -4286,6 +4287,10 @@
     "noAttachmentsFound": "No attachments found in selected ASSA file.",
     "deleteStyleQuestion": "Delete style?",
     "deleteStylesQuestion": "Delete styles?",
+    "deleteXStylesQuestion": "Do you want to delete {0} styles?",
+    "deleteXStylesFromStorageQuestion": "Do you want to delete {0} styles from storage?",
+    "deleteStyleXFromStorageQuestion": "Do you want to delete style \"{0}\" from storage?",
+    "deleteStyleXFromFileQuestion": "Do you want to delete style \"{0}\" from current file?",
     "openStyleImportFile": "Open subtitle file to import styles from",
     "styleImportFiles": "Style files (.ass, .sty, Subtitle Edit 4 categories .template)",
     "ssaStyleImportFiles": "Style files (.ssa, .ass, .sty)",

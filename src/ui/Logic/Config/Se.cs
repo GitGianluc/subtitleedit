@@ -21,7 +21,7 @@ public class Se
     internal const int CurrentShortcutsMigrationVersion = 5;
     internal const int CurrentLayoutMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.3.0-beta21";
+    public static string Version { get; set; } = "v5.3.0-beta22";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -1243,6 +1243,9 @@ public class Se
         {
             Settings.Providers = new SeProviders();
         }
+
+        Settings.Tools.RemoveTextForHi ??= new();
+        Settings.Tools.RemoveTextForHi.MigrateFullInterjectionLists();
 
         MigrateProviderApiKeys(Settings);
 
