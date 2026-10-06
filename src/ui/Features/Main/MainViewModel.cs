@@ -2110,6 +2110,13 @@ public partial class MainViewModel :
     [RelayCommand]
     private async Task ShowAssaStyles()
     {
+        // One "Styles" shortcut for both formats: SSA has its own dialog.
+        if (IsFormatSsa)
+        {
+            await ShowSsaStyles();
+            return;
+        }
+
         if (Window == null || !IsFormatAssa)
         {
             return;
@@ -5220,12 +5227,13 @@ public partial class MainViewModel :
             Window!,
             format,
             GetNewFileName(),
-            $"Save {format.Name} file as");
+            string.Format(Se.Language.Main.SaveXFileAs, format.Name));
 
         if (!string.IsNullOrEmpty(fileName))
         {
             await File.WriteAllBytesAsync(fileName, ms.ToArray());
             ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, format.Name, fileName));
+            await ShowExportFileSavedPrompt(fileName);
         }
     }
 
@@ -5251,12 +5259,13 @@ public partial class MainViewModel :
             Window!,
             format,
             GetNewFileName(),
-            $"Save {format.Name} file as");
+            string.Format(Se.Language.Main.SaveXFileAs, format.Name));
 
         if (!string.IsNullOrEmpty(fileName))
         {
             await File.WriteAllBytesAsync(fileName, ms.ToArray());
             ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, format.Name, fileName));
+            await ShowExportFileSavedPrompt(fileName);
         }
     }
 
@@ -5282,12 +5291,13 @@ public partial class MainViewModel :
             Window!,
             format,
             GetNewFileName(),
-            $"Save {format.Name} file as");
+            string.Format(Se.Language.Main.SaveXFileAs, format.Name));
 
         if (!string.IsNullOrEmpty(fileName))
         {
             await File.WriteAllBytesAsync(fileName, ms.ToArray());
             ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, format.Name, fileName));
+            await ShowExportFileSavedPrompt(fileName);
         }
     }
 
@@ -5340,6 +5350,7 @@ public partial class MainViewModel :
         }
 
         ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, cavena.Name, fileName));
+        await ShowExportFileSavedPrompt(fileName);
     }
 
     [RelayCommand]
@@ -5387,6 +5398,7 @@ public partial class MainViewModel :
         await File.WriteAllBytesAsync(fileName, GetDvbTeletextExportBytes(writer));
 
         ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, Se.Language.File.Export.TitleExportDvbTeletext, fileName));
+        await ShowExportFileSavedPrompt(fileName);
     }
 
     /// <summary>
@@ -5433,6 +5445,7 @@ public partial class MainViewModel :
         await File.WriteAllBytesAsync(fileName, ms.ToArray());
 
         ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, pac.Name, fileName));
+        await ShowExportFileSavedPrompt(fileName);
     }
 
     [RelayCommand]
@@ -5457,12 +5470,13 @@ public partial class MainViewModel :
             Window!,
             format,
             GetNewFileName(),
-            $"Save {format.Name} file as");
+            string.Format(Se.Language.Main.SaveXFileAs, format.Name));
 
         if (!string.IsNullOrEmpty(fileName))
         {
             await File.WriteAllBytesAsync(fileName, ms.ToArray());
             ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToY, format.Name, fileName));
+            await ShowExportFileSavedPrompt(fileName);
         }
 
         _shortcutManager.ClearKeys();
@@ -5572,7 +5586,7 @@ public partial class MainViewModel :
             Window!,
             format,
             GetNewFileName(),
-            $"Save {format.Name} file as");
+            string.Format(Se.Language.Main.SaveXFileAs, format.Name));
 
         if (string.IsNullOrEmpty(fileName))
         {
@@ -5602,6 +5616,24 @@ public partial class MainViewModel :
         }
 
         ShowStatus(string.Format(Se.Language.Main.FileExportedInFormatXToFileY, format.Name, fileName));
+        await ShowExportFileSavedPrompt(fileName);
+    }
+
+    /// <summary>
+    /// Confirms a finished binary export with the shared "File saved" dialog (open folder), like
+    /// the other exports do - a status-bar line alone was easy to miss.
+    /// </summary>
+    private async Task ShowExportFileSavedPrompt(string fileName)
+    {
+        await ShowDialogAsync<PromptFileSavedWindow, PromptFileSavedViewModel>(vm =>
+        {
+            vm.Initialize(
+                Se.Language.General.FileSaved,
+                string.Format(Se.Language.General.FileSavedToX, fileName),
+                fileName,
+                true,
+                false);
+        });
     }
 
     [RelayCommand]
@@ -12639,17 +12671,14 @@ public partial class MainViewModel :
     private void ExtendSelectedLinesToNextShotChangeOrNextSubtitle()
     {
         var selectedLines = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().OrderBy(p => p.StartTime).ToList();
-        var vp = GetVideoPlayerControl();
-        if (AreTimeCodesLocked ||
-            string.IsNullOrEmpty(_videoFileName) ||
-            vp == null ||
-            AudioVisualizer == null ||
-            AudioVisualizer.ShotChanges.Count == 0 ||
-            selectedLines.Count == 0)
+        if (AreTimeCodesLocked || selectedLines.Count == 0)
         {
             return;
         }
 
+        // No video or no shot changes is not a dead shortcut: the neighbouring subtitle is the
+        // bound then - the "(or next/previous subtitle)" half of the command (issue #15719).
+        var shotChanges = (IReadOnlyList<double>?)AudioVisualizer?.ShotChanges ?? Array.Empty<double>();
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var maxDurationMs = Se.Settings.General.SubtitleMaximumDisplayMilliseconds;
         var indexMap = BuildSubtitleIndexMap();
@@ -12659,7 +12688,7 @@ public partial class MainViewModel :
             var next = GetNextWorkingRow(idx);
 
             var newEndMs = ShotChangesHelper.GetExtendedEndMs(
-                AudioVisualizer.ShotChanges,
+                shotChanges,
                 line.StartTime.TotalMilliseconds,
                 line.EndTime.TotalMilliseconds,
                 next?.StartTime.TotalMilliseconds,
@@ -12729,17 +12758,14 @@ public partial class MainViewModel :
     private void ExtendSelectedLinesToPreviousShotChange()
     {
         var selectedLines = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().OrderBy(p => p.StartTime).ToList();
-        var vp = GetVideoPlayerControl();
-        if (AreTimeCodesLocked ||
-            string.IsNullOrEmpty(_videoFileName) ||
-            vp == null ||
-            AudioVisualizer == null ||
-            AudioVisualizer.ShotChanges.Count == 0 ||
-            selectedLines.Count == 0)
+        if (AreTimeCodesLocked || selectedLines.Count == 0)
         {
             return;
         }
 
+        // No video or no shot changes is not a dead shortcut: the neighbouring subtitle is the
+        // bound then - the "(or next/previous subtitle)" half of the command (issue #15719).
+        var shotChanges = (IReadOnlyList<double>?)AudioVisualizer?.ShotChanges ?? Array.Empty<double>();
         var gapMs = Se.Settings.General.MinimumBetweenLines.GetMilliseconds();
         var maxDurationMs = Se.Settings.General.SubtitleMaximumDisplayMilliseconds;
         var indexMap = BuildSubtitleIndexMap();
@@ -12749,7 +12775,7 @@ public partial class MainViewModel :
             var prev = GetPreviousWorkingRow(idx);
 
             var newStartMs = ShotChangesHelper.GetExtendedStartMs(
-                AudioVisualizer.ShotChanges,
+                shotChanges,
                 line.StartTime.TotalMilliseconds,
                 line.EndTime.TotalMilliseconds,
                 prev?.EndTime.TotalMilliseconds,
@@ -16442,7 +16468,7 @@ public partial class MainViewModel :
     [RelayCommand]
     private void MergeSelectedLines()
     {
-        RunWithoutChangeDetection(() => WithoutReferenceOnlyRows(() => MergeLinesSelected()));
+        RunWithoutChangeDetection(() => WithoutReferenceOnlyRows(() => MergeLinesSelected(MergeManager.DefaultBreakMode())));
     }
 
     [RelayCommand]
@@ -30713,7 +30739,7 @@ public partial class MainViewModel :
                 previous,
                 selectedItem,
             };
-            _mergeManager.MergeSelectedLines(Subtitles, list, breakMode: MergeManager.BreakMode.Normal, keepEndTime: MergeManager.ShouldKeepEndTime(SelectedSubtitleFormat));
+            _mergeManager.MergeSelectedLines(Subtitles, list, breakMode: MergeManager.DefaultBreakMode(), keepEndTime: MergeManager.ShouldKeepEndTime(SelectedSubtitleFormat));
             Renumber();
             SelectAndScrollToRow(previous);
             _updateAudioVisualizer = true;
@@ -30773,7 +30799,7 @@ public partial class MainViewModel :
                 selectedItem,
                 next
             };
-            _mergeManager.MergeSelectedLines(Subtitles, list, breakMode: MergeManager.BreakMode.Normal, keepEndTime: MergeManager.ShouldKeepEndTime(SelectedSubtitleFormat));
+            _mergeManager.MergeSelectedLines(Subtitles, list, breakMode: MergeManager.DefaultBreakMode(), keepEndTime: MergeManager.ShouldKeepEndTime(SelectedSubtitleFormat));
             Renumber();
             SelectAndScrollToRow(selectedItem);
             _updateAudioVisualizer = true;
@@ -30815,7 +30841,7 @@ public partial class MainViewModel :
         }
     }
 
-    private void MergeLinesSelected(MergeManager.BreakMode breakMode = MergeManager.BreakMode.Normal)
+    private void MergeLinesSelected(MergeManager.BreakMode breakMode)
     {
         var selectedItems = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().ToList();
         if (selectedItems.Count == 0 || SelectedSubtitle == null)

@@ -24,6 +24,8 @@ using Nikse.SubtitleEdit.Features.Translate;
 using Nikse.SubtitleEdit.UiLogic.AdjustDuration;
 using Nikse.SubtitleEdit.UiLogic.BatchConvert;
 using Nikse.SubtitleEdit.Features.Tools.ChangeCasing;
+using Nikse.SubtitleEdit.Features.Tools.ConvertActors;
+using Nikse.SubtitleEdit.Features.Tools.MergeContinuationLines;
 using Nikse.SubtitleEdit.Features.Tools.MergeSubtitlesWithSameTimeCodes;
 using Nikse.SubtitleEdit.Features.Tools.SplitBreakLongLines;
 using Nikse.SubtitleEdit.Logic;
@@ -889,7 +891,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         var text = Nikse.SubtitleEdit.UiLogic.Export.CustomTextFormatter.GenerateCustomText(selectedCustomFormat.ToTemplate(), paragraphs, item.FileName, string.Empty);
         try
         {
-            var path = MakeOutputFileName(item, selectedCustomFormat.Extension);
+            var path = MakeOutputFileName(item, selectedCustomFormat.GetDottedExtension());
             var encoding = EncodingHelper.ResolveEncoding(_config.TargetEncoding, item.FileName);
             await File.WriteAllTextAsync(path, text, encoding, cancellationToken);
             item.Status = Se.Language.General.Converted;
@@ -2430,10 +2432,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             s = ApplyMinGap(s);
             s = BeautifyTimeCodes(s, item.FileName);
             s = SnapTimeCodesToFrames(s, item.FileName);
+            s = Renumber(s);
         }
         else
         {
             s = DeleteLines(s);
+            s = ConvertActors(s);
             s = RemoveFormatting(s);
             s = AddFormatting(s);
             s = SplitBreakLongLines(s, Language);
@@ -2458,11 +2462,13 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             s = MergeLinesWithSameTimeCodes(s, Language);
             s = ConvertColorsToDialog(s, Language);
             s = MergeShortLines(s);
+            s = MergeContinuationLines(s, Language);
             s = MultipleReplace(s);
             s = RemoveLineBreaks(s);
             s = AutoBalanceLines(s, Language);
             s = ApplyDurationLimits(s);
             s = RemoveTextForHearingImpaired(s, Language);
+            s = RemoveUnicodeControlCharacters(s);
             s = FixRightToLeft(s);
             s = AssaChangeResolution(s);
             s = AssaChangeStyle(s);
@@ -2470,9 +2476,104 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             s = BeautifyTimeCodes(s, item.FileName);
             s = SnapTimeCodesToFrames(s, item.FileName);
             s = SortBy(s);
+            s = Renumber(s);
         }
 
         return s;
+    }
+
+    private Subtitle RemoveUnicodeControlCharacters(Subtitle subtitle)
+    {
+        if (!_config.RemoveUnicodeControlCharacters.IsActive)
+        {
+            return subtitle;
+        }
+
+        foreach (var p in subtitle.Paragraphs)
+        {
+            p.Text = Utilities.RemoveUnicodeControlChars(p.Text);
+        }
+
+        return subtitle;
+    }
+
+    private Subtitle Renumber(Subtitle subtitle)
+    {
+        if (!_config.Renumber.IsActive)
+        {
+            return subtitle;
+        }
+
+        subtitle.Renumber(_config.Renumber.StartNumber);
+        return subtitle;
+    }
+
+    private Subtitle MergeContinuationLines(Subtitle subtitle, string language)
+    {
+        if (!_config.MergeContinuationLines.IsActive)
+        {
+            return subtitle;
+        }
+
+        var c = _config.MergeContinuationLines;
+        var lines = subtitle.Paragraphs.Select(p => new SubtitleLineViewModel(p, subtitle.OriginalFormat)).ToList();
+        var candidates = MergeContinuationLinesHelper.Detect(lines, language, c.MaxMillisecondsBetweenLines, c.MaxCharacters);
+        if (candidates.Count == 0)
+        {
+            return subtitle;
+        }
+
+        var merged = MergeContinuationLinesHelper.Apply(lines, candidates, language);
+        subtitle.Paragraphs.Clear();
+        foreach (var line in merged)
+        {
+            // Pass the format so Paragraph.Extra (the ASSA style) survives - see SplitBreakLongLines.
+            subtitle.Paragraphs.Add(line.ToParagraph(subtitle.OriginalFormat));
+        }
+
+        subtitle.Renumber();
+        return subtitle;
+    }
+
+    private Subtitle ConvertActors(Subtitle subtitle)
+    {
+        if (!_config.ConvertActors.IsActive)
+        {
+            return subtitle;
+        }
+
+        var c = _config.ConvertActors;
+        if (c.ToType == ConvertActorType.Actor && !TargetFormatKeepsActors())
+        {
+            // Moving the name out of the text into an actor field the target format never writes
+            // (e.g. SRT) would silently delete it - leave the text alone instead.
+            SeLogger.Error("Batch convert: convert actors to actor field skipped - format " + _config.TargetFormatName + " has no actor field");
+            return subtitle;
+        }
+
+        int? changeCasing = c.ChangeCasing ? c.CasingIndex : null;
+        SKColor? color = c.SetColor ? c.Color.ToSkColor() : null;
+        ConvertActorsHelper.ConvertSubtitle(subtitle, subtitle.OriginalFormat ?? new SubRip(), c.FromType, c.ToType, changeCasing, color, c.OnlyNames);
+        return subtitle;
+    }
+
+    private static readonly HashSet<string> ActorFormatNames = new(StringComparer.Ordinal)
+    {
+        new AdvancedSubStationAlpha().Name,
+        new SubStationAlpha().Name,
+        new CsvExcel().Name,
+        new CsvNuendo().Name,
+        new CsvDaVinci().Name,
+        new MsOfficeWorkbook().Name,
+        new NVivoTranscript().Name,
+        new OtterAi().Name,
+        new PodcastIndexer().Name,
+        new VocapiaSplit().Name,
+    };
+
+    private bool TargetFormatKeepsActors()
+    {
+        return ActorFormatNames.Contains(_config.TargetFormatName ?? string.Empty);
     }
 
     private Subtitle MultipleReplace(Subtitle subtitle)

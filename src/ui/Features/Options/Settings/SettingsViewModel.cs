@@ -211,6 +211,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _adjustAllTimesRememberLineSelectionChoice;
     [ObservableProperty] private bool _mergeKeepEndTime;
     [ObservableProperty] private bool _mergeKeepEndTimeOnlyAssa;
+    [ObservableProperty] private bool _mergeAutoBreak;
     [ObservableProperty] private ObservableCollection<string> _splitOddNumberOfLinesActions;
     [ObservableProperty] private string _selectedSplitOddNumberOfLinesAction;
     [ObservableProperty] private bool _ocrUseWordSplitList;
@@ -901,6 +902,7 @@ public partial class SettingsViewModel : ObservableObject
         AdjustAllTimesRememberLineSelectionChoice = Se.Settings.Synchronization.AdjustAllTimesRememberLineSelectionChoice;
         MergeKeepEndTime = Se.Settings.Tools.MergeKeepEndTime;
         MergeKeepEndTimeOnlyAssa = Se.Settings.Tools.MergeKeepEndTimeOnlyAssa;
+        MergeAutoBreak = Se.Settings.Tools.MergeAutoBreak;
         SelectedSplitOddNumberOfLinesAction = MapFromSplitOddActionToLanguageCode(Se.Settings.Tools.SplitOddLinesAction);
         SelectedSpellCheckEngine = MapFromSpellCheckEngine(Se.Settings.SpellCheck.SpellCheckProvider);
         OcrUseWordSplitList = Se.Settings.Ocr.UseWordSplitList;
@@ -1115,6 +1117,14 @@ public partial class SettingsViewModel : ObservableObject
         AutoOpenVideoFile = video.AutoOpen;
         ShowSecondarySubtitleDialog = video.SecondarySubtitleShowDialog;
         RememberSecondarySubtitleFile = video.SecondarySubtitleRememberFile;
+
+        if (!string.IsNullOrEmpty(video.MpvPreviewFontName) && !Fonts.Contains(video.MpvPreviewFontName) &&
+            FontHelper.GetSystemFonts().Contains(video.MpvPreviewFontName))
+        {
+            // An installed family saved before the list held face names (e.g. "Hiragino Sans" on
+            // macOS has no face of that name) - list it, so the combo box does not show blank.
+            Fonts.Insert(0, video.MpvPreviewFontName);
+        }
 
         MpvPreviewFontName = video.MpvPreviewFontName;
         MpvPreviewFontSize = video.MpvPreviewFontSize;
@@ -1775,6 +1785,7 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Synchronization.AdjustAllTimesRememberLineSelectionChoice = AdjustAllTimesRememberLineSelectionChoice;
         Se.Settings.Tools.MergeKeepEndTime = MergeKeepEndTime;
         Se.Settings.Tools.MergeKeepEndTimeOnlyAssa = MergeKeepEndTimeOnlyAssa;
+        Se.Settings.Tools.MergeAutoBreak = MergeAutoBreak;
         Se.Settings.Tools.SplitOddLinesAction = MapFromSplitOddActionTranslationToCode(SelectedSplitOddNumberOfLinesAction);
         Se.Settings.SpellCheck.SpellCheckProvider = MapFromUISpellCheckEngineToCode(SelectedSpellCheckEngine);
         Se.Settings.Ocr.UseWordSplitList = OcrUseWordSplitList;

@@ -33,6 +33,7 @@ using Nikse.SubtitleEdit.Features.Shared.PickSubtitleFormat;
 using Nikse.SubtitleEdit.Features.Shared.PromptTextBox;
 using Nikse.SubtitleEdit.Features.Tools.AdjustDuration;
 using Nikse.SubtitleEdit.Features.Tools.BatchConvert.BatchErrorList;
+using Nikse.SubtitleEdit.Features.Tools.ConvertActors;
 using Nikse.SubtitleEdit.Features.Tools.FixCommonErrors;
 using Nikse.SubtitleEdit.Features.Tools.RemoveTextForHearingImpaired;
 using Nikse.SubtitleEdit.Features.Translate;
@@ -53,6 +54,8 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 using Nikse.SubtitleEdit.UiLogic.LlamaCpp;
@@ -294,6 +297,36 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private SortByOption? _selectedSortByOption;
     [ObservableProperty] private bool _sortByDescending;
 
+    // Renumber
+    [ObservableProperty] private int _renumberStartNumber = 1;
+
+    // Merge continuation lines
+    [ObservableProperty] private int _mergeContinuationLinesMaxMillisecondsBetweenLines = 250;
+    [ObservableProperty] private int _mergeContinuationLinesMaxCharacters = 86;
+
+    // Convert actors
+    [ObservableProperty] private ObservableCollection<ConvertActorTypeDisplay> _convertActorsFromTypes = new(ConvertActorTypeDisplay.GetTypes());
+    [ObservableProperty] private ConvertActorTypeDisplay? _selectedConvertActorsFromType;
+    [ObservableProperty] private ObservableCollection<ConvertActorTypeDisplay> _convertActorsToTypes = new(ConvertActorTypeDisplay.GetTypes());
+    [ObservableProperty] private ConvertActorTypeDisplay? _selectedConvertActorsToType;
+    [ObservableProperty] private bool _convertActorsSetColor;
+    [ObservableProperty] private Color _convertActorsColor = Colors.Yellow;
+    [ObservableProperty] private bool _convertActorsChangeCasing;
+    [ObservableProperty] private int _convertActorsCasingIndex;
+    [ObservableProperty] private bool _convertActorsOnlyNames;
+    [ObservableProperty] private ObservableCollection<string> _convertActorsCasingOptions = new()
+    {
+        Se.Language.General.NormalCasing,
+        Se.Language.Tools.ChangeCasing.AllUppercase,
+        Se.Language.Tools.ChangeCasing.AllLowercase,
+        "Proper case",
+    };
+
+    // Presets
+    [ObservableProperty] private ObservableCollection<string> _presetNames = new();
+    [ObservableProperty] private string? _selectedPresetName;
+    private bool _isApplyingPreset;
+
     public Window? Window { get; set; }
     public TableView FileGrid { get; set; } = new();
 
@@ -365,6 +398,10 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             Se.Language.General.AllFiles,
             Se.Language.Tools.BatchConvert.FileNameContainsDotDotDot,
             Se.Language.Tools.BatchConvert.TrackLanguageContainsDotDotDot,
+            Se.Language.Tools.BatchConvert.FormatContainsDotDotDot,
+            Se.Language.Tools.BatchConvert.ExtensionIsDotDotDot,
+            Se.Language.Tools.BatchConvert.StatusIsError,
+            Se.Language.Tools.BatchConvert.ForcedTracksOnly,
         ];
         SelectedFilterItem = FilterItems.FirstOrDefault();
         FilterText = string.Empty;
@@ -458,6 +495,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             new LibreTranslate(),
             new OpenAiCompatibleTranslate(),
             new LmStudioTranslate(),
+            new LmStudioAdvancedTranslate(),
             new LlamaCppTranslate(),
             new LlamaCppAdvancedTranslate(),
             new NoLanguageLeftBehindServe(),
@@ -514,6 +552,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         };
 
         LoadSettings();
+        RefreshPresetNames(null);
         FilterComboBoxChanged();
         _filesTimer = new System.Timers.Timer(250);
         _filesTimer.Elapsed += FilesTimerElapsed;
@@ -631,13 +670,57 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             return item.Format.Contains(FilterText, StringComparison.InvariantCultureIgnoreCase);
         }
 
+        if (SelectedFilterItem == Se.Language.Tools.BatchConvert.FormatContainsDotDotDot)
+        {
+            return item.Format.Contains(FilterText, StringComparison.InvariantCultureIgnoreCase);
+        }
+
+        if (SelectedFilterItem == Se.Language.Tools.BatchConvert.ExtensionIsDotDotDot)
+        {
+            // ".srt", "srt" or several: "srt, ass"
+            var extension = Path.GetExtension(item.FileName).TrimStart('.');
+            return FilterText
+                .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(p => p.TrimStart('*').TrimStart('.').Equals(extension, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (SelectedFilterItem == Se.Language.Tools.BatchConvert.StatusIsError)
+        {
+            return IsFailedStatus(item.Status);
+        }
+
+        if (SelectedFilterItem == Se.Language.Tools.BatchConvert.ForcedTracksOnly)
+        {
+            // Only Matroska tracks know about "forced" - see MakeMkvTrackInfoString.
+            return item.Format.Contains(" (forced)", StringComparison.Ordinal);
+        }
+
         return true;
     }
 
     private bool IsFilterActive =>
-        !string.IsNullOrEmpty(FilterText) &&
-        (SelectedFilterItem == Se.Language.Tools.BatchConvert.FileNameContainsDotDotDot ||
-         SelectedFilterItem == Se.Language.Tools.BatchConvert.TrackLanguageContainsDotDotDot);
+        IsFilterWithoutText(SelectedFilterItem) ||
+        (!string.IsNullOrEmpty(FilterText) &&
+         (SelectedFilterItem == Se.Language.Tools.BatchConvert.FileNameContainsDotDotDot ||
+          SelectedFilterItem == Se.Language.Tools.BatchConvert.TrackLanguageContainsDotDotDot ||
+          SelectedFilterItem == Se.Language.Tools.BatchConvert.FormatContainsDotDotDot ||
+          SelectedFilterItem == Se.Language.Tools.BatchConvert.ExtensionIsDotDotDot));
+
+    private static bool IsFilterWithoutText(string? filterItem) =>
+        filterItem == Se.Language.Tools.BatchConvert.StatusIsError ||
+        filterItem == Se.Language.Tools.BatchConvert.ForcedTracksOnly;
+
+    /// <summary>
+    /// True for a status a run left behind on a file it could not convert: an error, or a message
+    /// like "No subtitles found" - anything but not-run-yet, converted or cancelled.
+    /// </summary>
+    private static bool IsFailedStatus(string? status)
+    {
+        return !string.IsNullOrEmpty(status) &&
+               status != "-" &&
+               status != Se.Language.General.Converted &&
+               status != Se.Language.General.Cancelled;
+    }
 
     // Appends just-parsed items to the visible grid (respecting the active filter) so files show
     // up incrementally as they load. Must run on the UI thread.
@@ -823,6 +906,22 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         Se.Settings.Tools.BatchConvert.ConvertColorsToDialogAddNewLines = ConvertColorsToDialogAddNewLines;
         Se.Settings.Tools.BatchConvert.ConvertColorsToDialogReBreakLines = ConvertColorsToDialogReBreakLines;
 
+        // Renumber
+        Se.Settings.Tools.BatchConvert.RenumberStartNumber = RenumberStartNumber;
+
+        // Merge continuation lines
+        Se.Settings.Tools.BatchConvert.MergeContinuationLinesMaxGapMs = MergeContinuationLinesMaxMillisecondsBetweenLines;
+        Se.Settings.Tools.BatchConvert.MergeContinuationLinesMaxCharacters = MergeContinuationLinesMaxCharacters;
+
+        // Convert actors
+        Se.Settings.Tools.BatchConvert.ConvertActorsFromType = SelectedConvertActorsFromType?.Type.ToString() ?? string.Empty;
+        Se.Settings.Tools.BatchConvert.ConvertActorsToType = SelectedConvertActorsToType?.Type.ToString() ?? string.Empty;
+        Se.Settings.Tools.BatchConvert.ConvertActorsSetColor = ConvertActorsSetColor;
+        Se.Settings.Tools.BatchConvert.ConvertActorsColor = ConvertActorsColor.FromColorToHex();
+        Se.Settings.Tools.BatchConvert.ConvertActorsChangeCasing = ConvertActorsChangeCasing;
+        Se.Settings.Tools.BatchConvert.ConvertActorsCasingType = ConvertActorsCasingIndex;
+        Se.Settings.Tools.BatchConvert.ConvertActorsOnlyNames = ConvertActorsOnlyNames;
+
         // Adjust image brightness/alpha/color
         Se.Settings.Tools.BatchConvert.ImageAdjustBrightnessOn = ImageAdjustBrightnessOn;
         Se.Settings.Tools.BatchConvert.ImageAdjustBrightness = ImageAdjustBrightness;
@@ -1006,6 +1105,27 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         ConvertColorsToDialogRemoveColorTags = Se.Settings.Tools.BatchConvert.ConvertColorsToDialogRemoveColorTags;
         ConvertColorsToDialogAddNewLines = Se.Settings.Tools.BatchConvert.ConvertColorsToDialogAddNewLines;
         ConvertColorsToDialogReBreakLines = Se.Settings.Tools.BatchConvert.ConvertColorsToDialogReBreakLines;
+
+        // Renumber
+        RenumberStartNumber = Se.Settings.Tools.BatchConvert.RenumberStartNumber;
+
+        // Merge continuation lines - max characters 0 = max line length x max number of lines, like the dialog
+        MergeContinuationLinesMaxMillisecondsBetweenLines = Se.Settings.Tools.BatchConvert.MergeContinuationLinesMaxGapMs;
+        MergeContinuationLinesMaxCharacters = Se.Settings.Tools.BatchConvert.MergeContinuationLinesMaxCharacters > 0
+            ? Se.Settings.Tools.BatchConvert.MergeContinuationLinesMaxCharacters
+            : Se.Settings.General.SubtitleLineMaximumLength * Se.Settings.General.MaxNumberOfLines;
+
+        // Convert actors
+        SelectedConvertActorsFromType = ConvertActorsFromTypes.FirstOrDefault(p => p.Type.ToString() == Se.Settings.Tools.BatchConvert.ConvertActorsFromType) ?? ConvertActorsFromTypes.First();
+        SelectedConvertActorsToType = ConvertActorsToTypes.FirstOrDefault(p => p.Type.ToString() == Se.Settings.Tools.BatchConvert.ConvertActorsToType) ?? ConvertActorsToTypes.Last();
+        ConvertActorsSetColor = Se.Settings.Tools.BatchConvert.ConvertActorsSetColor;
+        if (!string.IsNullOrEmpty(Se.Settings.Tools.BatchConvert.ConvertActorsColor))
+        {
+            ConvertActorsColor = Se.Settings.Tools.BatchConvert.ConvertActorsColor.FromHexToColor();
+        }
+        ConvertActorsChangeCasing = Se.Settings.Tools.BatchConvert.ConvertActorsChangeCasing;
+        ConvertActorsCasingIndex = Math.Clamp(Se.Settings.Tools.BatchConvert.ConvertActorsCasingType, 0, ConvertActorsCasingOptions.Count - 1);
+        ConvertActorsOnlyNames = Se.Settings.Tools.BatchConvert.ConvertActorsOnlyNames;
 
         // Prefer this tool's own saved values over the app-wide rules, exactly as the dedicated
         // split/break dialog does - otherwise the numbers typed here reset on every open (and
@@ -1263,11 +1383,6 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         _cancellationTokenSource = new CancellationTokenSource();
         _cancellationToken = _cancellationTokenSource.Token;
 
-        foreach (var batchItem in BatchItems)
-        {
-            batchItem.Status = "-";
-        }
-
         SaveSettings();
 
         var config = MakeBatchConvertConfig();
@@ -1301,6 +1416,13 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             return;
         }
 
+        // Reset only once the run really starts - a declined API key/download prompt above must
+        // not wipe the error statuses of the previous run ("Status is error" re-runs).
+        foreach (var batchItem in BatchItems)
+        {
+            batchItem.Status = "-";
+        }
+
         _batchConverter.Initialize(config);
         var start = DateTime.UtcNow.Ticks;
 
@@ -1332,17 +1454,24 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 }
 
                 var count = 1;
+                var convertedCount = 0;
+                var failedCount = 0;
                 foreach (var batchItem in itemsToConvert)
                 {
                     var countDisplay = count;
                     ProgressText = string.Format(Se.Language.General.ConvertingXofYDotDoDot, countDisplay, itemsToConvert.Count);
                     ProgressValue = countDisplay / (double)itemsToConvert.Count;
 
+                    // The items whose status tells how this file went - a Transport Stream file
+                    // is converted as one item per track.
+                    var resultItems = new List<BatchConvertItem> { batchItem };
+                    var hasException = false;
                     try
                     {
                         if (batchItem.Format!.StartsWith("Transport Stream", StringComparison.Ordinal))
                         {
                             var tsResult = _batchConvertItemSplitter.LoadTransportStream(batchItem, _cancellationToken);
+                            resultItems = tsResult;
                             foreach (var bi in tsResult)
                             {
                                 if (_cancellationToken.IsCancellationRequested)
@@ -1365,7 +1494,21 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                         {
                             SeLogger.Error(exception, "Batch convert failed for: " + batchItem.FileName);
                             batchItem.Status = string.Format(Se.Language.General.ErrorX, exception.Message);
+                            hasException = true;
                         }
+                    }
+
+                    // Not converted and not stopped by cancel = failed; stopped by cancel = not processed.
+                    var isConverted = !hasException &&
+                                      resultItems.Count > 0 &&
+                                      resultItems.All(p => p.Status == Se.Language.General.Converted);
+                    if (isConverted)
+                    {
+                        convertedCount++;
+                    }
+                    else if (hasException || !_cancellationToken.IsCancellationRequested)
+                    {
+                        failedCount++;
                     }
 
                     count++;
@@ -1378,10 +1521,24 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
                 var end = DateTime.UtcNow.Ticks;
                 var elapsed = new TimeSpan(end - start).TotalMilliseconds;
-                var message = string.Format(Se.Language.General.XFilesConvertedInY, itemsToConvert.Count, elapsed);
+                var message = failedCount > 0
+                    ? string.Format(Se.Language.Tools.BatchConvert.XConvertedYFailedInZ, convertedCount, failedCount, elapsed)
+                    : string.Format(Se.Language.General.XFilesConvertedInY, convertedCount, elapsed);
                 if (_cancellationToken.IsCancellationRequested)
                 {
+                    var notProcessedCount = itemsToConvert.Count - convertedCount - failedCount;
+                    if (notProcessedCount > 0)
+                    {
+                        message += Environment.NewLine + string.Format(Se.Language.Tools.BatchConvert.XNotProcessed, notProcessedCount);
+                    }
+
                     message += Environment.NewLine + Se.Language.General.ConversionCancelledByUser;
+                }
+
+                if (SelectedFilterItem == Se.Language.Tools.BatchConvert.StatusIsError)
+                {
+                    // Re-run of the failed files: show what still fails.
+                    _isFilesDirty = true;
                 }
 
                 await ShowStatus(message);
@@ -2637,6 +2794,35 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [RelayCommand]
     private async Task AutoTranslateBrowseModel()
     {
+        // OpenAI-compatible servers list their models at GET {base}/v1/models instead of /api/tags.
+        if (SelectedAutoTranslator is OpenAiCompatibleTranslate or LmStudioAdvancedTranslate)
+        {
+            var isOpenAiCompatible = SelectedAutoTranslator is OpenAiCompatibleTranslate;
+            var openAiUrl = !string.IsNullOrWhiteSpace(AutoTranslateUrl)
+                ? AutoTranslateUrl.Trim()
+                : isOpenAiCompatible ? OpenAiCompatibleTranslate.DefaultUrl : LmStudioAdvancedTranslate.DefaultUrl;
+            var apiKey = isOpenAiCompatible ? AutoTranslateApiKey : null;
+            var openAiResult = await _windowService.ShowDialogAsync<PickOllamaModelWindow, PickOllamaModelViewModel>(Window!,
+                vm => { vm.InitializeOpenAiCompatible(Se.Language.General.PickModel, AutoTranslateModel, openAiUrl, apiKey); });
+
+            if (openAiResult is { OkPressed: true, SelectedModel: not null })
+            {
+                AutoTranslateModel = openAiResult.SelectedModel;
+                if (isOpenAiCompatible)
+                {
+                    Se.Settings.AutoTranslate.OpenAiCompatibleModel = openAiResult.SelectedModel;
+                }
+                else
+                {
+                    Se.Settings.AutoTranslate.LmStudioAdvancedModel = openAiResult.SelectedModel;
+                }
+
+                SaveSettings();
+            }
+
+            return;
+        }
+
         // Both Ollama engines list the same installed models; the picker only needs the host,
         // so the advanced engine's /v1/chat/completions URL works as-is (it strips the path).
         var isAdvanced = SelectedAutoTranslator is OllamaAdvancedTranslate;
@@ -2854,6 +3040,197 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         {
             batchConvertFunction.IsSelected = false;
         }
+    }
+
+    private void RefreshPresetNames(string? selectName)
+    {
+        _isApplyingPreset = true;
+        try
+        {
+            PresetNames.Clear();
+            foreach (var name in Se.Settings.Tools.BatchConvert.Presets
+                         .Select(p => p.Name)
+                         .OrderBy(p => p, StringComparer.CurrentCultureIgnoreCase))
+            {
+                PresetNames.Add(name);
+            }
+
+            SelectedPresetName = selectName != null && PresetNames.Contains(selectName) ? selectName : null;
+        }
+        finally
+        {
+            _isApplyingPreset = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SavePreset()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var result = await _windowService.ShowDialogAsync<PromptTextBoxWindow, PromptTextBoxViewModel>(Window, vm =>
+        {
+            vm.Initialize(Se.Language.Tools.BatchConvert.PresetName, SelectedPresetName ?? string.Empty, 300, 20, returnSubmits: true);
+        });
+
+        var name = (result.Text ?? string.Empty).Trim();
+        if (!result.OkPressed || name.Length == 0)
+        {
+            return;
+        }
+
+        // Push the current function selection + settings into Se.Settings.Tools.BatchConvert, then
+        // store a JSON copy of it - without the preset list itself.
+        SaveSettings();
+        var settings = Se.Settings.Tools.BatchConvert;
+        var presets = settings.Presets;
+        string json;
+        settings.Presets = new List<SeBatchConvertPreset>();
+        try
+        {
+            json = JsonSerializer.Serialize(settings, SeJsonContext.Default.SeBatchConvert);
+        }
+        finally
+        {
+            settings.Presets = presets;
+        }
+
+        presets.RemoveAll(p => p.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase));
+        var tools = Se.Settings.Tools;
+        presets.Add(new SeBatchConvertPreset
+        {
+            Name = name,
+            Settings = json,
+            MergeSameText = CloneJson(tools.MergeSameText, SeJsonContext.Default.SeMergeSameText),
+            MergeSameTimeCode = CloneJson(tools.MergeSameTimeCode, SeJsonContext.Default.SeMergeSameTimeCode),
+            BridgeGaps = CloneJson(tools.BridgeGaps, SeJsonContext.Default.SeBridgeGaps),
+            ApplyMinGapMilliseconds = tools.ApplyMinGapMilliseconds,
+        });
+        Se.SaveSettings();
+        RefreshPresetNames(name);
+    }
+
+    [RelayCommand]
+    private async Task DeletePreset()
+    {
+        var name = SelectedPresetName;
+        if (Window == null || string.IsNullOrEmpty(name))
+        {
+            return;
+        }
+
+        var answer = await MessageBox.Show(
+            Window,
+            Se.Language.Tools.BatchConvert.DeletePreset,
+            string.Format(Se.Language.Tools.BatchConvert.DeletePresetX, name),
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        Se.Settings.Tools.BatchConvert.Presets.RemoveAll(p => p.Name == name);
+        Se.SaveSettings();
+        RefreshPresetNames(null);
+    }
+
+    partial void OnSelectedPresetNameChanged(string? value)
+    {
+        if (_isApplyingPreset || string.IsNullOrEmpty(value))
+        {
+            return;
+        }
+
+        ApplyPreset(value);
+    }
+
+    private void ApplyPreset(string name)
+    {
+        var current = Se.Settings.Tools.BatchConvert;
+        var preset = current.Presets.FirstOrDefault(p => p.Name == name);
+        if (preset == null)
+        {
+            return;
+        }
+
+        SeBatchConvert? loaded;
+        try
+        {
+            loaded = JsonSerializer.Deserialize(preset.Settings, SeJsonContext.Default.SeBatchConvert);
+        }
+        catch (Exception exception)
+        {
+            SeLogger.Error(exception, "Batch convert: could not load preset " + name);
+            return;
+        }
+
+        if (loaded == null)
+        {
+            return;
+        }
+
+        // The preset list and the file filter are not part of a preset.
+        loaded.Presets = current.Presets;
+        loaded.LastFilterItem = current.LastFilterItem;
+        Se.Settings.Tools.BatchConvert = loaded;
+
+        var tools = Se.Settings.Tools;
+        if (preset.MergeSameText != null)
+        {
+            tools.MergeSameText = CloneJson(preset.MergeSameText, SeJsonContext.Default.SeMergeSameText);
+        }
+
+        if (preset.MergeSameTimeCode != null)
+        {
+            tools.MergeSameTimeCode = CloneJson(preset.MergeSameTimeCode, SeJsonContext.Default.SeMergeSameTimeCode);
+        }
+
+        if (preset.BridgeGaps != null)
+        {
+            tools.BridgeGaps = CloneJson(preset.BridgeGaps, SeJsonContext.Default.SeBridgeGaps);
+        }
+
+        if (preset.ApplyMinGapMilliseconds.HasValue)
+        {
+            tools.ApplyMinGapMilliseconds = preset.ApplyMinGapMilliseconds.Value;
+        }
+
+        _isApplyingPreset = true;
+        try
+        {
+            // LoadSettings only sets the chosen option of these radio groups to true.
+            NormalCasing = false;
+            FixNamesOnly = false;
+            AllUppercase = false;
+            AllLowercase = false;
+            RtlFixViaUniCode = false;
+            RtlRemoveUniCode = false;
+            RtlReverseStartEnd = false;
+
+            LoadSettings();
+
+            var activeFunctions = loaded.ActiveFunctions ?? Array.Empty<string>();
+            foreach (var function in BatchFunctions)
+            {
+                function.IsSelected = activeFunctions.Contains(function.Type.ToString());
+            }
+        }
+        finally
+        {
+            _isApplyingPreset = false;
+        }
+
+        ComboBoxSubtitleFormatChanged();
+        SelectedFunctionChanged();
+    }
+
+    private static T CloneJson<T>(T value, JsonTypeInfo<T> typeInfo) where T : new()
+    {
+        return JsonSerializer.Deserialize(JsonSerializer.Serialize(value, typeInfo), typeInfo) ?? new T();
     }
 
     internal void OnKeyDown(KeyEventArgs e)
@@ -3151,6 +3528,36 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 ReBreakLines = ConvertColorsToDialogReBreakLines,
             },
 
+            RemoveUnicodeControlCharacters = new BatchConvertConfig.RemoveUnicodeControlCharactersSettings
+            {
+                IsActive = activeFunctions.Contains(BatchConvertFunctionType.RemoveUnicodeControlCharacters),
+            },
+
+            Renumber = new BatchConvertConfig.RenumberSettings
+            {
+                IsActive = activeFunctions.Contains(BatchConvertFunctionType.Renumber),
+                StartNumber = RenumberStartNumber,
+            },
+
+            MergeContinuationLines = new BatchConvertConfig.MergeContinuationLinesSettings
+            {
+                IsActive = activeFunctions.Contains(BatchConvertFunctionType.MergeContinuationLines),
+                MaxMillisecondsBetweenLines = MergeContinuationLinesMaxMillisecondsBetweenLines,
+                MaxCharacters = MergeContinuationLinesMaxCharacters,
+            },
+
+            ConvertActors = new BatchConvertConfig.ConvertActorsSettings
+            {
+                IsActive = activeFunctions.Contains(BatchConvertFunctionType.ConvertActors),
+                FromType = SelectedConvertActorsFromType?.Type ?? ConvertActorType.InlineSquareBrackets,
+                ToType = SelectedConvertActorsToType?.Type ?? ConvertActorType.Actor,
+                SetColor = ConvertActorsSetColor,
+                Color = ConvertActorsColor,
+                ChangeCasing = ConvertActorsChangeCasing,
+                CasingIndex = ConvertActorsCasingIndex,
+                OnlyNames = ConvertActorsOnlyNames,
+            },
+
             AdjustImageColors = new BatchConvertConfig.AdjustImageColorsSettings
             {
                 IsActive = activeFunctions.Contains(BatchConvertFunctionType.AdjustImageColors),
@@ -3279,6 +3686,17 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             {
                 Se.Settings.AutoTranslate.OllamaAdvancedModel = AutoTranslateModel.Trim();
             }
+        }
+
+        if (engineType == typeof(LmStudioAdvancedTranslate))
+        {
+            // Like Ollama advanced: SE's own settings only. An empty model means "the loaded model".
+            if (!string.IsNullOrWhiteSpace(AutoTranslateUrl))
+            {
+                Se.Settings.AutoTranslate.LmStudioAdvancedUrl = AutoTranslateUrl.Trim();
+            }
+
+            Se.Settings.AutoTranslate.LmStudioAdvancedModel = AutoTranslateModel.Trim();
         }
 
         if (engineType == typeof(NoLanguageLeftBehindServe))
@@ -3511,7 +3929,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     {
         var engine = SelectedAutoTranslator;
 
-        AutoTranslateModelIsVisible = engine is OllamaTranslate or OllamaAdvancedTranslate;
+        AutoTranslateModelIsVisible = engine is OllamaTranslate or OllamaAdvancedTranslate or LmStudioAdvancedTranslate;
         CrispAsrModelComboIsVisible = engine is CrispAsrMadladTranslate;
         // Both turned back on by PopulateLlamaCppModels for a local llama.cpp.
         LlamaCppModelComboIsVisible = false;
@@ -3524,7 +3942,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // Batch size, context history and the synopsis/glossary/style prompt only exist on the
         // advanced engines; they are shared settings, so the same window serves both llama.cpp
         // (local or remote llama-server) and Ollama.
-        LlamaCppAdvancedButtonIsVisible = engine is LlamaCppAdvancedTranslate or OllamaAdvancedTranslate;
+        LlamaCppAdvancedButtonIsVisible = engine is LlamaCppAdvancedTranslate or OllamaAdvancedTranslate or LmStudioAdvancedTranslate;
 
         // The regular llama.cpp engine has no advanced window - its prompt (and the shared
         // delay/max-bytes/merge settings) live in the translate settings dialog instead.
@@ -3565,6 +3983,17 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateApiKey = string.Empty;
             AutoTranslateApiKeyIsVisible = false;
         }
+        else if (engine is LmStudioAdvancedTranslate)
+        {
+            // Empty model = whatever model LM Studio has loaded; "Browse" asks /v1/models.
+            AutoTranslateModel = Se.Settings.AutoTranslate.LmStudioAdvancedModel;
+            AutoTranslateModelBrowseIsVisible = true;
+            AutoTranslateModelIsVisible = true;
+            AutoTranslateUrl = Se.Settings.AutoTranslate.LmStudioAdvancedUrl;
+            AutoTranslateUrlIsVisible = true;
+            AutoTranslateApiKey = string.Empty;
+            AutoTranslateApiKeyIsVisible = false;
+        }
         else if (engine is LibreTranslate)
         {
             AutoTranslateModel = string.Empty;
@@ -3578,10 +4007,10 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         else if (engine is OpenAiCompatibleTranslate)
         {
             // Any vLLM/llama-server/hosted "chat/completions" endpoint: URL, key and model are all
-            // user-typed. No model list to browse - the server decides which models exist, and a
-            // one-model server (llama.cpp, vLLM) may leave the model empty.
+            // user-typed; "Browse" asks the server's /v1/models. A one-model server (llama.cpp,
+            // vLLM) may leave the model empty.
             AutoTranslateModel = Se.Settings.AutoTranslate.OpenAiCompatibleModel;
-            AutoTranslateModelBrowseIsVisible = false;
+            AutoTranslateModelBrowseIsVisible = true;
             AutoTranslateModelIsVisible = true;
             AutoTranslateUrl = Se.Settings.AutoTranslate.OpenAiCompatibleUrl;
             AutoTranslateUrlIsVisible = true;
@@ -3762,7 +4191,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     internal void FilterComboBoxChanged()
     {
         var selection = SelectedFilterItem;
-        if (selection == Se.Language.General.AllFiles)
+        if (selection == Se.Language.General.AllFiles || IsFilterWithoutText(selection))
         {
             IsFilterTextVisible = false;
         }
