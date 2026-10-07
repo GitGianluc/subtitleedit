@@ -3816,13 +3816,14 @@ public partial class MainViewModel :
         // Every original line lives in exactly one row here: matched ones in their working row, the
         // rest in the display-only rows - so this round-trips the whole original.
         var format = _subtitleOriginal.OriginalFormat ?? SelectedSubtitleFormat;
+        var linkedLines = GetOriginalLinesById();
         var captured = new Subtitle(_subtitleOriginal);
         captured.Paragraphs.Clear();
         foreach (var line in Subtitles)
         {
             if (line.IsReferenceOnly || !string.IsNullOrEmpty(line.OriginalText))
             {
-                var p = line.ToParagraphOriginal(format);
+                var p = ToOriginalParagraph(line, format, linkedLines);
                 captured.Paragraphs.Add(p);
 
                 // The capture creates fresh paragraphs (fresh ids), so re-point the row's sticky
@@ -3832,6 +3833,49 @@ public partial class MainViewModel :
         }
 
         _subtitleOriginal = captured;
+    }
+
+    /// <summary>
+    /// The original's lines by id, for <see cref="ToOriginalParagraph"/> - empty unless the
+    /// original's non-matching lines are on screen (the only mode where a row and its original line
+    /// can have different time codes).
+    /// </summary>
+    private Dictionary<Guid, Paragraph> GetOriginalLinesById()
+    {
+        var linesById = new Dictionary<Guid, Paragraph>();
+        if (!IsShowingOriginalNonMatchingLines || _subtitleOriginal == null)
+        {
+            return linesById;
+        }
+
+        foreach (var p in _subtitleOriginal.Paragraphs)
+        {
+            if (p.Id is { } id)
+            {
+                linesById[id] = p;
+            }
+        }
+
+        return linesById;
+    }
+
+    /// <summary>
+    /// The original line a row holds. A working row that displays an original line matched by time
+    /// code only borrows that line's text - its time codes and style are the translation's - so the
+    /// line keeps its own time codes and style from the original. Taking them from the row gave a
+    /// line split in two in the original the translation's single time span, overlapping its second
+    /// half (#15749). Display-only rows are the original's lines themselves, nudged timings included.
+    /// </summary>
+    private static Paragraph ToOriginalParagraph(SubtitleLineViewModel line, SubtitleFormat format, Dictionary<Guid, Paragraph> linesById)
+    {
+        if (!line.IsReferenceOnly &&
+            line.ReferenceParagraphId is { } id &&
+            linesById.TryGetValue(id, out var originalLine))
+        {
+            return new Paragraph(originalLine) { Text = line.OriginalText.TrimEnd() };
+        }
+
+        return line.ToParagraphOriginal(format);
     }
 
     /// <summary>
@@ -4166,26 +4210,57 @@ public partial class MainViewModel :
                 return;
             }
         }
-
-        foreach (var subtitle in Subtitles)
+        else if (!IsEmpty && Window != null)
         {
-            subtitle.Text = subtitle.OriginalText;
-            subtitle.OriginalText = string.Empty;
-
-            // A display-only reference row carries a line of the original, so the promotion turns
-            // it into an ordinary line - left flagged, it would be dropped from every save by
-            // GetUpdateSubtitle and keep its dimmed, read-only appearance.
-            subtitle.IsReferenceOnly = false;
-            subtitle.ReferenceParagraphId = null; // the original it pointed into is gone
+            // Nothing unsaved, but the whole translation still leaves the grid - and it sits right
+            // next to "Close original" in the File menu, so a slip used to swap the subtitle being
+            // edited for the original without a word (#15749). The save prompt above already asks.
+            var name = string.IsNullOrEmpty(_subtitleFileName) ? Se.Language.General.Untitled : Path.GetFileName(_subtitleFileName);
+            var originalName = string.IsNullOrEmpty(_subtitleFileNameOriginal) ? Se.Language.General.Untitled : Path.GetFileName(_subtitleFileNameOriginal);
+            var answer = await MessageBox.Show(Window, Se.Language.Options.Shortcuts.FileCloseTranslation,
+                string.Format(Se.Language.Main.CloseTranslationQuestionXY, name, originalName),
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer != MessageBoxResult.Yes)
+            {
+                _shortcutManager.ClearKeys();
+                return;
+            }
         }
 
         if (IsShowingOriginalNonMatchingLines)
         {
-            // The mode is over: the original is now the working subtitle. Rebuild the rows so the
-            // promoted reference rows take a number and settle into their final rendering.
+            // The original does not line up with the rows: a matched row only borrows its original
+            // line's text, under the translation's time codes. Promoting the rows in place gave the
+            // original's text the translation's timing, with the display-only rows overlapping it -
+            // a line split in two in the original showed both halves stacked (#15749). The original
+            // itself, edits folded in, becomes the working subtitle instead.
+            CaptureOriginalFromRows();
+            var promoted = new Subtitle(_subtitleOriginal);
+            promoted.Sort(SubtitleSortCriteria.StartTime);
+            if (_subtitleOriginal.OriginalFormat?.GetType() != SelectedSubtitleFormat.GetType() ||
+                string.IsNullOrEmpty(promoted.Header))
+            {
+                // The rows stay in the current format, so its header (ASSA styles) stays too.
+                promoted.Header = _subtitle.Header;
+                promoted.Footer = _subtitle.Footer;
+            }
+
+            promoted.OriginalFormat = _subtitle.OriginalFormat;
+            promoted.FileName = _subtitle.FileName;
+
             IsShowingOriginalNonMatchingLines = false;
-            _subtitle = GetUpdateSubtitle();
+            _subtitle = promoted;
             SetSubtitles(_subtitle, null);
+        }
+        else
+        {
+            foreach (var subtitle in Subtitles)
+            {
+                subtitle.Text = subtitle.OriginalText;
+                subtitle.OriginalText = string.Empty;
+                subtitle.IsReferenceOnly = false;
+                subtitle.ReferenceParagraphId = null; // the original it pointed into is gone
+            }
         }
 
         IsEditOriginalMode = false; // there is no original left to edit
@@ -11497,6 +11572,7 @@ public partial class MainViewModel :
             return;
         }
 
+        var frameNumbers = GetFrameNumbersOfFrameBasedFormat();
         if (IsSmpteTimingEnabled)
         {
             IsSmpteTimingEnabled = false;
@@ -11514,6 +11590,8 @@ public partial class MainViewModel :
             }
         }
 
+        RestoreFrameNumbers(frameNumbers);
+
         var vp = GetVideoPlayerControl();
         if (vp != null)
         {
@@ -11522,6 +11600,45 @@ public partial class MainViewModel :
 
         _mpvReloader.SmpteMode = IsSmpteTimingEnabled;
         _vlcReloader.SmpteMode = IsSmpteTimingEnabled;
+    }
+
+    /// <summary>
+    /// In a format that stores frame numbers (MicroDVD, FCP 7 XML...) the frame number is the
+    /// truth, but SMPTE timing changes how many milliseconds a 23.976/29.97/59.94 frame is
+    /// (#15753). Read the frame numbers before the toggle so <see cref="RestoreFrameNumbers"/>
+    /// can put every line back on the same frame - otherwise toggling, or reopening a recent
+    /// file in SMPTE timing, would move every line by 0.1 %.
+    /// </summary>
+    private List<(SubtitleLineViewModel Line, int StartFrame, int EndFrame)>? GetFrameNumbersOfFrameBasedFormat()
+    {
+        var frameRate = Configuration.Settings.General.CurrentFrameRate;
+        if (SelectedSubtitleFormat is not { StoresFrameNumbers: true } ||
+            SubtitleFormat.GetFrameForCalculation(frameRate).Equals(frameRate))
+        {
+            // Not an NTSC rate: SMPTE timing doesn't change the frame length.
+            return null;
+        }
+
+        return Subtitles
+            .Select(p => (p, SubtitleFormat.MillisecondsToFrames(p.StartTime.TotalMilliseconds), SubtitleFormat.MillisecondsToFrames(p.EndTime.TotalMilliseconds)))
+            .ToList();
+    }
+
+    private void RestoreFrameNumbers(List<(SubtitleLineViewModel Line, int StartFrame, int EndFrame)>? frameNumbers)
+    {
+        if (frameNumbers == null)
+        {
+            return;
+        }
+
+        foreach (var (line, startFrame, endFrame) in frameNumbers)
+        {
+            line.SetTimes(
+                TimeSpan.FromMilliseconds(SubtitleFormat.FramesToMilliseconds(startFrame)),
+                TimeSpan.FromMilliseconds(SubtitleFormat.FramesToMilliseconds(endFrame)));
+        }
+
+        _updateAudioVisualizer = true;
     }
 
     /// <summary>
@@ -12218,6 +12335,99 @@ public partial class MainViewModel :
 
             // StopSpeakFromLine clears _speakFromLineCts at once, so a quick restart can already
             // be reading while this run unwinds - leave its status alone.
+            if (_speakFromLineCts == null)
+            {
+                ShowStatus(string.Empty);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Plays the video and speaks each line when the video reaches it, like a live dub (#15755).
+    /// Running it again or Escape stops it; pausing and seeking work as usual.
+    /// </summary>
+    /// <remarks>Concurrent executions allowed: the second run is the stop.</remarks>
+    [RelayCommand(AllowConcurrentExecutions = true)]
+    private async Task PlayWithSpeech()
+    {
+        if (_speakFromLineCts != null)
+        {
+            StopSpeakFromLine();
+            return;
+        }
+
+        if (Window == null)
+        {
+            return;
+        }
+
+        if (GetVideoPlayerControl() == null || string.IsNullOrEmpty(_videoFileName))
+        {
+            await MessageBox.Show(Window, Se.Language.Video.TextToSpeech.PlayWithSpeechTitle, Se.Language.General.NoVideoLoaded, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var vm = await ShowDialogAsync<SpeakFromLineWindow, SpeakFromLineViewModel>(v => v.InitializePlayWithSpeech());
+        _shortcutManager.ClearKeys();
+        if (!vm.OkPressed || vm.SelectedEngine == null || vm.SelectedVoice == null || _speakFromLineCts != null)
+        {
+            return;
+        }
+
+        var rows = Subtitles
+            .Where(p => !p.IsReferenceOnly)
+            .OrderBy(p => p.StartTime.TotalSeconds)
+            .ToList();
+        var lines = rows
+            .Select(p => new SpeechLine(p.StartTime.TotalSeconds, p.EndTime.TotalSeconds, SpeakFromLineReader.GetSpeakableText(p.Text)))
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _speakFromLineCts = cts;
+        IsSpeakingFromLine = true;
+
+        var reader = new PlayWithSpeechReader(vm.SelectedEngine, vm.SelectedVoice, vm.HasLanguageParameter ? vm.SelectedLanguage : null,
+            vm.LowerVideoVolume, vm.PauseVideoWhenLate);
+        var video = new PlayWithSpeechVideo(
+            GetVideoPlayerControl,
+            PlayVideo,
+            PauseVideoAndFreezePlayhead,
+            () => TryGetSelectedPlaybackSpeed(out var speed) ? speed : 1.0,
+            () => !string.IsNullOrEmpty(_videoFileName));
+        try
+        {
+            await reader.RunAsync(
+                lines,
+                video,
+                i => ShowStatus(string.Format(Se.Language.Video.TextToSpeech.SpeakingLineX, Subtitles.IndexOf(rows[i]) + 1), 10_000),
+                i => ShowStatus(string.Format(Se.Language.Video.TextToSpeech.WaitingForSpeechLineX, Subtitles.IndexOf(rows[i]) + 1), 10_000),
+                cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // stopped by the user
+        }
+        catch (Exception ex)
+        {
+            Se.LogError(ex, "Play with speech failed");
+            if (!cts.IsCancellationRequested)
+            {
+                await MessageBox.Show(Window, Se.Language.General.Error, ex.Message, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_speakFromLineCts, cts))
+            {
+                _speakFromLineCts = null;
+                IsSpeakingFromLine = false;
+            }
+
+            cts.Dispose();
             if (_speakFromLineCts == null)
             {
                 ShowStatus(string.Empty);
@@ -15071,7 +15281,7 @@ public partial class MainViewModel :
     [RelayCommand]
     private void SortByNumberOfLines()
     {
-        SortSubtitlesBy(p => (p.Text ?? string.Empty).SplitToLines().Count, Se.Language.Main.SortedByNumberOfLines);
+        SortSubtitlesBy(p => (p.Text ?? string.Empty).CountLines(), Se.Language.Main.SortedByNumberOfLines);
     }
 
     [RelayCommand]
@@ -21442,7 +21652,7 @@ public partial class MainViewModel :
 
         // The user places the line break by hand here, so no auto-break: re-breaking an
         // over-long line rebalanced the text and undid the move (issue #15496).
-        var upDown = new MoveWordUpDown(lines[0].Trim(), lines[1].Trim()) { AutoBreak = false };
+        var upDown = new MoveWordUpDown(lines[0].Trim(), lines[1].Trim()) { AutoBreak = false, SameSubtitle = true };
         if (up)
         {
             upDown.MoveWordUp();
@@ -28027,6 +28237,7 @@ public partial class MainViewModel :
         _subtitleOriginal.OriginalFormat ??= SelectedSubtitleFormat;
         var originalFormat = _subtitleOriginal.OriginalFormat ?? SelectedSubtitleFormat;
 
+        var linkedLines = GetOriginalLinesById();
         _subtitleOriginal.Paragraphs.Clear();
         foreach (var line in Subtitles)
         {
@@ -28044,7 +28255,7 @@ public partial class MainViewModel :
                 continue;
             }
 
-            var p = line.ToParagraphOriginal(originalFormat);
+            var p = ToOriginalParagraph(line, originalFormat, linkedLines);
             _subtitleOriginal.Paragraphs.Add(p);
 
             // Fresh paragraphs mean fresh ids - keep the row's sticky link pointing at the line it
@@ -28551,6 +28762,11 @@ public partial class MainViewModel :
             Se.Settings.General.SelectCurrentSubtitleWhilePlaying = SelectCurrentSubtitleWhilePlaying;
             Se.Settings.Waveform.ShowToolbar = IsWaveformToolbarVisible;
             Se.Settings.Waveform.CenterVideoPosition = WaveformCenter;
+            if (Se.Settings.Waveform.RememberZoom && AudioVisualizer != null)
+            {
+                Se.Settings.Waveform.ZoomFactor = AudioVisualizer.ZoomFactor;
+                Se.Settings.Waveform.VerticalZoomFactor = AudioVisualizer.VerticalZoomFactor;
+            }
 
             UiUtil.SaveWindowPosition(Window);
             Se.Settings.General.UndockVideoControls = Se.Settings.General.RememberPositionAndSize && AreVideoControlsUndocked;
@@ -29762,8 +29978,12 @@ public partial class MainViewModel :
         if (vp.VideoPlayer.Duration > 0)
         {
             var peakWaveFileName = WavePeakGenerator2.GetPeakWaveFileName(_videoFileName ?? string.Empty, _audioTrack?.FfIndex ?? -1);
-            AudioVisualizer.ZoomFactor = 1.0;
-            AudioVisualizer.VerticalZoomFactor = 1.0;
+            if (!Se.Settings.Waveform.RememberZoom)
+            {
+                AudioVisualizer.ZoomFactor = 1.0;
+                AudioVisualizer.VerticalZoomFactor = 1.0;
+            }
+
             AudioVisualizer.WavePeaks = WavePeakGenerator2.GenerateEmptyPeaks(peakWaveFileName, (int)vp.VideoPlayer.Duration);
         }
     }
@@ -32793,7 +33013,7 @@ public partial class MainViewModel :
                         keyEventArgs.KeyModifiers == KeyModifiers.None &&
                         Se.Settings.General.SubtitleTextBoxLimitNewLines)
                     {
-                        var newLineCount = EditTextBox.Text.SplitToLines().Count;
+                        var newLineCount = EditTextBox.Text.CountLines();
                         if (newLineCount >= Se.Settings.General.MaxNumberOfLines)
                         {
                             keyEventArgs.Handled = true;
@@ -35153,7 +35373,7 @@ public partial class MainViewModel :
         if (value != null)
         {
             _teletextLineCountSubtitleId = value.Id;
-            _teletextLineCountLastSeen = (value.Text ?? string.Empty).SplitToLines().Count;
+            _teletextLineCountLastSeen = (value.Text ?? string.Empty).CountLines();
         }
     }
 
@@ -35165,7 +35385,7 @@ public partial class MainViewModel :
     /// </summary>
     private void AdjustTeletextRowForLineCountChange(SubtitleLineViewModel subtitle)
     {
-        var newLineCount = (subtitle.Text ?? string.Empty).SplitToLines().Count;
+        var newLineCount = (subtitle.Text ?? string.Empty).CountLines();
 
         // The edit box also raises TextChanged when the selection swaps its content to another
         // row - only line-count changes within the same row are edits.
