@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.3.0-beta24",
+  "version": "v5.3.0-beta25",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -2189,7 +2189,7 @@
       "addFolderRecursiveDotDotDot": "Aggiungi cartella e sottocartelle…",
       "selectFolderToConvert": "Seleziona cartella con i file da convertire",
       "includeSubfolders": "Includi sottocartelle quando si aggiunge una cartella",
-      "videoFilesWhenAddingFolder": "File video files (mkv, mp4, ts…) quando si aggiunge una cartella",
+      "videoFilesWhenAddingFolder": "File video (mkv, mp4, ts…) quando si aggiunge una cartella",
       "videoFilesAsk": "Chiedi",
       "videoFilesInclude": "Aggiungi le corrispettive tracce di sottotitoli",
       "videoFilesSkip": "Ignora",
@@ -2523,7 +2523,21 @@
     "correctWordsX": "Parole corrette: {0}",
     "namesX": "Nomi: {0}",
     "addedToDictionaryX": "Aggiunte al dizionario: {0}",
-    "doNotShowThisAgain": "Non mostrare più questo messaggio"
+    "doNotShowThisAgain": "Non mostrare più questo messaggio",
+    "editUseAlwaysList": "Modifica elenco “Usa sempre”…",
+    "useAlwaysListTitle": "Controllo ortografico –\u00A0Elenco “Usa sempre”",
+    "useAlwaysListHeader": "Elenco “Usa sempre”",
+    "useAlwaysListDescription": "Parole che il correttore ortografico sostituisce in automatico, memorizzate da “Modifica tutto” e “Usa sempre”. Una coppia viene utilizzata solo se la parola è scritta in modo errato.",
+    "useAlwaysWord": "Parola scritta in modo errato",
+    "xPairs": "{0:#,##0} coppie",
+    "xUnusedPairs": "{0:#,##0} mai utilizzata",
+    "useAlwaysUnusedHint": "Mai utilizzata: questa parola è scritta correttamente (o è un nome o una parola definita dall’utente), quindi il controllo ortografico non la segnala mai",
+    "removeUnused": "Rimuovi inutilizzate",
+    "useAlwaysEmpty": "Nessuna coppia “Usa sempre” per questa lingua al momento",
+    "useAlwaysEmptyHint": "Le coppie vengono aggiunte quando si clicca su “Modifica tutto” o “Usa sempre” durante il controllo ortografico.",
+    "useAlwaysNoMatch": "Nessuna coppia corrisponde alla ricerca",
+    "useAlwaysSameWord": "La sostituzione deve differire dalla parola cercata.",
+    "useAlwaysRememberOff": "L’opzione “Ricorda elenco ‘Usa sempre’” è disattivata nelle Impostazioni, quindi il controllo ortografico non utilizza né salva questa lista."
   },
   "video": {
     "burnIn": {
@@ -3404,6 +3418,7 @@
       "promptBeforeDelete": "Chiedi conferma prima di eliminare",
       "rememberPositionAndSize": "Ricorda posizione e dimensione della finestra",
       "titleBarFullFileName": "Mostra percorso completo del file nella barra del titolo",
+      "showRecentFiles": "Mostra file recenti (per poterli riaprire)",
       "openLastFileOnStart": "Apri ultimo file recente all’avvio",
       "autoSave": "Salvataggio automatico (salva il file aperto durante la modifica)",
       "autoBackupOn": "Backup automatico",
