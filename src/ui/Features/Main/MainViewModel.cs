@@ -9349,9 +9349,33 @@ public partial class MainViewModel :
 
         var idx = SelectedSubtitleIndex ?? 0;
 
-        if (pluginSubtitle.Paragraphs is { Count: > 0 } && pluginSubtitle.Header != null)
+        if (pluginSubtitle.Paragraphs is { Count: > 0 })
         {
-            _subtitle.Header = pluginSubtitle.Header;
+            var current = GetUpdateSubtitle();
+            var currentParagraphs = JsonSerializer.Serialize(current.Paragraphs.Select(ToPluginParagraph).ToList(), PluginJsonContext.Default.Options);
+            var resultParagraphs = JsonSerializer.Serialize(subtitle.Paragraphs.Select(ToPluginParagraph).ToList(), PluginJsonContext.Default.Options);
+            if ((pluginSubtitle.Header ?? current.Header) == current.Header && currentParagraphs == resultParagraphs)
+            {
+                return true;
+            }
+
+            // Structured results are completed tool changes, not pending manual edits.
+            // Record their exact times before ordinary change detection can snap them again.
+            var toolApply = BeginToolApply(string.IsNullOrWhiteSpace(response.UndoDescription)
+                ? plugin.Manifest.Name : response.UndoDescription);
+            EndToolApply(toolApply, () =>
+            {
+                if (pluginSubtitle.Header != null)
+                {
+                    var oldHeader = _subtitle.Header;
+                    _subtitle.Header = pluginSubtitle.Header;
+                    FollowEbuHeaderFrameRate(oldHeader, pluginSubtitle.Header);
+                }
+
+                SetSubtitlesKeepingOriginal(subtitle);
+                SelectAndScrollToRow(Math.Min(idx, Math.Max(0, Subtitles.Count - 1)));
+            });
+            return true;
         }
 
         // Not the plain rebuild: that blanks the original column, and with an original captured
@@ -9359,6 +9383,35 @@ public partial class MainViewModel :
         SetSubtitlesKeepingOriginal(subtitle);
         SelectAndScrollToRow(Math.Min(idx, Math.Max(0, Subtitles.Count - 1)));
         return true;
+    }
+
+    /// <summary>
+    /// A plugin that changes the EBU STL disk format code (ArteCheck sets STL30.01 → STL25.01 when it
+    /// converts to 25 fps) changes the frame rate the file is saved in, so the toolbar frame rate
+    /// follows - like opening an STL file does. Otherwise the grid kept showing, and frame mode kept
+    /// snapping edits to, the old frame rate. A loaded video still wins.
+    /// </summary>
+    private void FollowEbuHeaderFrameRate(string? oldHeader, string newHeader)
+    {
+        if (SelectedSubtitleFormat is not Ebu || _mediaInfo != null || !Ebu.IsStlHeader(newHeader))
+        {
+            return;
+        }
+
+        var diskFormatCode = newHeader.Substring(3, 8);
+        if (oldHeader != null && Ebu.IsStlHeader(oldHeader) && oldHeader.Substring(3, 8) == diskFormatCode)
+        {
+            return;
+        }
+
+        var frameRate = new Ebu.EbuGeneralSubtitleInformation { DiskFormatCode = diskFormatCode }.FrameRate;
+        if (Math.Abs(frameRate - Se.Settings.General.CurrentFrameRate) < 0.001)
+        {
+            return;
+        }
+
+        SetSelectedFrameRate(frameRate);
+        ApplyCurrentFrameRate(frameRate);
     }
 
     private static void SavePluginSettings(InstalledPlugin plugin, PluginResponse response)
@@ -14681,6 +14734,15 @@ public partial class MainViewModel :
         {
             Layout.InitNativeMacMenu.UpdatePluginsMenuVisibility(this);
         }
+
+        // "Show recent files" may have been turned off (lists cleared) or back on.
+        InitMenu.UpdateRecentFiles(this);
+        if (OperatingSystem.IsMacOS())
+        {
+            Layout.InitNativeMacMenu.UpdateRecentFiles(this);
+        }
+
+        UpdateRecentVideoMenus();
 
         LockTimeCodes = Se.Settings.General.LockTimeCodes;
         UpdateTimeCodeModeText();
@@ -28676,7 +28738,7 @@ public partial class MainViewModel :
 
     private void AddToRecentFiles(bool updateMenu, int? selectedLine = null)
     {
-        if (_loading)
+        if (_loading || !Se.Settings.File.ShowRecentFiles)
         {
             return;
         }
@@ -29010,7 +29072,7 @@ public partial class MainViewModel :
                 await OpenPendingStartupFilesAsync(delayForLayout: true);
             });
         }
-        else if (Se.Settings.File.OpenLastFileOnStart)
+        else if (Se.Settings.File.OpenLastFileOnStart && Se.Settings.File.ShowRecentFiles)
         {
             var first = Se.Settings.File.RecentFiles.FirstOrDefault();
             if (first != null && File.Exists(first.SubtitleFileName))
@@ -29368,7 +29430,7 @@ public partial class MainViewModel :
 
     private void AddToRecentVideoFiles(string videoFileName)
     {
-        if (string.IsNullOrEmpty(videoFileName) || IsValidUrl(videoFileName))
+        if (string.IsNullOrEmpty(videoFileName) || IsValidUrl(videoFileName) || !Se.Settings.File.ShowRecentFiles)
         {
             return;
         }
@@ -29772,16 +29834,21 @@ public partial class MainViewModel :
     {
         if (double.TryParse(SelectedFrameRate, NumberStyles.Any, CultureInfo.InvariantCulture, out var frameRate))
         {
-            Se.Settings.General.CurrentFrameRate = frameRate;
-            Configuration.Settings.General.CurrentFrameRate = frameRate;
-            _updateAudioVisualizer = true;
+            ApplyCurrentFrameRate(frameRate);
+        }
+    }
 
-            if (Se.Settings.General.UseFrameMode)
+    private void ApplyCurrentFrameRate(double frameRate)
+    {
+        Se.Settings.General.CurrentFrameRate = frameRate;
+        Configuration.Settings.General.CurrentFrameRate = frameRate;
+        _updateAudioVisualizer = true;
+
+        if (Se.Settings.General.UseFrameMode)
+        {
+            foreach (var s in Subtitles)
             {
-                foreach (var s in Subtitles)
-                {
-                    s.RefreshTimeCodes();
-                }
+                s.RefreshTimeCodes();
             }
         }
     }
