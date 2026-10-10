@@ -91,6 +91,7 @@ using Nikse.SubtitleEdit.Features.Shared.ColumnPaste;
 using Nikse.SubtitleEdit.Features.Shared.ErrorList;
 using Nikse.SubtitleEdit.Features.Shared.FindText;
 using Nikse.SubtitleEdit.Features.Shared.FormatLimitWarning;
+using Nikse.SubtitleEdit.Features.Shared.CommandPalette;
 using Nikse.SubtitleEdit.Features.Shared.GoToLineNumber;
 using Nikse.SubtitleEdit.Features.Shared.PickAlignment;
 using Nikse.SubtitleEdit.Features.Shared.PickTeletextAlignment;
@@ -327,6 +328,7 @@ public static class DependencyInjectionExtensions
         collection.AddHttpClientWithProxy<IFireRedTts3AudioCppDownloadService, FireRedTts3AudioCppDownloadService>();
         collection.AddHttpClientWithProxy<IKugelAudioAudioCppDownloadService, KugelAudioAudioCppDownloadService>();
         collection.AddHttpClientWithProxy<IAceStepAudioCppDownloadService, AceStepAudioCppDownloadService>();
+        collection.AddHttpClientWithProxy<ISidonAudioCppDownloadService, SidonAudioCppDownloadService>();
         collection.AddHttpClientWithProxy<ICosyVoice3CrispAsrDownloadService, CosyVoice3CrispAsrDownloadService>();
         collection.AddHttpClientWithProxy<IF5TtsCrispAsrDownloadService, F5TtsCrispAsrDownloadService>();
         collection.AddHttpClientWithProxy<IOmniVoiceCrispAsrDownloadService, OmniVoiceCrispAsrDownloadService>();
@@ -481,6 +483,7 @@ public static class DependencyInjectionExtensions
         collection.AddTransient<GetDictionariesViewModel>();
         collection.AddTransient<GetKeyViewModel>();
         collection.AddTransient<GoToLineNumberViewModel>();
+        collection.AddTransient<CommandPaletteViewModel>();
         collection.AddTransient<GridColumnsViewModel>();
         collection.AddTransient<FormatLimitWarningViewModel>();
         collection.AddTransient<GoToVideoPositionViewModel>();

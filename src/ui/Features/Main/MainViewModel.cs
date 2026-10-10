@@ -95,6 +95,7 @@ using Nikse.SubtitleEdit.Features.Shared.ColumnPaste;
 using Nikse.SubtitleEdit.Features.Shared.ErrorList;
 using Nikse.SubtitleEdit.Features.Shared.GetAudioClips;
 using Nikse.SubtitleEdit.Features.Shared.FormatLimitWarning;
+using Nikse.SubtitleEdit.Features.Shared.CommandPalette;
 using Nikse.SubtitleEdit.Features.Shared.GoToLineNumber;
 using Nikse.SubtitleEdit.Features.Shared.MediaInfoView;
 using Nikse.SubtitleEdit.Features.Shared.PickAlignment;
@@ -178,6 +179,7 @@ using Nikse.SubtitleEdit.Features.Video.VideoOcr;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ActorVoices;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.AutoCast;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.CloneReferenceCleaning;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ReviewSpeech;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.SpeakFromLine;
@@ -583,6 +585,21 @@ public partial class MainViewModel :
     private static int IndexFromMap(Dictionary<SubtitleLineViewModel, int> map, SubtitleLineViewModel row)
     {
         return map.TryGetValue(row, out var index) ? index : -1;
+    }
+
+    /// <summary>
+    /// <c>rows.IndexOf</c> as a lookup built in one pass: the column and ripple-delete commands
+    /// map every selected row to its position, which was O(rows * selected) with IndexOf.
+    /// </summary>
+    internal static Func<SubtitleLineViewModel, int> IndexLookup(List<SubtitleLineViewModel> rows)
+    {
+        var map = new Dictionary<SubtitleLineViewModel, int>(rows.Count);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            map.TryAdd(rows[i], i); // first position wins, like IndexOf
+        }
+
+        return row => row != null && map.TryGetValue(row, out var index) ? index : -1;
     }
 
     private List<SubtitleLineViewModel> GetSelectedSubtitlesInOrder(bool includeReferenceOnly)
@@ -2594,6 +2611,29 @@ public partial class MainViewModel :
         }
     }
 
+    private static readonly Regex AssaDrawingTagRegex = new(@"\{[^{}]*\\p1[^}]*\}", RegexOptions.Compiled);
+    private static readonly Regex AssaTagBlockRegex = new(@"\{[^}]*\}", RegexOptions.Compiled);
+
+    /// <summary>
+    /// A row the ASSA draw dialog imports as drawing: a \p1 drawing, or a mask-only line
+    /// (just an \iclip, no text) as the dialog writes for a layer of erase shapes.
+    /// </summary>
+    internal static bool IsAssaDrawingText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        if (AssaDrawingTagRegex.IsMatch(text))
+        {
+            return true;
+        }
+
+        return text.Contains("\\iclip(", StringComparison.Ordinal) &&
+               AssaTagBlockRegex.Replace(text, string.Empty).Trim().Length == 0;
+    }
+
     [RelayCommand]
     private async Task ShowAssaDraw()
     {
@@ -2608,7 +2648,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<AssaDrawWindow, AssaDrawViewModel>(vm =>
         {
-            vm.Initialize(GetUpdateSubtitle(), selectedItems, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height);
+            vm.Initialize(GetUpdateSubtitle(), selectedItems, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height, _videoFileName, GetVideoPlayerControl()?.Position);
         });
 
         if (!result.OkPressed)
@@ -2616,44 +2656,45 @@ public partial class MainViewModel :
             return;
         }
 
-        _subtitle = result.ResultSubtitle;
+        // Only the header (styles, PlayRes) comes back - ResultSubtitle holds just the drawing
+        // lines, the rest of the file lives in the grid rows.
+        _subtitle.Header = result.ResultSubtitle.Header;
+        _subtitle.Footer = result.ResultSubtitle.Footer;
         var assa = new SubStationAlpha();
-        var firstParagraph = selectedItems.FirstOrDefault();
-        var lastParagraph = selectedItems.LastOrDefault();
-        if (lastParagraph == null)
-        {
-            lastParagraph = new SubtitleLineViewModel()
-            {
-                StartTime = TimeSpan.FromSeconds(firstParagraph != null ? firstParagraph.StartTime.TotalSeconds : 0),
-                EndTime = TimeSpan.FromSeconds(firstParagraph != null ? firstParagraph.EndTime.TotalSeconds : 2),
-                Text = string.Empty
-            };
-        }
 
-        for (var index = 0; index < result.ResultSubtitle.Paragraphs.Count; index++)
+        // The dialog edits the drawings it imported, so only those rows are replaced. Writing the
+        // drawings over the selection in order overwrote ordinary dialogue lines that happened to be
+        // selected, and a drawing deleted in the dialog stayed behind in its old row.
+        var drawingRows = selectedItems.Where(p => IsAssaDrawingText(p.Text)).ToList();
+        var anchor = selectedItems.LastOrDefault();
+        var paragraphs = result.ResultSubtitle.Paragraphs;
+        for (var index = 0; index < paragraphs.Count; index++)
         {
-            var p = result.ResultSubtitle.Paragraphs[index];
-            if (index < selectedItems.Count)
+            var p = paragraphs[index];
+            if (index < drawingRows.Count)
             {
-                selectedItems[index].Text = p.Text;
-                selectedItems[index].Style = p.Extra;
-                selectedItems[index].Layer = p.Layer;
-                lastParagraph = selectedItems[index];
+                drawingRows[index].Text = p.Text;
+                drawingRows[index].Style = p.Extra;
+                drawingRows[index].Layer = p.Layer;
+                anchor = drawingRows[index];
             }
             else
             {
-                var newP = new SubtitleLineViewModel(p, assa);
-                newP.StartTime = lastParagraph.StartTime;
-                newP.EndTime = lastParagraph.EndTime;
-                var insertIndex = Subtitles.IndexOf(lastParagraph) + 1;
-                if (insertIndex <= 0)
+                var newP = new SubtitleLineViewModel(p, assa)
                 {
-                    insertIndex = Subtitles.Count;
-                }
-
+                    StartTime = anchor?.StartTime ?? TimeSpan.Zero,
+                    EndTime = anchor?.EndTime ?? TimeSpan.FromSeconds(2),
+                };
+                var insertIndex = anchor == null ? -1 : Subtitles.IndexOf(anchor);
+                insertIndex = insertIndex < 0 ? Subtitles.Count : insertIndex + 1;
                 Subtitles.Insert(insertIndex, newP);
-                lastParagraph = newP;
+                anchor = newP;
             }
+        }
+
+        for (var index = paragraphs.Count; index < drawingRows.Count; index++)
+        {
+            Subtitles.Remove(drawingRows[index]);
         }
 
         Renumber();
@@ -2802,7 +2843,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<AssSetBackgroundWindow, AssSetBackgroundViewModel>(vm =>
         {
-            vm.Initialize(GetUpdateSubtitle(), selectedItems, _mediaInfo?.Dimension.Width ?? 1920, _mediaInfo?.Dimension.Height ?? 1080, _videoFileName);
+            vm.Initialize(GetUpdateSubtitle(), selectedItems, _mediaInfo?.Dimension.Width ?? 1920, _mediaInfo?.Dimension.Height ?? 1080, _videoFileName, GetVideoPlayerControl()?.Position);
         });
 
         if (!result.OkPressed)
@@ -2832,7 +2873,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<AssaImageColorPickerWindow, AssaImageColorPickerViewModel>(vm =>
         {
-            vm.Initialize(_subtitle, selectedItem, _videoFileName, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height);
+            vm.Initialize(_subtitle, selectedItem, _videoFileName, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height, GetVideoPlayerControl()?.Position);
         });
 
         RefreshSubtitlePreview();
@@ -2855,7 +2896,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<AssaSetPositionWindow, AssaSetPositionViewModel>(vm =>
         {
-            vm.Initialize(_subtitle, selectedItem, _videoFileName, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height);
+            vm.Initialize(_subtitle, selectedItem, _videoFileName, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height, GetVideoPlayerControl()?.Position);
         });
 
         if (!result.OkPressed)
@@ -6881,6 +6922,11 @@ public partial class MainViewModel :
                 }
             }
 
+            if (CloneReferenceCleaner.IsEnabled && await CloneReferenceCleaner.EnsureInstalledAsync(Window, _windowService))
+            {
+                await CloneReferenceCleaner.CleanFileAsync(clipFileName, null, CancellationToken.None);
+            }
+
             var transcript = HtmlUtil.RemoveHtmlTags(line.Text ?? string.Empty, true)
                 .Replace('\n', ' ')
                 .Replace('\r', ' ')
@@ -7408,7 +7454,7 @@ public partial class MainViewModel :
         // Insert empty cells at the original selection indices and shift down
         // Use delta to keep correct original target positions
         var indices = selectedItems
-            .Select(x => column.IndexOf(x))
+            .Select(IndexLookup(column))
             .Where(i => i >= 0 && i < total)
             .Distinct()
             .OrderBy(i => i)
@@ -7669,7 +7715,7 @@ public partial class MainViewModel :
         var column = Subtitles.Where(p => !p.IsReferenceOnly).ToList();
         var total = column.Count;
         var sel = selectedItems
-            .Select(x => column.IndexOf(x))
+            .Select(IndexLookup(column))
             .Where(i => i >= 0 && i < total)
             .Distinct()
             .OrderBy(i => i)
@@ -7738,7 +7784,7 @@ public partial class MainViewModel :
         var column = Subtitles.Where(p => !p.IsReferenceOnly).ToList();
         var total = column.Count;
         var sel = selectedItems
-            .Select(x => column.IndexOf(x))
+            .Select(IndexLookup(column))
             .Where(i => i >= 0 && i < total)
             .Distinct()
             .OrderBy(i => i)
@@ -12103,6 +12149,8 @@ public partial class MainViewModel :
     {
         var clonedVoiceNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var referenceFolder = Path.Combine(Path.GetTempPath(), "SeAutoCast_" + Guid.NewGuid().ToString("N"));
+        var cleanReferences = CloneReferenceCleaner.IsEnabled && Window != null &&
+                              await CloneReferenceCleaner.EnsureInstalledAsync(Window, _windowService);
 
         try
         {
@@ -12120,6 +12168,11 @@ public partial class MainViewModel :
                 if (referenceFileName == null)
                 {
                     continue;
+                }
+
+                if (cleanReferences)
+                {
+                    await CloneReferenceCleaner.CleanFileAsync(referenceFileName, null, CancellationToken.None);
                 }
 
                 var transcript = await ReadReferenceTranscriptAsync(referenceFileName);
@@ -18528,7 +18581,7 @@ public partial class MainViewModel :
         _shortcutManager.ClearKeys();
     }
 
-    private static int? TryBuildReplacement(string line, int matchIndex, string matchText, ReplaceViewModel result, out string newLine)
+    internal static int? TryBuildReplacement(string line, int matchIndex, string matchText, ReplaceViewModel result, out string newLine)
     {
         if (result.FindMode == FindMode.RegularExpression)
         {
@@ -18773,6 +18826,43 @@ public partial class MainViewModel :
         }
     }
 
+
+    /// <summary>
+    /// Searchable list of every main-window command (the same list as Options > Shortcuts),
+    /// so commands without a menu entry or shortcut are still reachable from the keyboard.
+    /// </summary>
+    [RelayCommand]
+    private async Task ShowCommandPalette()
+    {
+        var items = new List<CommandPaletteItem>();
+        var seen = new HashSet<IRelayCommand>(ReferenceEqualityComparer.Instance);
+        foreach (var shortcut in ShortcutsMain.GetAllShortcuts(this)
+                     .OrderByDescending(p => p.Keys.Count > 0))
+        {
+            // Text box commands only act on a focused text box, which the palette has just taken
+            // focus from; the palette itself is left out so it cannot open itself.
+            if (shortcut.Category == ShortcutCategory.TextBox ||
+                ReferenceEquals(shortcut.Action, ShowCommandPaletteCommand) ||
+                !seen.Add(shortcut.Action))
+            {
+                continue;
+            }
+
+            var displayName = ShortcutsMain.GetCommandDisplayName(shortcut.Name)
+                .Replace("_", string.Empty)
+                .Trim();
+            var keys = shortcut.Keys.Count > 0
+                ? string.Join("+", ShortcutManager.OrderKeys(shortcut.Keys).Select(ShortcutManager.GetKeyDisplayName))
+                : string.Empty;
+            items.Add(new CommandPaletteItem(shortcut.Name, displayName, ShortcutGroupUi.GetName(shortcut.Group), keys, shortcut.Action));
+        }
+
+        var viewModel = await ShowDialogAsync<CommandPaletteWindow, CommandPaletteViewModel>(vm => vm.Initialize(items));
+        if (viewModel.SelectedCommand != null)
+        {
+            await ExecuteCommandAndWait(viewModel.SelectedCommand);
+        }
+    }
 
     [RelayCommand]
     private async Task ShowGoToLine()
@@ -25702,6 +25792,7 @@ public partial class MainViewModel :
 
             SetSubtitles(_subtitle);
             _changeSubtitleHash = GetFastHash();
+            RememberSubtitleFileStamp();
             ShowStatus(string.Format(Se.Language.General.SubtitleLoadedX, fileName));
             LoadBookmarks();
 
@@ -27972,6 +28063,7 @@ public partial class MainViewModel :
 
         _changeSubtitleHash = GetFastHash();
         _lastOpenSaveFormat = SelectedSubtitleFormat;
+        RememberSubtitleFileStamp();
 
         new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
 
@@ -28044,6 +28136,7 @@ public partial class MainViewModel :
 
         _changeSubtitleHash = GetFastHash();
         _lastOpenSaveFormat = SelectedSubtitleFormat;
+        RememberSubtitleFileStamp();
 
         new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
 
@@ -29832,6 +29925,14 @@ public partial class MainViewModel :
 
     internal void ComboBoxFrameRateSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        // While the user types in the editable combo box, each keystroke that matches or
+        // un-matches a preset changes the selection - typing "240" would apply 24 on the way.
+        // A typed rate is applied once, by CommitTypedFrameRate, on Enter or focus loss.
+        if (sender is ComboBox { IsEditable: true, IsDropDownOpen: false, IsKeyboardFocusWithin: true })
+        {
+            return;
+        }
+
         if (double.TryParse(SelectedFrameRate, NumberStyles.Any, CultureInfo.InvariantCulture, out var frameRate))
         {
             ApplyCurrentFrameRate(frameRate);
@@ -29850,6 +29951,25 @@ public partial class MainViewModel :
             {
                 s.RefreshTimeCodes();
             }
+        }
+    }
+
+    /// <summary>
+    /// Applies a frame rate typed into the editable toolbar frame rate combo box (#15806). A rate
+    /// that is not a preset is added to the list. Invalid text selects the current rate again.
+    /// </summary>
+    internal void CommitTypedFrameRate(string? text)
+    {
+        if (!FrameRateHelper.TryParseTypedFrameRate(text, out var frameRate))
+        {
+            SetSelectedFrameRate(Se.Settings.General.CurrentFrameRate);
+            return;
+        }
+
+        SetSelectedFrameRate(frameRate);
+        if (Math.Abs(Se.Settings.General.CurrentFrameRate - frameRate) > 0.0001)
+        {
+            ApplyCurrentFrameRate(frameRate);
         }
     }
 
@@ -30980,7 +31100,7 @@ public partial class MainViewModel :
             // the shift for the rest of the file.
             var workingRows = Subtitles.Where(p => !p.IsReferenceOnly).ToList();
             var sortedIndices = selectedItems
-                .Select(item => workingRows.IndexOf(item))
+                .Select(IndexLookup(workingRows))
                 .Where(i => i >= 0)
                 .OrderBy(i => i)
                 .ToList();
@@ -32382,6 +32502,9 @@ public partial class MainViewModel :
         // Captured before the cleanup below, which can move focus itself.
         _focusBeforeWindowDeactivated = GetRestorableFocusedControl();
 
+        // The user may be off to edit the subtitle file in another program (#15828).
+        EnsureSubtitleFileStamp();
+
         // The claim on the SE foreground moves to a dialog when one is what took over; it
         // deliberately STAYS with the main window otherwise - through the application going to
         // the background, and through an undocked tool window reading as active here (topmost
@@ -32474,6 +32597,19 @@ public partial class MainViewModel :
             }
 
             SubtitleGrid?.Focus();
+        });
+
+        // Back from another program - pick up edits it made to the open subtitle file (#15828).
+        Dispatcher.UIThread.Post(async void () =>
+        {
+            try
+            {
+                await CheckSubtitleFileChangedOutside();
+            }
+            catch (Exception exception)
+            {
+                SeLogger.Error(exception, "Checking for subtitle file changes made outside Subtitle Edit failed");
+            }
         });
     }
 
@@ -35873,6 +36009,13 @@ public partial class MainViewModel :
         }
 
         CancelFrameStepPlayBlip();
+
+        // A direct jump (start/end of current line, next line, bookmark...) must also drop the
+        // relative-seek tracker: its 0.5 s "still matches the player" guard let a stale target
+        // survive short jumps, so alternating "set position to start of line" with a 10 ms step
+        // went 10, 20, 30... ms until the drift reached 0.5 s (#15818). MoveVideoPositionMs
+        // seeks via SeekTo, which does not raise this, so chained steps still accumulate.
+        _relativeSeekTargetSeconds = null;
     }
 
     internal void OnVideoPlayerUserSeeked(double newPositionSeconds)

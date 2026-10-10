@@ -3,6 +3,50 @@ Subtitle Edit Changelog
 
 -----------------------------------------------------------------------------------------------------
 
+v5.3.0-rc1 (10th of October 2026)
+
+* Add search of help topics from the macOS Help menu search field
+* Fix llama.cpp OCR ignoring the server URL (OCR + batch OCR can now use an external server) - thx GitGerby
+* Fix iTT export losing italic in nested formatting spans - thx michi987654
+* Fix Compare window jumping to a scrolled-away row when focus returns - thx WAusJackBauer
+* Fix jitter on held short millisecond seek shortcuts - thx 114562175
+* Update Avalonia to 12.1.4
+* Update German translation - thx FunkyKnilch
+* Update Italian translation - thx bovirus
+* Update Japanese translation - thx hisui3393
+* Update Korean translation - thx 12si27
+
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta26 (9th of October 2026)
+
+* Add ElevenLabs Eleven v4 and v4 Turbo TTS models (v4 Turbo is the new default, <break> converted to audio pause tags)
+* Add optional Sidon cleaning of voice-clone reference audio
+* Add Find and Replace to the OCR window
+* Add video player deinterlace setting (default auto) - thx MaxBunny1786
+* Add reload of the subtitle file when changed outside SE - thx jojorne
+* Add typing a custom frame rate - thx jojorne
+* Add Cut/Copy/Paste to the Find/Replace regex context menu - thx hisui3393
+* ASSA draw: live resolution change, zoom/reset view and F9 preview of the rendered drawing
+* Set position / Set background / Image color picker: use the paused video frame inside the line - thx 114562175
+* Set start/end and offset the rest: work without waveform focus, F9 default - thx DrDanAharoni
+* Fix no progress shown for whisper.cpp in Speech to text - thx abc16361
+* Fix custom ms seek accumulating after jump to start/end of line - thx 114562175
+* Fix Merge as dialog dash placed inside leading formatting tags - thx accessallareas
+* Fix OCR "All fixes"/"All guesses" line numbers after deleting lines - thx Peter Vella
+* Fix ASSA draw OK overwriting selected text lines + canvas sync bugs
+* Fix main menu dropdown size with UI scale at startup
+* Fix seconv --overwrite emptying the input file if interrupted - thx yottayoshida
+* Update CrispASR to v0.8.42
+* Update audio.cpp runtime to v0.9.1
+* Update Chinese Traditional translation - thx love80312
+* Update Italian translation - thx bovirus
+* Update Japanese translation - thx hisui3393
+* Update Polish translation - thx potplayer-fanpack
+
+-----------------------------------------------------------------------------------------------------
+
 v5.3.0-beta25 (8th of October 2026)
 
 * Add taskbar/Dock progress for Speech to text, Text to speech, AI review, Auto-translate, Burn-in and Generate shot changes - thx pdjdev
@@ -21,6 +65,7 @@ v5.3.0-beta25 (8th of October 2026)
 * Fix Linux startup crash when Skia reports no default font family - thx MaryJaneInChain
 * Update Italian translation - thx bovirus
 
+-----------------------------------------------------------------------------------------------------
 
 v5.3.0-beta24 (7th of October 2026)
 
@@ -39,6 +84,7 @@ v5.3.0-beta24 (7th of October 2026)
 * Update Korean translation - thx 12si27
 * Update Polish translation - thx potplayer-fanpack
 
+-----------------------------------------------------------------------------------------------------
 
 v5.3.0-beta23 (6th of October 2026)
 
@@ -73,6 +119,7 @@ v5.3.0-beta23 (6th of October 2026)
 * Update Italian translation - thx bovirus
 * Update Polish translation - thx potplayer-fanpack
 
+-----------------------------------------------------------------------------------------------------
 
 v5.3.0-beta22 (5th of October 2026)
 

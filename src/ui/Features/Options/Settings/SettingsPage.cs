@@ -135,13 +135,21 @@ public class SettingsPage : UserControl
 
         UpdateVisibleSections(string.Empty);
 
+        // Search updates immediately, without the category navigation fade.
         _searchBox.TextChanged += (_, e) => UpdateVisibleSections(_searchBox.Text ?? string.Empty);
         ActualThemeVariantChanged += (_, _) => Dispatcher.UIThread.Post(RefreshSections);
         _vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SettingsViewModel.SelectedSection))
             {
-                RefreshSections();
+                if (_vm.DeferSectionRefresh)
+                {
+                    UpdateMenuHighlight();
+                }
+                else
+                {
+                    RefreshSections();
+                }
             }
         };
     }
@@ -613,6 +621,8 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoOpenVideoFile, nameof(_vm.AutoOpenVideoFile)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowSecondarySubtitleDialog, nameof(_vm.ShowSecondarySubtitleDialog)),
             MakeCheckboxSetting(Se.Language.Options.Settings.RememberSecondarySubtitleFile, nameof(_vm.RememberSecondarySubtitleFile)),
+            new SettingsItem(Se.Language.Options.Settings.Deinterlace,
+                () => UiUtil.MakeComboBox(_vm.MpvDeinterlaceItems, _vm, nameof(_vm.MpvSelectedDeinterlace))),
             new SettingsItem(Se.Language.Options.Settings.SubtitlePreviewProperties, () => MakeMpvPreviewSettings(_vm)),
             new SettingsItem(!_vm.IsLibMpvDownloadVisible, Se.Language.Options.Settings.DownloadMpv, () => new StackPanel
             {
