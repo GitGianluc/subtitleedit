@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Layout;
@@ -138,7 +138,7 @@ public class EditCustomTextFormatWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             MinWidth = 200,
             Margin = new Thickness(0, 0, 0, 3),
-            PlaceholderText = Se.Language.File.Export.NewLineFormat,
+            PlaceholderText = Se.Language.File.Export.TimeCodeFormat,
             ItemsSource = vm.NewLineList,
             [!AutoCompleteBox.TextProperty] = new Binding(nameof(vm.SelectedCustomFormat) + "." + nameof(CustomFormatItem.FormatNewLine)),
             MinimumPrefixLength = 0,
