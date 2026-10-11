@@ -31,6 +31,8 @@ Built-in trainable OCR engine.
 - Very accurate once trained
 - Best for consistent fonts (like DVD/Blu-ray subtitles)
 - **Train nOCR database...** - a database can also be trained from installed fonts instead of being taught during OCR. Open the nOCR database settings (the settings button next to the database list) and right-click anywhere in that dialog to reach it. Pick one or more fonts, a font size, the characters to train (or **Import characters from subtitle file...**), letter combinations that might end up in one image, whether to include bold and italic, and the number of line segments; **Start training** renders every character in every selected font and saves the result as a new `.nocr` database in the OCR folder, ready to pick from the database list
+- **Optimize nOCR database...** - in the same right-click menu. Removes the lines of each character that don't tell it apart from similar characters (e.g. the stem that "i", "l" and "j" share), using glyphs rendered from common subtitle fonts as the check: every similar character must still be rejected, and the character itself must still match as well as before. The database gets smaller and OCR faster, usually with fewer errors - the shipped Latin database is already optimized this way. It takes up to a minute; the original is kept as `<name>.nocr.bak` in the OCR folder. Also available in seconv as `seconv optimize-nocr <database.nocr>`
+- **Mixed italic in one image** - when an italic letter touches an upright one and both end up in a single image, type the text with italic tags, e.g. `<i>i</i>t`. The tagged part is italic and the rest upright, whatever the surrounding word is, so an italic line comes out as `<i>... i</i>t<i>?</i>` instead of nested tags. This works the same in Binary OCR
 
 ### Binary OCR
 Binary image comparison engine, listed as **Binary image compare** in the engine dropdown.
@@ -165,7 +167,7 @@ number, time codes, duration and image size.
 | F3 / Shift+F3 | Find next / Find previous |
 | Ctrl++ | Zoom in (images in grid) |
 | Ctrl+- | Zoom out (images in grid) |
-| F1 | Show help |
+| F1 | Show help (default key, [changeable](shortcuts.md#worth-knowing)) |
 
 ### Subtitle Grid
 
@@ -188,12 +190,14 @@ number, time codes, duration and image size.
 
 ## Pre-processing
 
-Before OCR, you can apply image pre-processing:
-- Crop transparent colors
-- Remove borders (with configurable border size)
-- Invert colors
-- To one color (keep pixels brighter than a darkness threshold)
-- Binarize (convert to black/white using Otsu thresholding)
+Before OCR, you can apply image pre-processing via the **Image pre-processing** toggle button in the OCR window (it shows as pressed while any pre-processing is active):
+- **Crop transparent colors**
+- **Remove borders** (with configurable **Border size**)
+- **Inverse colors**
+- **One color (white)** (keep pixels brighter than a **Darkness threshold**)
+- **Binarize** (convert to black/white using Otsu thresholding)
+
+The settings are remembered between sessions and applied automatically the next time you open the OCR window. **Reset** in the **Pre-processing** window sets all options back to their defaults (all off, border size 2, darkness threshold 128).
 
 ## Batch OCR
 
