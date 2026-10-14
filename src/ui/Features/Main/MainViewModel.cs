@@ -724,6 +724,12 @@ public partial class MainViewModel :
     // setting - that setting answers "no name yet, what do we suggest?", and here there is
     // one. Consumed and cleared by the next "Save as".
     private string? _saveAsFileNameSuggestion;
+
+    // The file the translation was "saved as" over, taking it from the original (#15999). While
+    // the translation still lives there and the original is untitled, Ctrl+S saves the
+    // translation only instead of asking where the original goes every time; closing still
+    // prompts for the original's unsaved changes.
+    private string? _originalFileReplacedByTranslation;
     private Subtitle _subtitle;
     private Subtitle? _subtitleSecondary;
     // The second subtitle as parsed from its file, before styling. "Edit second subtitle
@@ -2615,8 +2621,9 @@ public partial class MainViewModel :
     private static readonly Regex AssaTagBlockRegex = new(@"\{[^}]*\}", RegexOptions.Compiled);
 
     /// <summary>
-    /// A row the ASSA draw dialog imports as drawing: a \p1 drawing, or a mask-only line
-    /// (just an \iclip, no text) as the dialog writes for a layer of erase shapes.
+    /// A row the ASSA draw dialog imports as drawing: a \p1 drawing, a mask-only line
+    /// (just an \iclip, no text) as the dialog writes for a layer of erase shapes, or a text
+    /// line it wrote for a bubble or text box.
     /// </summary>
     internal static bool IsAssaDrawingText(string text)
     {
@@ -2625,7 +2632,7 @@ public partial class MainViewModel :
             return false;
         }
 
-        if (AssaDrawingTagRegex.IsMatch(text))
+        if (AssaDrawingTagRegex.IsMatch(text) || AssaDrawTextLine.IsTextLine(text))
         {
             return true;
         }
@@ -4649,11 +4656,18 @@ public partial class MainViewModel :
         var saved = await SaveSubtitle();
         var savedOriginal = false;
 
+        // "Save as" may have written the translation over the original's own file (now, or on an
+        // earlier save), which leaves the original untitled. Saving it here would ask for a file
+        // name on every Ctrl+S - or, answered with the same file, put the original straight back
+        // over the translation (#15999).
+        var originalDetached = string.IsNullOrEmpty(_subtitleFileNameOriginal) &&
+                               IsSameFile(_subtitleFileName, _originalFileReplacedByTranslation);
+
         // Only when the subtitle itself was written. Ctrl+S is one gesture: after a translation
         // _converted is set, so SaveSubtitle routes to "Save as" and returns false when the user
         // dismisses the picker - and the original was written anyway, over the file the
         // translation was made from, by a save the user had just cancelled.
-        if (saved && ShowColumnOriginalText && _changeSubtitleHashOriginal != GetFastHashOriginal())
+        if (saved && !originalDetached && ShowColumnOriginalText && _changeSubtitleHashOriginal != GetFastHashOriginal())
         {
             savedOriginal = await SaveSubtitleOriginal();
         }
@@ -14991,7 +15005,8 @@ public partial class MainViewModel :
 
         if (languageChanged && Se.Settings.General.IsLanguageRightToLeft() != wasRightToLeft)
         {
-            ApplyLayoutDirectionForCurrentLanguage(videoPosition);
+            // Undocked, the sizes were not taken above (no docked panels to keep).
+            ApplyLayoutDirectionForCurrentLanguage(videoPosition, AreVideoControlsUndocked ? null : Se.Settings.Appearance.CurrentLayoutPositions);
         }
     }
 
@@ -15613,7 +15628,12 @@ public partial class MainViewModel :
             // taken here to be restored once the new layout is in place.
             var videoPosition = GetVideoPlayerControl()?.VideoPlayer?.Position ?? 0;
 
-            await LoadLanguage(viewModel.SelectedLanguage.FileName);
+            // The panel sizes the user dragged are lost by the rebuild as well, so note
+            // them now too - once, before the first rebuild, as the direction rebuild
+            // below runs later, when the new grids may not be measured yet (#16001).
+            var layoutPositions = InitLayout.SaveLayoutPositions(ContentGrid.Children.FirstOrDefault() as Grid);
+
+            await LoadLanguage(viewModel.SelectedLanguage.FileName, layoutPositions);
 
             // Strings update live already. When the new language flips the layout
             // direction (between a right to left and a left to right language),
@@ -15621,12 +15641,12 @@ public partial class MainViewModel :
             // correct side at once, instead of asking the user to restart.
             if (Se.Settings.General.IsLanguageRightToLeft() != wasRightToLeft)
             {
-                ApplyLayoutDirectionForCurrentLanguage(videoPosition);
+                ApplyLayoutDirectionForCurrentLanguage(videoPosition, layoutPositions);
             }
         }
     }
 
-    private async Task LoadLanguage(string jsonFileName)
+    private async Task LoadLanguage(string jsonFileName, InitLayout.LayoutPositions? layoutPositions = null)
     {
         await Se.LoadLanguageFromFileAsync(jsonFileName);
 
@@ -15639,7 +15659,23 @@ public partial class MainViewModel :
         {
             Layout.InitNativeMacMenu.Rebuild(this);
         }
-        SetLayout(Se.Settings.General.LayoutNumber);
+
+        // Same as closing Options/Settings: re-run the undock flow while the video
+        // controls are undocked (SetLayout would dock fresh panels next to the open
+        // undocked windows, #12520), else rebuild and put back the panel sizes the
+        // user dragged, which the fresh grids would otherwise reset (#16001).
+        if (AreVideoControlsUndocked)
+        {
+            VideoUndockControls();
+        }
+        else
+        {
+            SetLayout(Se.Settings.General.LayoutNumber);
+            if (layoutPositions != null)
+            {
+                InitLayout.RestoreLayoutPositions(layoutPositions, ContentGrid.Children.FirstOrDefault() as Grid);
+            }
+        }
 
         RebuildToolbar();
 
@@ -17864,8 +17900,11 @@ public partial class MainViewModel :
             return;
         }
 
-        var focusedTextBox = selectedItems.Count == 1 ? GetFocusedTextBoxWrapper() : null;
-        var reselectAll = TextBoxSurroundToggler.IsWholeTextSelected(focusedTextBox);
+        // Not gated on focus: the edit box keeps (and shows) its selection without focus, and on
+        // Windows the box can briefly report no focus during an Alt shortcut - the stale range
+        // then cut off the last characters again (#16015).
+        var editTextBox = selectedItems.Count == 1 ? GetFocusedTextBoxWrapper() ?? EditTextBox : null;
+        var reselectAll = TextBoxSurroundToggler.IsWholeTextSelected(editTextBox);
 
         var newTexts = TextBoxSurroundToggler.ApplyToTexts(
             behavior, scope, surroundLeft, selectedItems.Select(p => p.Text), surroundRight);
@@ -17876,7 +17915,7 @@ public partial class MainViewModel :
 
         if (reselectAll)
         {
-            TextBoxSurroundToggler.SelectAllAfterTextChange(focusedTextBox!);
+            TextBoxSurroundToggler.SelectAllAfterTextChange(editTextBox!);
         }
 
         _updateAudioVisualizer = true;
@@ -19073,7 +19112,11 @@ public partial class MainViewModel :
     /// loading the language rebuilds the layout, so by now the player is a fresh one
     /// sitting at the beginning.
     /// </param>
-    private void ApplyLayoutDirectionForCurrentLanguage(double videoPosition)
+    /// <param name="layoutPositions">
+    /// The panel sizes taken before the language was loaded, restored after the rebuild,
+    /// or null to keep the default sizes.
+    /// </param>
+    private void ApplyLayoutDirectionForCurrentLanguage(double videoPosition, InitLayout.LayoutPositions? layoutPositions)
     {
         if (Window == null)
         {
@@ -19110,6 +19153,13 @@ public partial class MainViewModel :
             // are placed on the correct side, exactly as they are at startup (the
             // layout is built after the flow direction is set).
             SetLayout(Se.Settings.General.LayoutNumber);
+
+            // The rebuilt grids start at the default sizes; put back the panel sizes the
+            // user dragged (the column order is the same in both directions, #16001).
+            if (layoutPositions != null)
+            {
+                InitLayout.RestoreLayoutPositions(layoutPositions, ContentGrid.Children.FirstOrDefault() as Grid);
+            }
 
             // Apply the text and grid direction for the new mode in both directions
             // (SetLayout only re-applies it for right to left), so the list is never
@@ -28566,6 +28616,20 @@ public partial class MainViewModel :
             _formatChangedByUser = false;
         }
 
+        // Picking the file the translation was made from replaces it with the translation, so the
+        // original no longer has a file of its own. Keeping the name made the next original save
+        // (the same Ctrl+S, or a later one) write the original back over the translation (#15999).
+        // Untitled, the original stays in memory and its unsaved changes are still prompted for.
+        if (ShowColumnOriginalText && IsSameFile(saveAsResult.FileName, _subtitleFileNameOriginal))
+        {
+            _originalFileReplacedByTranslation = saveAsResult.FileName;
+            _subtitleFileNameOriginal = string.Empty;
+            if (_subtitleOriginal != null)
+            {
+                _subtitleOriginal.FileName = string.Empty;
+            }
+        }
+
         _subtitleFileName = saveAsResult.FileName;
         _subtitle.FileName = saveAsResult.FileName;
         _converted = false;
@@ -28780,6 +28844,14 @@ public partial class MainViewModel :
             _subtitleFileNameOriginal = oldSubtitleFileNameOriginal;
             _subtitleOriginal.FileName = oldSubtitleOriginalFileName;
             return false;
+        }
+
+        // The mirror of SaveSubtitleAs: the original now occupies the translation's file, so the
+        // next Ctrl+S must ask where the translation goes instead of writing over it (#15999).
+        if (IsSameFile(fileName, _subtitleFileName))
+        {
+            _subtitleFileName = string.Empty;
+            _subtitle.FileName = string.Empty;
         }
 
         AddToRecentFiles(true);
@@ -33370,9 +33442,25 @@ public partial class MainViewModel :
                 }
             }
 
-            if (AudioVisualizer != null && AudioVisualizer.IsFocused)
+            var isWaveformFocused = AudioVisualizer != null && AudioVisualizer.IsFocused;
+            if (isWaveformFocused)
             {
                 var relayCommand = _shortcutManager.CheckShortcuts(keyEventArgs, CategoryWaveform);
+                if (relayCommand != null)
+                {
+                    keyEventArgs.Handled = true;
+                    relayCommand.Execute(null);
+                    return;
+                }
+            }
+
+            // Selecting a line by clicking the waveform (or using the video player's buttons/sliders)
+            // moves focus there, which left SubtitleGridAndTextBox shortcuts like "Toggle dialog
+            // dashes" dead until the grid or text box was clicked again. They act on the grid
+            // selection, so run them from these controls too, like SE 4 did (#16013).
+            if (isWaveformFocused || GetVideoPlayerControl()?.IsKeyboardFocusWithin == true)
+            {
+                var relayCommand = _shortcutManager.CheckShortcuts(keyEventArgs, CategorySubtitleGridAndTextBox);
                 if (relayCommand != null)
                 {
                     keyEventArgs.Handled = true;
