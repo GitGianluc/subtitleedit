@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.3.0-rc4",
+  "version": "v5.3.0",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -3572,6 +3572,7 @@
       "timeCodeModeTime": "Tempo (hh:mm:ss,zzz)",
       "timeCodeModeFrames": "Fotogrammi (hh:mm:ss:ff)",
       "timeCodeModeFrameNumbers": "Numeri dei fotogrammi",
+      "frameModeSnapToVideoFrames": "Definisci le tempistiche in base ai fotogrammi del video (non al conteggio dei fotogrammi in ogni secondo)",
       "textBoxLimitNewLines": "Limita numero di righe nel riquadro di testo dei sottotitoli",
       "mpvOpenGl": "libmpv – OpenGL",
       "mpvSoftwareRendering": "libmpv – Rendering software (lento)",
