@@ -30,24 +30,24 @@ namespace Nikse.SubtitleEdit.Features.Assa.AssaDraw;
 /// </summary>
 public class AssaDrawWindow : Window
 {
-    private static readonly IBrush WindowBrush = new ImmutableSolidColorBrush(Color.FromRgb(30, 31, 36));
-    private static readonly IBrush PanelBrush = new ImmutableSolidColorBrush(Color.FromRgb(36, 38, 44));
-    private static readonly IBrush StatusBrush = new ImmutableSolidColorBrush(Color.FromRgb(27, 28, 33));
-    private static readonly IBrush ButtonBarBrush = new ImmutableSolidColorBrush(Color.FromRgb(32, 34, 39));
-    private static readonly IBrush LineBrush = new ImmutableSolidColorBrush(Color.FromRgb(47, 50, 58));
-    private static readonly IBrush SeparatorBrush = new ImmutableSolidColorBrush(Color.FromRgb(55, 58, 67));
-    private static readonly IBrush DimTextBrush = new ImmutableSolidColorBrush(Color.FromRgb(140, 146, 160));
-    private static readonly IBrush FaintTextBrush = new ImmutableSolidColorBrush(Color.FromRgb(111, 117, 131));
-    private static readonly IBrush IconBrush = new ImmutableSolidColorBrush(Color.FromRgb(174, 180, 194));
-    private static readonly IBrush HoverBrush = new ImmutableSolidColorBrush(Color.FromRgb(51, 54, 63));
-    private static readonly IBrush PressedBrush = new ImmutableSolidColorBrush(Color.FromRgb(59, 62, 71));
-    private static readonly IBrush AccentBrush = new ImmutableSolidColorBrush(Color.FromRgb(76, 110, 245));
-    private static readonly IBrush AccentHoverBrush = new ImmutableSolidColorBrush(Color.FromRgb(92, 124, 250));
-    private static readonly IBrush AccentSoftBrush = new ImmutableSolidColorBrush(Color.FromArgb(70, 76, 110, 245));
-    private static readonly IBrush FieldBrush = new ImmutableSolidColorBrush(Color.FromRgb(27, 28, 33));
-    private static readonly IBrush FieldBorderBrush = new ImmutableSolidColorBrush(Color.FromRgb(54, 57, 68));
-    private static readonly IBrush MenuBrush = new ImmutableSolidColorBrush(Color.FromRgb(42, 44, 51));
-    private static readonly IBrush MenuBorderBrush = new ImmutableSolidColorBrush(Color.FromRgb(66, 69, 79));
+    internal static readonly IBrush WindowBrush = new ImmutableSolidColorBrush(Color.FromRgb(30, 31, 36));
+    internal static readonly IBrush PanelBrush = new ImmutableSolidColorBrush(Color.FromRgb(36, 38, 44));
+    internal static readonly IBrush StatusBrush = new ImmutableSolidColorBrush(Color.FromRgb(27, 28, 33));
+    internal static readonly IBrush ButtonBarBrush = new ImmutableSolidColorBrush(Color.FromRgb(32, 34, 39));
+    internal static readonly IBrush LineBrush = new ImmutableSolidColorBrush(Color.FromRgb(47, 50, 58));
+    internal static readonly IBrush SeparatorBrush = new ImmutableSolidColorBrush(Color.FromRgb(55, 58, 67));
+    internal static readonly IBrush DimTextBrush = new ImmutableSolidColorBrush(Color.FromRgb(140, 146, 160));
+    internal static readonly IBrush FaintTextBrush = new ImmutableSolidColorBrush(Color.FromRgb(111, 117, 131));
+    internal static readonly IBrush IconBrush = new ImmutableSolidColorBrush(Color.FromRgb(174, 180, 194));
+    internal static readonly IBrush HoverBrush = new ImmutableSolidColorBrush(Color.FromRgb(51, 54, 63));
+    internal static readonly IBrush PressedBrush = new ImmutableSolidColorBrush(Color.FromRgb(59, 62, 71));
+    internal static readonly IBrush AccentBrush = new ImmutableSolidColorBrush(Color.FromRgb(76, 110, 245));
+    internal static readonly IBrush AccentHoverBrush = new ImmutableSolidColorBrush(Color.FromRgb(92, 124, 250));
+    internal static readonly IBrush AccentSoftBrush = new ImmutableSolidColorBrush(Color.FromArgb(70, 76, 110, 245));
+    internal static readonly IBrush FieldBrush = new ImmutableSolidColorBrush(Color.FromRgb(27, 28, 33));
+    internal static readonly IBrush FieldBorderBrush = new ImmutableSolidColorBrush(Color.FromRgb(54, 57, 68));
+    internal static readonly IBrush MenuBrush = new ImmutableSolidColorBrush(Color.FromRgb(42, 44, 51));
+    internal static readonly IBrush MenuBorderBrush = new ImmutableSolidColorBrush(Color.FromRgb(66, 69, 79));
 
     private readonly AssaDrawViewModel _vm;
     private readonly AssaDrawCanvas _canvas;
@@ -142,7 +142,7 @@ public class AssaDrawWindow : Window
     /// <summary>
     /// Flat icon buttons with an accent "active" state, compact number fields and accent menus.
     /// </summary>
-    private static void AddEditorStyles(Styles styles)
+    internal static void AddEditorStyles(Styles styles)
     {
         static Style ToolPresenter(Func<Selector?, Selector> button, params (AvaloniaProperty Property, object Value)[] setters)
         {
@@ -600,7 +600,7 @@ public class AssaDrawWindow : Window
         };
     }
 
-    private static TextBlock MakeDimLabel(string text, Thickness margin)
+    internal static TextBlock MakeDimLabel(string text, Thickness margin)
     {
         return new TextBlock
         {
@@ -615,7 +615,7 @@ public class AssaDrawWindow : Window
     /// <summary>
     /// Compact number field without spinner buttons, optionally with a dim prefix like "X".
     /// </summary>
-    private static NumericUpDown MakeField(string property, double minimum, double maximum, double width = double.NaN, string? prefix = null, string format = "0")
+    internal static NumericUpDown MakeField(string property, double minimum, double maximum, double width = double.NaN, string? prefix = null, string format = "0")
     {
         var field = new NumericUpDown
         {
@@ -643,7 +643,7 @@ public class AssaDrawWindow : Window
         return field;
     }
 
-    private static Border MakeToolbarSeparator()
+    internal static Border MakeToolbarSeparator()
     {
         return new Border
         {
@@ -655,7 +655,7 @@ public class AssaDrawWindow : Window
         };
     }
 
-    private static Button CreateToolButton(string icon, string tooltip, System.Windows.Input.ICommand? command, double size = 30, string? shortcut = null)
+    internal static Button CreateToolButton(string icon, string tooltip, System.Windows.Input.ICommand? command, double size = 30, string? shortcut = null)
     {
         Control content = new Optris.Icons.Avalonia.Icon { Value = icon, FontSize = size > 34 ? 15 : 13 };
         if (shortcut != null)
@@ -820,23 +820,34 @@ public class AssaDrawWindow : Window
             var wrap = new WrapPanel { Width = columns * (cell + 4) };
             foreach (var item in list)
             {
-                var path = new Avalonia.Controls.Shapes.Path
+                Control thumbnail;
+                if (item.HasOwnColors)
                 {
-                    Data = item.ToGeometry(),
-                    Fill = item.UserShape != null ? null : new SolidColorBrush(Color.FromRgb(214, 218, 226)),
-                    Stretch = Stretch.Uniform,
-                    Margin = new Thickness(9),
-                };
-                if (item.UserShape != null)
+                    // Saved shapes and clip art show all their colors: one path per layer, in one
+                    // coordinate space, scaled together
+                    var (left, top, right, bottom) = item.Bounds;
+                    var parts = new Canvas { Width = Math.Max(1, right - left), Height = Math.Max(1, bottom - top) };
+                    foreach (var (color, geometry) in item.ToColoredGeometries())
+                    {
+                        parts.Children.Add(new Avalonia.Controls.Shapes.Path { Data = geometry, Fill = new SolidColorBrush(color) });
+                    }
+
+                    thumbnail = new Viewbox { Child = parts, Stretch = Stretch.Uniform, Margin = new Thickness(7) };
+                }
+                else
                 {
-                    // Saved shapes show their own (first) color
-                    var color = item.Template.FirstOrDefault(s => !s.IsEraser)?.ForeColor ?? Colors.White;
-                    path.Fill = new SolidColorBrush(color);
+                    thumbnail = new Avalonia.Controls.Shapes.Path
+                    {
+                        Data = item.ToGeometry(),
+                        Fill = new SolidColorBrush(Color.FromRgb(214, 218, 226)),
+                        Stretch = Stretch.Uniform,
+                        Margin = new Thickness(9),
+                    };
                 }
 
                 var button = new Button
                 {
-                    Content = path,
+                    Content = thumbnail,
                     Width = cell,
                     Height = cell,
                     Margin = new Thickness(0, 0, 4, 4),
@@ -994,7 +1005,32 @@ public class AssaDrawWindow : Window
         return contentGrid;
     }
 
-    private static TextBlock MakeSectionHeader(string text)
+    /// <summary>
+    /// A properties section like ASSA draw's: small caps header (with optional text on the right), line on top.
+    /// </summary>
+    internal static Border MakeEditorSection(string title, Control content, Control? headerRight = null, bool first = false)
+    {
+        var header = new DockPanel();
+        if (headerRight != null)
+        {
+            DockPanel.SetDock(headerRight, Dock.Right);
+            header.Children.Add(headerRight);
+        }
+
+        header.Children.Add(MakeSectionHeader(title));
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(header);
+        panel.Children.Add(content);
+        return new Border
+        {
+            Child = panel,
+            BorderBrush = LineBrush,
+            BorderThickness = new Thickness(0, first ? 0 : 1, 0, 0),
+            Padding = new Thickness(14, 12, 14, 14),
+        };
+    }
+
+    internal static TextBlock MakeSectionHeader(string text)
     {
         return new TextBlock
         {
@@ -1177,7 +1213,7 @@ public class AssaDrawWindow : Window
     /// <summary>
     /// A "Label  [field] [field]" row of the properties panel.
     /// </summary>
-    private static Grid MakePropertyRow(string label, params Control[] fields)
+    internal static Grid MakePropertyRow(string label, params Control[] fields)
     {
         var grid = new Grid { ColumnSpacing = 6 };
         grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(70)));
