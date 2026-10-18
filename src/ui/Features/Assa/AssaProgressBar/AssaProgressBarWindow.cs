@@ -18,13 +18,11 @@ using Nikse.SubtitleEdit.Logic.Config;
 namespace Nikse.SubtitleEdit.Features.Assa.AssaProgressBar;
 
 /// <summary>
-/// Progress bar generator, styled like ASSA draw: always dark, settings on the left with the bar
+/// Progress bar generator, styled like ASSA draw: settings on the left with the bar
 /// styles as a gallery, the libass preview on the right.
 /// </summary>
 public class AssaProgressBarWindow : Window
 {
-    private static readonly IBrush ThumbnailBrush = new SolidColorBrush(Color.FromRgb(96, 102, 116));
-    private static readonly IBrush ThumbnailFillBrush = new SolidColorBrush(Color.FromRgb(214, 218, 226));
 
     public AssaProgressBarWindow(AssaProgressBarViewModel vm)
     {
@@ -35,9 +33,8 @@ public class AssaProgressBarWindow : Window
         Height = 800;
         MinWidth = 950;
         MinHeight = 650;
-        RequestedThemeVariant = ThemeVariant.Dark;
-        Background = AssaDrawWindow.WindowBrush;
-        AssaDrawWindow.AddEditorStyles(Styles);
+        Background = EditorChrome.WindowBrush;
+        EditorChrome.AddEditorStyles(Styles);
 
         vm.Window = this;
         DataContext = vm;
@@ -94,8 +91,8 @@ public class AssaProgressBarWindow : Window
         return new Border
         {
             Child = new ScrollViewer { Content = sections, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
-            Background = AssaDrawWindow.PanelBrush,
-            BorderBrush = AssaDrawWindow.LineBrush,
+            Background = EditorChrome.PanelBrush,
+            BorderBrush = EditorChrome.LineBrush,
             BorderThickness = new Thickness(0, 0, 1, 0),
         };
     }
@@ -117,7 +114,7 @@ public class AssaProgressBarWindow : Window
 
     private static NumericUpDown Field(string property, double min, double max, string? prefix, string name, double width = double.NaN)
     {
-        var field = AssaDrawWindow.MakeField(property, min, max, width, prefix);
+        var field = EditorChrome.MakeField(property, min, max, width, prefix);
         AutomationProperties.SetName(field, name);
         if (Se.Settings.Appearance.ShowHints)
         {
@@ -162,11 +159,11 @@ public class AssaProgressBarWindow : Window
         var name = new TextBlock
         {
             FontSize = 12,
-            Foreground = AssaDrawWindow.DimTextBrush,
+            Foreground = EditorChrome.DimTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.BarStyleName)),
         };
-        return AssaDrawWindow.MakeEditorSection(Se.Language.General.Style, gallery, name, first: true);
+        return EditorChrome.MakeEditorSection(Se.Language.General.Style, gallery, name, first: true);
     }
 
     /// <summary>
@@ -178,11 +175,11 @@ public class AssaProgressBarWindow : Window
         const double height = 14;
         var geometry = AssaDrawingGeometry.FromDrawing(ProgressBarStyles.Drawing(styleIndex, (int)width, (int)height));
         var canvas = new Canvas { Width = width, Height = height };
-        canvas.Children.Add(new Avalonia.Controls.Shapes.Path { Data = geometry, Fill = ThumbnailBrush });
+        canvas.Children.Add(new Avalonia.Controls.Shapes.Path { Data = geometry, Fill = EditorChrome.ThumbnailMutedBrush });
         canvas.Children.Add(new Avalonia.Controls.Shapes.Path
         {
             Data = geometry,
-            Fill = ThumbnailFillBrush,
+            Fill = EditorChrome.ThumbnailBrush,
             Clip = new RectangleGeometry(new Rect(0, 0, width * 0.6, height)),
         });
 
@@ -191,8 +188,8 @@ public class AssaProgressBarWindow : Window
 
     private static Border CreatePositionSection(AssaProgressBarViewModel vm, out Control firstInput)
     {
-        var top = AssaDrawWindow.CreateToolButton("fa-solid fa-arrow-up", Se.Language.General.Top, null, 28);
-        var bottom = AssaDrawWindow.CreateToolButton("fa-solid fa-arrow-down", Se.Language.General.Bottom, null, 28);
+        var top = EditorChrome.CreateToolButton("fa-solid fa-arrow-up", Se.Language.General.Top, null, 28);
+        var bottom = EditorChrome.CreateToolButton("fa-solid fa-arrow-down", Se.Language.General.Bottom, null, 28);
         top.Click += (_, _) => vm.PositionTop = true;
         bottom.Click += (_, _) => vm.PositionBottom = true;
         BindActive(top, vm, () => vm.PositionTop, nameof(vm.PositionTop), nameof(vm.PositionBottom));
@@ -219,10 +216,10 @@ public class AssaProgressBarWindow : Window
         playheadRow.Children.Add(new TextBlock { Text = Se.Language.Assa.ProgressBarPlayhead, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
 
         var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Position, topBottom, new Control()));
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Size, height, margin));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Position, topBottom, new Control()));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Size, height, margin));
         content.Children.Add(playheadRow);
-        return AssaDrawWindow.MakeEditorSection(Se.Language.General.Position, content);
+        return EditorChrome.MakeEditorSection(Se.Language.General.Position, content);
     }
 
     private static Border CreateColorsSection(AssaProgressBarViewModel vm)
@@ -236,24 +233,24 @@ public class AssaProgressBarWindow : Window
         }
 
         var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.Assa.ProgressBarForeColor, Swatch(nameof(vm.ForegroundColor), Se.Language.Assa.ProgressBarForeColor)));
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.BackgroundColor, Swatch(nameof(vm.BackgroundColor), Se.Language.General.BackgroundColor)));
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Text, Swatch(nameof(vm.TextColor), Se.Language.General.Text)));
-        return AssaDrawWindow.MakeEditorSection(Se.Language.General.Color, content);
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.Assa.ProgressBarForeColor, Swatch(nameof(vm.ForegroundColor), Se.Language.Assa.ProgressBarForeColor)));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.BackgroundColor, Swatch(nameof(vm.BackgroundColor), Se.Language.General.BackgroundColor)));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Text, Swatch(nameof(vm.TextColor), Se.Language.General.Text)));
+        return EditorChrome.MakeEditorSection(Se.Language.General.Color, content);
     }
 
     private static Border CreateChaptersSection(AssaProgressBarViewModel vm)
     {
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
-        buttons.Children.Add(AssaDrawWindow.CreateToolButton("fa-solid fa-plus", Se.Language.General.Add, vm.AddChapterCommand, 24));
-        buttons.Children.Add(AssaDrawWindow.CreateToolButton("fa-solid fa-trash", Se.Language.General.Remove, vm.RemoveChapterCommand, 24));
-        buttons.Children.Add(AssaDrawWindow.CreateToolButton("fa-solid fa-eraser", Se.Language.General.Remove + " " + Se.Language.General.All, vm.RemoveAllChaptersCommand, 24));
+        buttons.Children.Add(EditorChrome.CreateToolButton("fa-solid fa-plus", Se.Language.General.Add, vm.AddChapterCommand, 24));
+        buttons.Children.Add(EditorChrome.CreateToolButton("fa-solid fa-trash", Se.Language.General.Remove, vm.RemoveChapterCommand, 24));
+        buttons.Children.Add(EditorChrome.CreateToolButton("fa-solid fa-eraser", Se.Language.General.Remove + " " + Se.Language.General.All, vm.RemoveAllChaptersCommand, 24));
 
         var listBox = new ListBox
         {
             Height = 140,
-            Background = AssaDrawWindow.FieldBrush,
-            BorderBrush = AssaDrawWindow.FieldBorderBrush,
+            Background = EditorChrome.FieldBrush,
+            BorderBrush = EditorChrome.FieldBorderBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             [!ListBox.ItemsSourceProperty] = new Binding(nameof(vm.Chapters)),
@@ -265,7 +262,7 @@ public class AssaProgressBarWindow : Window
             var time = new TextBlock
             {
                 FontSize = 11.5,
-                Foreground = AssaDrawWindow.FaintTextBrush,
+                Foreground = EditorChrome.FaintTextBrush,
                 VerticalAlignment = VerticalAlignment.Center,
                 [!TextBlock.TextProperty] = new Binding(nameof(ProgressBarChapter.StartTimeDisplay)),
             };
@@ -284,8 +281,8 @@ public class AssaProgressBarWindow : Window
         var textBox = new TextBox
         {
             FontSize = 12.5,
-            Background = AssaDrawWindow.FieldBrush,
-            BorderBrush = AssaDrawWindow.FieldBorderBrush,
+            Background = EditorChrome.FieldBrush,
+            BorderBrush = EditorChrome.FieldBorderBrush,
             CornerRadius = new CornerRadius(6),
             [!TextBox.TextProperty] = new Binding(nameof(vm.ChapterText)) { Mode = BindingMode.TwoWay },
         };
@@ -294,8 +291,8 @@ public class AssaProgressBarWindow : Window
         var timeBox = new TextBox
         {
             FontSize = 12.5,
-            Background = AssaDrawWindow.FieldBrush,
-            BorderBrush = AssaDrawWindow.FieldBorderBrush,
+            Background = EditorChrome.FieldBrush,
+            BorderBrush = EditorChrome.FieldBorderBrush,
             CornerRadius = new CornerRadius(6),
             PlaceholderText = "hh:mm:ss.fff",
         };
@@ -313,13 +310,13 @@ public class AssaProgressBarWindow : Window
             Spacing = 6,
             [!StackPanel.IsVisibleProperty] = new Binding(nameof(vm.SelectedChapter)) { Converter = ObjectConverters.IsNotNull },
         };
-        editor.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Text, textBox));
-        editor.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.StartTime, timeBox));
+        editor.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Text, textBox));
+        editor.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.StartTime, timeBox));
 
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(listBox);
         content.Children.Add(editor);
-        return AssaDrawWindow.MakeEditorSection(Se.Language.Assa.ProgressBarChapters, content, buttons);
+        return EditorChrome.MakeEditorSection(Se.Language.General.Chapters, content, buttons);
     }
 
     private static Border CreateChapterTextSection(AssaProgressBarViewModel vm)
@@ -342,7 +339,7 @@ public class AssaProgressBarWindow : Window
         for (var i = 0; i < icons.Length; i++)
         {
             var index = i;
-            var button = AssaDrawWindow.CreateToolButton(icons[i], vm.TextAlignments[i], null, 28);
+            var button = EditorChrome.CreateToolButton(icons[i], vm.TextAlignments[i], null, 28);
             button.Click += (_, _) => vm.TextAlignmentIndex = index;
             BindActive(button, vm, () => vm.TextAlignmentIndex == index, nameof(vm.TextAlignmentIndex));
             alignment.Children.Add(button);
@@ -354,11 +351,11 @@ public class AssaProgressBarWindow : Window
         var splitterHeight = Field(nameof(vm.SplitterHeight), 0, 500, "H", Se.Language.Assa.ProgressBarSplitterHeight);
 
         var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Font, fontCombo));
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Size, size, alignment));
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.General.Position, x, y));
-        content.Children.Add(AssaDrawWindow.MakePropertyRow(Se.Language.Assa.ProgressBarSplitter, splitterWidth, splitterHeight));
-        return AssaDrawWindow.MakeEditorSection(Se.Language.Assa.ProgressBarChapters + " - " + Se.Language.General.Text, content);
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Font, fontCombo));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Size, size, alignment));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.General.Position, x, y));
+        content.Children.Add(EditorChrome.MakePropertyRow(Se.Language.Assa.ProgressBarSplitter, splitterWidth, splitterHeight));
+        return EditorChrome.MakeEditorSection(Se.Language.General.Chapters + " - " + Se.Language.General.Text, content);
     }
 
     private static Border CreateButtonBar(AssaProgressBarViewModel vm)
@@ -390,8 +387,8 @@ public class AssaProgressBarWindow : Window
         return new Border
         {
             Child = grid,
-            Background = AssaDrawWindow.ButtonBarBrush,
-            BorderBrush = AssaDrawWindow.LineBrush,
+            Background = EditorChrome.ButtonBarBrush,
+            BorderBrush = EditorChrome.LineBrush,
             BorderThickness = new Thickness(0, 1, 0, 0),
             Padding = new Thickness(16, 10),
         };
