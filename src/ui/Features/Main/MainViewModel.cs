@@ -461,6 +461,11 @@ public partial class MainViewModel :
     [ObservableProperty] private string _textBoxLookUpHeader = string.Empty;
     [ObservableProperty] private ObservableCollection<string> _speeds;
     [ObservableProperty] private string _selectedSpeed;
+
+    // Waveform toolbar rule-profile picker (#16236): the names from Settings > Rules, with the
+    // active one selected. Changing the selection applies that profile like Choose profile does.
+    [ObservableProperty] private ObservableCollection<string> _ruleProfiles;
+    [ObservableProperty] private string? _selectedRuleProfile;
     [ObservableProperty] private ObservableCollection<string> _videoSeekAmounts;
     [ObservableProperty] private string _selectedVideoSeekAmount;
     [ObservableProperty] private bool _showWaveformDisplayModeSeparator;
@@ -1200,6 +1205,9 @@ public partial class MainViewModel :
         VideoSeekAmounts = new ObservableCollection<string>();
         SelectedVideoSeekAmount = string.Empty;
         RefreshVideoSeekAmounts();
+
+        RuleProfiles = new ObservableCollection<string>();
+        RefreshRuleProfiles();
 
         WaveformAudioTracks = new ObservableCollection<WaveformAudioTrackItem>();
 
@@ -4940,6 +4948,18 @@ public partial class MainViewModel :
 
         await _folderHelper.OpenFolderWithFileSelected(Window!, _subtitleFileName);
         _shortcutManager.ClearKeys();
+    }
+
+    // Kept in sync on every change, not only through the toolbar button's IsCheckedChanged:
+    // the shortcut and the menu set the property too, and the button is not always there.
+    partial void OnSelectCurrentSubtitleWhilePlayingChanged(bool value)
+    {
+        Se.Settings.General.SelectCurrentSubtitleWhilePlaying = value;
+    }
+
+    partial void OnWaveformCenterChanged(bool value)
+    {
+        Se.Settings.Waveform.CenterVideoPosition = value;
     }
 
     [RelayCommand]
@@ -10831,13 +10851,38 @@ public partial class MainViewModel :
 
         if (result is { OkPressed: true, SelectedProfile: not null })
         {
-            var p = result.SelectedProfile.ToRulesProfile();
-            Se.ApplyRuleProfile(p);
-
-            SetLibSeSettings();
-
-            ShowStatus(string.Format(Se.Language.Main.RuleProfileIsX, p.Name));
+            ApplyRuleProfile(result.SelectedProfile.ToRulesProfile());
         }
+
+        // The picker's dialog can add, rename or delete profiles too.
+        RefreshRuleProfiles();
+    }
+
+    /// <summary>
+    /// Makes <paramref name="profile"/> the active rule profile - from the Choose profile dialog
+    /// or the waveform toolbar picker - and refreshes what depends on its limits: libse's copy
+    /// of the rules and the grid's CPS / line-length colouring, which is computed per row from
+    /// the settings and otherwise keeps the old profile's colours until a row is edited.
+    /// </summary>
+    private void ApplyRuleProfile(RulesProfile profile)
+    {
+        Se.ApplyRuleProfile(profile);
+        SetLibSeSettings();
+
+        foreach (var row in Subtitles)
+        {
+            row.ClearStrippedTextCaches();
+            row.RefreshAfterSettingsChanged();
+        }
+
+        if (AudioVisualizer != null)
+        {
+            AudioVisualizer.MinGapSeconds = Se.Settings.General.MinimumBetweenLines.GetMilliseconds() / 1000.0;
+            AudioVisualizer.InvalidateVisual();
+        }
+
+        SelectedRuleProfile = profile.Name;
+        ShowStatus(string.Format(Se.Language.Main.RuleProfileIsX, profile.Name));
     }
 
     [RelayCommand]
@@ -14961,6 +15006,10 @@ public partial class MainViewModel :
     private bool _oldGenerateSpectrogram;
     private string _oldSpectrogramStyle = string.Empty;
 
+    // Set for the ApplySettings that follows a settings import or reset: the layout sizes and
+    // the waveform zoom then come from the settings, not from what is on screen (#16213).
+    private bool _applyLayoutAndZoomFromSettings;
+
     [RelayCommand]
     private async Task CommandShowSettings()
     {
@@ -15009,6 +15058,10 @@ public partial class MainViewModel :
             {
                 return;
             }
+
+            // Set only now, past the early return above, so it cannot linger for an unrelated
+            // ApplySettings later (e.g. a language change, which keeps the on-screen sizes).
+            _applyLayoutAndZoomFromSettings = viewModel.SettingsReplaced;
 
             // Defer to a fresh dispatcher cycle: ApplySettings rebuilds the layout, which
             // destroys and recreates the video player control (a native Win32 HWND on Windows
@@ -15166,9 +15219,18 @@ public partial class MainViewModel :
         UpdateTimeCodeModeText();
         IsWaveformToolbarVisible = Se.Settings.Waveform.ShowToolbar;
 
+        // The two waveform toolbar toggles are written back to the settings from the view model
+        // (on change and on close), so an import or a reset that changed them in Se.Settings
+        // was overwritten with the old on-screen state the moment the window closed (#16214).
+        SelectCurrentSubtitleWhilePlaying = Se.Settings.General.SelectCurrentSubtitleWhilePlaying;
+        WaveformCenter = Se.Settings.Waveform.CenterVideoPosition;
+
         // Frame mode may have just been toggled - refresh the waveform seek combo (frames vs
         // seconds) before SetLayout below rebuilds the toolbar and re-binds the combo.
         RefreshVideoSeekAmounts();
+
+        // Profiles may have been added, renamed or switched in Settings > Rules.
+        RefreshRuleProfiles();
 
         if (AudioVisualizer != null)
         {
@@ -15261,10 +15323,27 @@ public partial class MainViewModel :
         }
         else
         {
-            Se.Settings.Appearance.CurrentLayoutPositions = InitLayout.SaveLayoutPositions(ContentGrid.Children.FirstOrDefault() as Grid);
+            // A plain OK keeps the panel sizes the user has on screen. After an import or a
+            // reset the sizes in the settings are the ones to show - taking the on-screen ones
+            // here silently threw the imported sizes away (#16213).
+            if (!_applyLayoutAndZoomFromSettings)
+            {
+                Se.Settings.Appearance.CurrentLayoutPositions = InitLayout.SaveLayoutPositions(ContentGrid.Children.FirstOrDefault() as Grid);
+            }
+
             SetLayout(Se.Settings.General.LayoutNumber);
             InitLayout.RestoreLayoutPositions(Se.Settings.Appearance.CurrentLayoutPositions, ContentGrid.Children.FirstOrDefault() as Grid);
         }
+
+        // The rebuilt waveform inherits the zoom of the one it replaces (CarryOverWaveformState);
+        // an imported zoom is only read when a waveform is first created, so push it here.
+        if (_applyLayoutAndZoomFromSettings && Se.Settings.Waveform.RememberZoom && AudioVisualizer != null)
+        {
+            AudioVisualizer.ZoomFactor = Math.Clamp(Se.Settings.Waveform.ZoomFactor, AudioVisualizer.MinZoomFactor, AudioVisualizer.MaxZoomFactor);
+            AudioVisualizer.VerticalZoomFactor = Math.Clamp(Se.Settings.Waveform.VerticalZoomFactor, AudioVisualizer.MinZoomFactor, AudioVisualizer.MaxZoomFactor);
+        }
+
+        _applyLayoutAndZoomFromSettings = false;
 
         _autoBackupService.StopAutobackup();
         _autoBackupService.StartAutoBackup(this);
@@ -22806,6 +22885,46 @@ public partial class MainViewModel :
         SelectedVideoSeekAmount = preferred;
     }
 
+    /// <summary>
+    /// Rebuilds the waveform toolbar's profile list from the settings and selects the active
+    /// profile. The toolbar combo is rebuilt by SetLayout when settings close, so this only has to
+    /// keep the bound collection and selection current.
+    /// </summary>
+    private void RefreshRuleProfiles()
+    {
+        var names = Se.Settings.General.Profiles.Select(p => p.Name).ToList();
+        var current = Se.Settings.General.CurrentProfile;
+        if (!names.Contains(current))
+        {
+            current = names.FirstOrDefault();
+        }
+
+        if (!RuleProfiles.SequenceEqual(names))
+        {
+            RuleProfiles = new ObservableCollection<string>(names);
+        }
+
+        SelectedRuleProfile = current;
+    }
+
+    partial void OnSelectedRuleProfileChanged(string? value)
+    {
+        // Null while the combo swaps its items source; a re-selection of the active profile (the
+        // refresh above, or the Choose profile dialog having applied it already) is a no-op.
+        if (string.IsNullOrEmpty(value) || value == Se.Settings.General.CurrentProfile)
+        {
+            return;
+        }
+
+        var profile = Se.Settings.General.Profiles.FirstOrDefault(p => p.Name == value);
+        if (profile == null)
+        {
+            return;
+        }
+
+        ApplyRuleProfile(profile);
+    }
+
     private int GetVideoSeekMs()
     {
         var amount = SelectedVideoSeekAmount;
@@ -28567,6 +28686,12 @@ public partial class MainViewModel :
             return result;
         }
 
+        // Another program may have written the file since it was loaded (#16216).
+        if (!await ConfirmOverwriteFileChangedOutside(isAutoSave))
+        {
+            return false;
+        }
+
         // Auto-save writes exactly what is on screen. AutoTrimWhiteSpaces() mutates the grid text,
         // which is fine for an explicit Ctrl+S but surprising for a background timer save - so skip it.
         if (!isAutoSave)
@@ -32515,12 +32640,10 @@ public partial class MainViewModel :
         }
 
         var hasMisspelledWords = false;
-        var cell = pointerArgs == null ? null : GetSubtitleGridSpellCheckCell(pointerArgs);
-        if (cell != null)
+        var line = pointerArgs == null ? null : GetSubtitleGridSpellCheckLine(pointerArgs);
+        if (line != null)
         {
-            var (line, isOriginal) = cell.Value;
-            var text = isOriginal ? line.OriginalText : line.Text;
-            var words = GetMisspelledWords(text);
+            var words = GetMisspelledWords(line.Text);
             hasMisspelledWords = words.Count > 0;
 
             if (words.Count == 1)
@@ -32530,7 +32653,7 @@ public partial class MainViewModel :
                 // Add first 5 suggestions
                 foreach (var suggestion in _spellCheckManager.GetSuggestions(word).Take(5))
                 {
-                    flyout.Items.Insert(insertIndex++, MakeSuggestionMenuItem(line, isOriginal, word, suggestion));
+                    flyout.Items.Insert(insertIndex++, MakeSuggestionMenuItem(line, word, suggestion));
                 }
 
                 if (insertIndex > 0)
@@ -32546,7 +32669,7 @@ public partial class MainViewModel :
             {
                 foreach (var word in words.Take(MaxSpellCheckMenuWords))
                 {
-                    flyout.Items.Insert(insertIndex++, MakeMisspelledWordMenuItem(line, isOriginal, word));
+                    flyout.Items.Insert(insertIndex++, MakeMisspelledWordMenuItem(line, word));
                 }
 
                 // Add separator
@@ -32582,7 +32705,7 @@ public partial class MainViewModel :
     /// The suggestions are only looked up when the submenu is opened - asking hunspell for suggestions for
     /// every misspelled word in the line would make the context menu slow to open.
     /// </summary>
-    private MenuItem MakeMisspelledWordMenuItem(SubtitleLineViewModel line, bool isOriginal, string word)
+    private MenuItem MakeMisspelledWordMenuItem(SubtitleLineViewModel line, string word)
     {
         var wordItem = new MenuItem
         {
@@ -32605,7 +32728,7 @@ public partial class MainViewModel :
             var index = 0;
             foreach (var suggestion in _spellCheckManager.GetSuggestions(word).Take(5))
             {
-                wordItem.Items.Insert(index++, MakeSuggestionMenuItem(line, isOriginal, word, suggestion));
+                wordItem.Items.Insert(index++, MakeSuggestionMenuItem(line, word, suggestion));
             }
 
             if (index > 0)
@@ -32617,7 +32740,7 @@ public partial class MainViewModel :
         return wordItem;
     }
 
-    private MenuItem MakeSuggestionMenuItem(SubtitleLineViewModel line, bool isOriginal, string word, string suggestion)
+    private MenuItem MakeSuggestionMenuItem(SubtitleLineViewModel line, string word, string suggestion)
     {
         var suggestionItem = new MenuItem
         {
@@ -32625,7 +32748,7 @@ public partial class MainViewModel :
             FontWeight = FontWeight.Bold,
             Tag = "SpellCheck"
         };
-        suggestionItem.Click += (_, _) => { ReplaceSubtitleGridWord(line, isOriginal, word, suggestion); };
+        suggestionItem.Click += (_, _) => { ReplaceSubtitleGridWord(line, word, suggestion); };
         return suggestionItem;
     }
 
@@ -32682,10 +32805,12 @@ public partial class MainViewModel :
     }
 
     /// <summary>
-    /// The subtitle line and text column the pointer is over. Falls back to the text column of the
-    /// right-clicked row when the pointer is not over one of the two text columns.
+    /// The subtitle line whose text the spell check menu items act on. Falls back to the
+    /// right-clicked row when the pointer is not over one of the two text columns. The original
+    /// column gives nothing: the live dictionary is the working subtitle's, and in translation mode
+    /// the original is another language, so its "misspelled" words were just foreign words (#16211).
     /// </summary>
-    private (SubtitleLineViewModel Line, bool IsOriginal)? GetSubtitleGridSpellCheckCell(PointerEventArgs pointerArgs)
+    private SubtitleLineViewModel? GetSubtitleGridSpellCheckLine(PointerEventArgs pointerArgs)
     {
         if (SubtitleGrid == null)
         {
@@ -32694,13 +32819,20 @@ public partial class MainViewModel :
 
         var position = pointerArgs.GetPosition(SubtitleGrid);
         var textBlock = FindSubtitleGridTextBlock(position);
-        if (textBlock?.DataContext is SubtitleLineViewModel cellLine)
+        if (textBlock != null)
         {
-            return (cellLine, textBlock.Tag as string == InitListViewAndEditBox.SubtitleGridColumnKeys.OriginalText);
+            if (textBlock.Tag as string == InitListViewAndEditBox.SubtitleGridColumnKeys.OriginalText)
+            {
+                return null;
+            }
+
+            if (textBlock.DataContext is SubtitleLineViewModel cellLine)
+            {
+                return cellLine;
+            }
         }
 
-        var line = Subtitles.GetOrNull(GetDataGridRowIndexFromPoint(position));
-        return line == null ? null : (line, false);
+        return Subtitles.GetOrNull(GetDataGridRowIndexFromPoint(position));
     }
 
     private TextBlock? FindSubtitleGridTextBlock(Avalonia.Point pointerPosition)
@@ -32731,15 +32863,10 @@ public partial class MainViewModel :
     /// The menu offers each misspelled word once, so a word occurring twice in the line is corrected in both
     /// places - fixing only one of them would leave the other one underlined with no obvious way to fix it.
     /// </summary>
-    private void ReplaceSubtitleGridWord(SubtitleLineViewModel line, bool isOriginal, string word, string suggestion)
+    private void ReplaceSubtitleGridWord(SubtitleLineViewModel line, string word, string suggestion)
     {
-        if (isOriginal && !CanEditOriginal)
-        {
-            return;
-        }
-
         // Split the current text: the line may have been edited since the menu was opened
-        var text = isOriginal ? line.OriginalText : line.Text;
+        var text = line.Text;
         if (string.IsNullOrEmpty(text))
         {
             return;
@@ -32757,17 +32884,6 @@ public partial class MainViewModel :
         {
             var occurrence = occurrences[i];
             newText = newText.Remove(occurrence.Index, occurrence.Length).Insert(occurrence.Index, suggestion);
-        }
-
-        if (isOriginal)
-        {
-            line.OriginalText = newText;
-            if (ReferenceEquals(SelectedSubtitle, line) && EditTextBoxOriginal.Text != newText)
-            {
-                EditTextBoxOriginal.Text = newText;
-            }
-
-            return;
         }
 
         line.Text = newText;

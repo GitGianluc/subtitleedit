@@ -213,6 +213,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _defaultSaveLocationCustomFolder = string.Empty;
     [ObservableProperty] private bool _isDefaultSaveLocationCustomFolderEnabled;
     [ObservableProperty] private string _selectedSaveAsBehaviorType;
+    [ObservableProperty] private ObservableCollection<FileChangedOutsideActionDisplay> _fileChangedOutsideActions;
+    [ObservableProperty] private FileChangedOutsideActionDisplay _selectedFileChangedOutsideAction;
 
     [ObservableProperty] private ObservableCollection<string> _saveAsAppendLanguageCode;
     [ObservableProperty] private string _selectedSaveAsAppendLanguageCode;
@@ -486,6 +488,13 @@ public partial class SettingsViewModel : ObservableObject
     /// </summary>
     public bool SettingsImported { get; private set; }
 
+    /// <summary>
+    /// True once an import or a reset has replaced the settings wholesale. The main window then
+    /// applies the layout sizes and the waveform zoom *from* the settings instead of carrying its
+    /// current on-screen state over them, which is what a plain OK does (#16213).
+    /// </summary>
+    public bool SettingsReplaced { get; private set; }
+
     public Window? Window { get; internal set; }
     public ScrollViewer ScrollView { get; internal set; }
     public List<SettingsSection> Sections { get; internal set; }
@@ -700,6 +709,8 @@ public partial class SettingsViewModel : ObservableObject
             Se.Language.General.Name,
         ];
         SelectedSaveAsBehaviorType = SaveAsBehaviorTypes[0];
+        FileChangedOutsideActions = new ObservableCollection<FileChangedOutsideActionDisplay>(FileChangedOutsideActionDisplay.List());
+        SelectedFileChangedOutsideAction = FileChangedOutsideActions[0];
 
         DefaultSaveLocationTypes =
         [
@@ -869,6 +880,7 @@ public partial class SettingsViewModel : ObservableObject
         SelectedSubtitleDoubleClickActionType = MapFromSelectedSubtitleDoubleClickAction(Se.Settings.General.SubtitleDoubleClickAction);
         SubtitleGridCenterSelectedRow = Se.Settings.General.SubtitleGridCenterSelectedRow;
         SelectedSaveAsBehaviorType = MapFromSelectedSaveAsBehavior(Se.Settings.General.SaveAsBehavior);
+        SelectedFileChangedOutsideAction = FileChangedOutsideActions.FirstOrDefault(p => p.Action.ToString() == general.FileChangedOutsideAction) ?? FileChangedOutsideActions[0];
         SelectedSaveAsAppendLanguageCode = MapFromSelectedSaveAsAppendLanguageCode(Se.Settings.General.SaveAsAppendLanguageCode);
         SelectedDefaultSaveLocationType = MapFromDefaultSaveLocation(Se.Settings.General.DefaultSaveLocation);
         DefaultSaveLocationCustomFolder = Se.Settings.General.DefaultSaveLocationCustomFolder ?? string.Empty;
@@ -1183,9 +1195,7 @@ public partial class SettingsViewModel : ObservableObject
         ProxyUseDefaultCredentials = Se.Settings.General.ProxyUseDefaultCredentials;
         ProxyBypassList = Se.Settings.General.ProxyBypassList ?? string.Empty;
         CheckForUpdatesOnStartup = Se.Settings.General.CheckForUpdatesOnStartup;
-        SelectedUpdateChannel = UpdateCheckService.IncludePrereleases()
-            ? Se.Language.Options.Settings.CheckForUpdatesChannelStableAndBeta
-            : Se.Language.Options.Settings.CheckForUpdatesChannelStable;
+        SelectedUpdateChannel = UpdateCheckService.ChannelDisplayName();
         _loadedUpdateChannel = SelectedUpdateChannel;
         SetFfmpegStatus();
         SetLibMpvStatus();
@@ -1797,6 +1807,7 @@ public partial class SettingsViewModel : ObservableObject
         general.SubtitleDoubleClickAction = MapToSelectedSubtitleDoubleClickAction(SelectedSubtitleDoubleClickActionType);
         general.SubtitleGridCenterSelectedRow = SubtitleGridCenterSelectedRow;
         general.SaveAsBehavior = MapToSaveAsBehavior(SelectedSaveAsBehaviorType);
+        general.FileChangedOutsideAction = SelectedFileChangedOutsideAction.Action.ToString();
         general.SaveAsAppendLanguageCode = MapToSaveAsAppendLanguageCode(SelectedSaveAsAppendLanguageCode);
         general.DefaultSaveLocation = MapToDefaultSaveLocation(SelectedDefaultSaveLocationType);
         general.DefaultSaveLocationCustomFolder = DefaultSaveLocationCustomFolder;
@@ -2061,9 +2072,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             // Only an actual change is stored, so an untouched dropdown keeps the
             // "auto" default (beta users follow betas, stable users stable only).
-            general.CheckForUpdatesChannel = SelectedUpdateChannel == Se.Language.Options.Settings.CheckForUpdatesChannelStableAndBeta
-                ? UpdateCheckService.ChannelBeta
-                : UpdateCheckService.ChannelStable;
+            general.CheckForUpdatesChannel = UpdateCheckService.ChannelFromDisplayName(SelectedUpdateChannel);
         }
 
         general.CurrentProfile = SelectedProfile;
@@ -3099,6 +3108,7 @@ public partial class SettingsViewModel : ObservableObject
 
         Se.SaveSettings();
         OkPressed = true;
+        SettingsReplaced = true;
         Window?.Close();
     }
 
@@ -3328,6 +3338,7 @@ public partial class SettingsViewModel : ObservableObject
             // Reload the settings from disk since they were updated
             LoadSettings();
             SettingsImported = true;
+            SettingsReplaced = true;
         }
     }
 

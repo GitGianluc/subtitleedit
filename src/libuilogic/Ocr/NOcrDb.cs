@@ -577,6 +577,15 @@ public class NOcrDb
     // Share of wrong points a comma/apostrophe shape may have when its position is ignored.
     private const double UnplacedMarkMaxRate = 0.15;
 
+    // An upright match with a higher share of wrong points than this is challenged by the
+    // straightened glyph (sheared by the italic factor and by 1.5 x it), which wins when its
+    // share is at most two thirds of the upright one. Measured on 38 Blu-ray discs: a steep bold
+    // italic went from "/f* accogd/ng fo plan" to "/t* accord/ng to plan" while upright discs
+    // were byte-identical.
+    private const double ItalicChallengeMinRate = 0.02;
+    private const double ItalicChallengeRatio = 1.5;
+    private const double ItalicChallengeSteeperShear = 1.5;
+
     /// <summary>
     /// A small mark that matched nothing, tried against the comma and apostrophe shapes without
     /// their trained position: a curly apostrophe is a raised comma, and comma entries sit at the
@@ -647,7 +656,44 @@ public class NOcrDb
         // skipExactCheck: the exact scan already ran (and missed) above - without the flag,
         // GetMatchSingle re-scanned the whole single-character list a second time for every
         // glyph that wasn't an exact match.
-        var single = GetMatchSingle(bitmap, topMargin, deepSeek, maxWrongPixels, lastDitch: false, skipExactCheck: true, placement);
+        var single = GetMatchSingle(bitmap, topMargin, deepSeek, maxWrongPixels, lastDitch: false, skipExactCheck: true, placement, out var singleRate);
+
+        // A slanted glyph often still fits some entry loosely - an italic "t" read as an italic
+        // "f", "r" as "g", "y" as "x" - and a loose hit used to end the search before the
+        // straightened glyph was ever tried. When the upright match is not a close one, match the
+        // straightened glyph too and keep whichever fits clearly better.
+        if (single != null && italicFactor > 0 && singleRate > ItalicChallengeMinRate &&
+            bitmap.Width * bitmap.Height >= SmallGlyphAreaLimit)
+        {
+            // Slants differ between fonts: a bold italic sheared by the configured factor is
+            // still half slanted, and a half-straightened "h" fits "b". Try a steeper shear too
+            // and keep the better fit.
+            NOcrChar? challenger = null;
+            var challengerRate = double.MaxValue;
+            foreach (var factor in new[] { italicFactor, italicFactor * ItalicChallengeSteeperShear })
+            {
+                var straightened = bitmap.UnItalic(factor);
+                if (straightened.Width <= 0 || straightened.Height <= 0)
+                {
+                    continue;
+                }
+
+                var candidate = GetMatchSingle(straightened, topMargin, deepSeek, maxWrongPixels, lastDitch: false, skipExactCheck: false, placement, out var candidateRate);
+                if (candidate != null && candidateRate < challengerRate)
+                {
+                    challenger = candidate;
+                    challengerRate = candidateRate;
+                }
+            }
+
+            // A mark may not replace a mark: a straightened comma is a period, which says
+            // nothing about slant.
+            if (challenger != null && challengerRate * ItalicChallengeRatio <= singleRate &&
+                (single.Text.All(char.IsLetterOrDigit) || challenger.Text.All(char.IsLetterOrDigit)))
+            {
+                single = new NOcrChar(challenger) { Italic = true };
+            }
+        }
 
         // Two letters drawn touching ("av", "wt", "As") are one glyph that fits nothing. Read it
         // as two unless the last-ditch pass finds a single character that fits better than the
@@ -1118,7 +1164,8 @@ public class NOcrDb
 
         foreach (var oc in candidates)
         {
-            if (Math.Abs(oc.MarginTop - topMargin) < 5 && FitsBaselinePlacement(oc, placement) && IsMatch(bitmap, oc, 0))
+            if ((Math.Abs(oc.MarginTop - topMargin) < 5 || MatchesByBaseline(bitmap, oc, placement)) &&
+                FitsBaselinePlacement(oc, placement) && IsMatch(bitmap, oc, 0))
             {
                 return oc;
             }
@@ -1191,7 +1238,7 @@ public class NOcrDb
             var bestLowerRate = double.MaxValue;
             foreach (var oc in OcrCharacters)
             {
-                if (!PassFilter(bitmap, heightToWidthPercent, oc, topMargin, pass) || !FitsBaselinePlacement(oc, placement) ||
+                if (!PassFilter(bitmap, heightToWidthPercent, oc, topMargin, pass, placement) || !FitsBaselinePlacement(oc, placement) ||
                     !hasRowGap && IsDottedOrAccentedI(oc.Text))
                 {
                     continue;
@@ -1386,7 +1433,22 @@ public class NOcrDb
     private const double SmallGlyphMaxAspectRatio = 2.0;
     private const int SmallGlyphMaxAreaRatio = 5;
 
-    private static bool PassFilter(NikseBitmap2 bitmap, double heightToWidthPercent, NOcrChar oc, int topMargin, in MatchPass pass)
+    /// <summary>
+    /// A period, comma or low quote sitting on the baseline is matched by that position instead of
+    /// by the top margin it was trained at. The trained margin is a line-height artefact - a "."
+    /// learnt in a 90 px line (top 54) can't fit a dot of the same pixel size in a 57 px line (top
+    /// 32) through any pass's top gate, although the baseline already says what it is. Only marks
+    /// that <see cref="FitsBaselinePlacement"/> keeps on the baseline anyway; dashes, apostrophes
+    /// and quotes still have to be at the right height, or a dash entry could claim a dot.
+    /// </summary>
+    private static bool MatchesByBaseline(NikseBitmap2 bitmap, NOcrChar oc, BaselinePlacement placement) =>
+        placement == BaselinePlacement.OnBaseline &&
+        bitmap.Width * bitmap.Height < SmallGlyphAreaLimit &&
+        IsBaselineMark(oc.Text);
+
+    private static bool IsBaselineMark(string text) => text is "." or "…" or "," or "„" or "_";
+
+    private static bool PassFilter(NikseBitmap2 bitmap, double heightToWidthPercent, NOcrChar oc, int topMargin, in MatchPass pass, BaselinePlacement placement)
     {
         // A small entry (dot, comma, apostrophe) carries only a few lines of evidence, and since
         // every gate below scales with the glyph, it fits a much bigger glyph once stretched
@@ -1445,7 +1507,7 @@ public class NOcrDb
         var scale = bitmap.Height / (double)oc.Height;
         var expectedTop = oc.MarginTop * scale;
         var topTolerance = pass.MarginTopMaxDelta * Math.Max(1.0, scale);
-        if (Math.Abs(expectedTop - topMargin) >= topTolerance)
+        if (Math.Abs(expectedTop - topMargin) >= topTolerance && !MatchesByBaseline(bitmap, oc, placement))
         {
             return false;
         }
