@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.4.0-beta2",
+  "version": "v5.4.0-beta3",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -1712,7 +1712,19 @@
     "propertyTopExtent": "Ampiezza area superiore",
     "propertyBottomOrigin": "Posizione origine inferiore",
     "propertyBottomExtent": "Ampiezza area inferiore",
-    "xProperties": "{0} proprietà"
+    "xProperties": "{0} proprietà",
+    "propertyHeaderSource": "Origine intestazione",
+    "propertyHeaderSourceCurrentFile": "File attuale",
+    "propertyHeaderSourceTemplateFile": "File modello",
+    "propertyTemplateFile": "File modello",
+    "propertyTemplateFileHint": "Gli stili, le aree e i metadati vengono estratti da questo file per ogni file salvato; la frequenza dei fotogrammi segue quella del video corrente.",
+    "propertyTemplateSummaryX": "Lingua: {0}, stili: {1}, aree: {2}",
+    "propertyTemplateFileNotFound": "File modello non trovato",
+    "propertyTemplateFileInvalid": "Nessun file TTML con un’intestazione e un corpo del testo",
+    "propertyDefaultColor": "Colore predefinito",
+    "propertyDefaultColorTemplateHint": "I colori provengono dal file modello ",
+    "pickTemplateFile": "Seleziona un file modello",
+    "ttmlFiles": "File Timed Text"
   },
   "edit": {
     "modifySelection": {
@@ -1779,7 +1791,12 @@
       "addRulesToX": "Aggiungi regole a ‘{0}’",
       "xRules": "{0:#,##0} regole",
       "discardXRules": "Vuoi eliminare le {0} regole inserite?",
-      "enterAddsRule": "Il tasto Invio aggiunge la regola all’elenco, OK aggiunge l’elenco alla categoria (Ctrl+Invio)"
+      "enterAddsRule": "Il tasto Invio aggiunge la regola all’elenco, OK aggiunge l’elenco alla categoria (Ctrl+Invio)",
+      "categories": "Categorie",
+      "newestFirst": "Più recenti in cima",
+      "filterRules": "Filtra regole…",
+      "rulesInX": "Regole in ‘{0}’",
+      "enterAddsRuleToCategory": "Il tasto Invio aggiunge la regola in fondo all’elenco interno alla categoria"
     },
     "find": {
       "searchTextWatermark": "Cerca testo…",
