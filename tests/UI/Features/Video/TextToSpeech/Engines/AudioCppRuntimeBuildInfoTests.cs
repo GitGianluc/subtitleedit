@@ -1,4 +1,4 @@
-﻿using Nikse.SubtitleEdit.Features.Video.BackgroundMusic;
+using Nikse.SubtitleEdit.Features.Video.BackgroundMusic;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.CloneReferenceCleaning;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
 
@@ -47,13 +47,6 @@ public class AudioCppRuntimeBuildInfoTests
         "source      : https://github.com/0xShug0/audio.cpp\n" +
         "ref         : f04de8ec38e69c5b97c024542395278608b1450b\n" +
         "models      : index_tts2,higgs_audio_tts,fish_audio,fireredtts3,ace_step,kugelaudio,sidon,breeze_tts\n" +
-        "backend     : metal (arm64)\n";
-
-    private const string BuildInfo2026_10_16b =
-        "audio.cpp build for SubtitleEdit's IndexTTS-2.5 engine\n" +
-        "source      : https://github.com/0xShug0/audio.cpp\n" +
-        "ref         : 0097d365a00b52a6991ad7618f0a04e8d2935e47\n" +
-        "models      : index_tts2,higgs_audio_tts,fish_audio,fireredtts3,ace_step,kugelaudio,sidon,breeze_tts,voxtral_tts\n" +
         "backend     : metal (arm64)\n";
 
     private const string BuildInfo2026_10_19 =
@@ -136,6 +129,6 @@ public class AudioCppRuntimeBuildInfoTests
     [Fact]
     public void PreviousBuild_LacksAceStep_SoMusicAsksForTheUpdate()
     {
-        Assert.False(AudioCppRuntime.ParseBuiltModelFamilies(BuildInfo2026_09_17)!.Contains(AceStepAudioCpp.FamilyName));
+        Assert.DoesNotContain(AceStepAudioCpp.FamilyName, AudioCppRuntime.ParseBuiltModelFamilies(BuildInfo2026_09_17)!);
     }
 }

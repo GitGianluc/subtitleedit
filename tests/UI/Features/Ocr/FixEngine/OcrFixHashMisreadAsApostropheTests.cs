@@ -1,9 +1,4 @@
 using Nikse.SubtitleEdit.Core.Common;
-using Nikse.SubtitleEdit.Features.Ocr.FixEngine;
-using Nikse.SubtitleEdit.Features.SpellCheck;
-using System;
-using System.Collections.Generic;
-using System.IO;
 using Nikse.SubtitleEdit.UiLogic.Ocr.FixEngine;
 using Nikse.SubtitleEdit.UiLogic.SpellCheck;
 
@@ -41,7 +36,7 @@ public class OcrFixHashMisreadAsApostropheTests : IDisposable
 
         var result = engine.FixOcrErrors(0, input, doTryToGuessUnknownWords: false);
 
-        Assert.Equal(expected, result.GetText());
+        Assert.Equal(expected.Replace("\r\n", "\n"), result.GetText().Replace("\r\n", "\n"));
     }
 
     [Theory]

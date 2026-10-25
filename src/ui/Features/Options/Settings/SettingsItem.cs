@@ -1,6 +1,5 @@
 using System;
 using Avalonia;
-using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Layout;
@@ -117,6 +116,7 @@ public class SettingsItem
             {
                 Text = _label,
                 FontSize = EditorChrome.FieldFontSize,
+                Foreground = EditorChrome.DimTextBrush,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
             }

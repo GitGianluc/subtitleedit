@@ -23,7 +23,6 @@ namespace Nikse.SubtitleEdit.Features.Video.RemuxVideo;
 /// </summary>
 public class RemuxVideoWindow : Window
 {
-    private readonly RemuxVideoViewModel _vm;
     private Button? _buttonBrowseVideo;
 
     private const double LabelWidth = 96;
@@ -41,7 +40,6 @@ public class RemuxVideoWindow : Window
         EditorChrome.AddEditorStyles(Styles);
         AddStyles();
 
-        _vm = vm;
         vm.Window = this;
         DataContext = vm;
 
@@ -260,7 +258,7 @@ public class RemuxVideoWindow : Window
         var captionsHint = new TextBlock
         {
             Text = l.RemuxVideoMp4CaptionsHint,
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             Foreground = EditorChrome.DimTextBrush,
             TextWrapping = TextWrapping.Wrap,
         };
@@ -280,7 +278,7 @@ public class RemuxVideoWindow : Window
         var captionOffsetHint = new TextBlock
         {
             Text = l.RemuxVideoCaptionOffsetHint,
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             Foreground = EditorChrome.DimTextBrush,
             TextWrapping = TextWrapping.Wrap,
         };
@@ -341,7 +339,7 @@ public class RemuxVideoWindow : Window
             Children =
             {
                 switchMixAudio,
-                new TextBlock { Text = l.RemuxVideoMixAudio, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = l.RemuxVideoMixAudio, FontSize = EditorChrome.FieldFontSize, VerticalAlignment = VerticalAlignment.Center },
                 labelVolume,
                 numericVolume,
             },
@@ -417,7 +415,7 @@ public class RemuxVideoWindow : Window
                     Margin = new Thickness(2, 0, 8, 0),
                 };
 
-                var textName = new TextBlock { FontWeight = FontWeight.SemiBold, FontSize = 12.5, TextTrimming = TextTrimming.CharacterEllipsis };
+                var textName = new TextBlock { FontWeight = FontWeight.SemiBold, FontSize = EditorChrome.FieldFontSize, TextTrimming = TextTrimming.CharacterEllipsis };
                 textName.Bind(TextBlock.TextProperty, new Binding(nameof(RemuxFileItem.Name)));
                 if (Se.Settings.Appearance.ShowHints)
                 {
@@ -429,7 +427,7 @@ public class RemuxVideoWindow : Window
                 var textFolder = new TextBlock
                 {
                     Opacity = 0.6,
-                    FontSize = 12,
+                    FontSize = EditorChrome.FieldFontSize,
                     TextTrimming = TextTrimming.PrefixCharacterEllipsis,
                     VerticalAlignment = VerticalAlignment.Bottom,
                     Margin = new Thickness(8, 0, 0, 0),
@@ -639,7 +637,7 @@ public class RemuxVideoWindow : Window
         progressBar.Bind(ProgressBar.IsIndeterminateProperty, new Binding(nameof(vm.IsFinalizing)));
 
         var statusText = EditorChrome.MakeBoundHint(nameof(vm.ProgressText));
-        statusText.FontSize = 12;
+        statusText.FontSize = EditorChrome.FieldFontSize;
 
         var grid = new Grid
         {
@@ -671,7 +669,7 @@ public class RemuxVideoWindow : Window
 
         // The result ("Remux completed", errors) - while remuxing the progress row shows the text
         var status = EditorChrome.MakeBoundHint(nameof(vm.ProgressText));
-        status.FontSize = 12;
+        status.FontSize = EditorChrome.FieldFontSize;
         status.Bind(Visual.IsVisibleProperty, NotRemuxing(vm));
 
         var buttonRemux = new SeSplitButton

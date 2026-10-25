@@ -10,9 +10,7 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Main.Layout;
-using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
-using System.Linq;
 using UITests;
 
 namespace Tests.Features.Main;
@@ -97,6 +95,32 @@ public class WaveformToolbarRuleProfileTests : IDisposable
             // (ApplyRuleProfile from the view model) keeps the combo in step.
             vm.SelectedRuleProfile = "Netflix (English)";
             Assert.Equal("Netflix (English)", Se.Settings.General.CurrentProfile);
+        }
+        finally
+        {
+            CloseWindow(window, vm);
+        }
+    }
+
+    // A current profile that is not in the list (renamed, deleted, stale settings) must not
+    // make the picker apply the first profile, overwriting the user's limits.
+    [AvaloniaFact]
+    public void MissingCurrentProfile_DoesNotApplyTheFirstProfile()
+    {
+        var defaultProfile = Se.Settings.General.Profiles.Single(p => p.Name == "Default");
+        Se.ApplyRuleProfile(defaultProfile);
+        Se.ApplyRuleSettingsToLibSe();
+        Se.Settings.General.CurrentProfile = "Deleted profile";
+        Se.Settings.General.SubtitleLineMaximumLength = 99;
+
+        var (window, vm) = CreateMainViewModel();
+        try
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Null(vm.SelectedRuleProfile);
+            Assert.Equal("Deleted profile", Se.Settings.General.CurrentProfile);
+            Assert.Equal(99, Se.Settings.General.SubtitleLineMaximumLength);
         }
         finally
         {

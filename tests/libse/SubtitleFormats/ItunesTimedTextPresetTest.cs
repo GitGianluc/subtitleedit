@@ -167,6 +167,57 @@ public class ItunesTimedTextPresetTest
     }
 
     [Fact]
+    public void SourceHeaderTimingParametersFollowCurrentFrameRate()
+    {
+        using var _ = new SettingsSnapshot();
+        Configuration.Settings.General.CurrentFrameRate = 25;
+
+        var raw = MakeSubtitle(WhiteSourceHeader, "One").ToText(new ItunesTimedText());
+
+        Assert.Contains("ttp:frameRate=\"25\"", raw);
+        Assert.Contains("ttp:frameRateMultiplier=\"1 1\"", raw);
+        Assert.Contains("ttp:dropMode=\"nonDrop\"", raw);
+        Assert.DoesNotContain("999 1000", raw);
+
+        Configuration.Settings.General.CurrentFrameRate = 29.97;
+        raw = MakeSubtitle(WhiteSourceHeader, "One").ToText(new ItunesTimedText());
+
+        Assert.Contains("ttp:frameRate=\"30\"", raw);
+        Assert.Contains("ttp:frameRateMultiplier=\"999 1000\"", raw);
+        Assert.Contains("ttp:dropMode=\"dropNTSC\"", raw);
+    }
+
+    [Fact]
+    public void SourceHeaderTimingParametersAreKeptWhenFrameRateIsUnchanged()
+    {
+        using var _ = new SettingsSnapshot();
+        var header = WhiteSourceHeader.Replace("ttp:frameRate=\"24\" ttp:frameRateMultiplier=\"999 1000\"", "ttp:frameRate=\"30\" ttp:frameRateMultiplier=\"1000 1001\"");
+        Configuration.Settings.General.CurrentFrameRate = 29.97;
+
+        var raw = MakeSubtitle(header, "One").ToText(new ItunesTimedText());
+
+        Assert.Contains("ttp:frameRate=\"30\"", raw);
+        Assert.Contains("ttp:frameRateMultiplier=\"1000 1001\"", raw);
+        Assert.Contains("ttp:dropMode=\"nonDrop\"", raw);
+    }
+
+    [Fact]
+    public void TemplateWithoutTtpNamespaceGetsTtpPrefixAndSmpteTimeBase()
+    {
+        using var _ = new SettingsSnapshot();
+        Configuration.Settings.SubtitleSettings.TimedTextItunesHeaderTemplate =
+            "<tt xmlns=\"http://www.w3.org/ns/ttml\" xml:lang=\"en\"><head/><body><div/></body></tt>";
+        Configuration.Settings.General.CurrentFrameRate = 25;
+
+        var raw = MakeSubtitle(null, "One").ToText(new ItunesTimedText());
+
+        Assert.Contains("ttp:frameRate=\"25\"", raw);
+        Assert.Contains("ttp:timeBase=\"smpte\"", raw);
+        Assert.Contains("xmlns:ttp=\"http://www.w3.org/ns/ttml#parameter\"", raw);
+        Assert.DoesNotContain("p2:", raw);
+    }
+
+    [Fact]
     public void OnlyTopLinesNameTheirRegionWhenBodyIsBottom()
     {
         using var _ = new SettingsSnapshot();

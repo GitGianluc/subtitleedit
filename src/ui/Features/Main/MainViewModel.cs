@@ -200,7 +200,6 @@ using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.Initializers;
 using Nikse.SubtitleEdit.Logic.Media;
 using Nikse.SubtitleEdit.Logic.Ocr;
-using Nikse.SubtitleEdit.Logic.Platform.Windows;
 using Nikse.SubtitleEdit.Logic.Plugins;
 using Nikse.SubtitleEdit.Logic.UndoRedo;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
@@ -213,7 +212,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -900,7 +898,6 @@ public partial class MainViewModel :
     private readonly Lock _scrollLock = new();
     private bool _changingFormatProgrammatically;
     private bool _formatChangedByUser;
-    private SubtitleFormat? _formatChangedFrom;
 
     private readonly IFileHelper _fileHelper;
     private readonly IFolderHelper _folderHelper;
@@ -1358,6 +1355,8 @@ public partial class MainViewModel :
     {
         Se.ApplyRuleSettingsToLibSe();
 
+        Configuration.Settings.General.DefaultEncoding = Se.Settings.General.DefaultEncoding;
+
         TimedTextImscRosetta.LineHeight = Se.Settings.Formats.RosettaLineHeight;
         TimedTextImscRosetta.FontSize = Se.Settings.Formats.RosettaFontSize;
         if (Se.Settings.Formats.RosettaLanguageAutoDetect)
@@ -1590,6 +1589,36 @@ public partial class MainViewModel :
         {
             GetVideoPlayerControl()?.SetSpeed(speed);
             _playheadPlaybackSpeed = speed;
+        }
+    }
+
+    /// <summary>
+    /// Speed picked from the video controls' playback speed button (#16306). Goes through
+    /// <see cref="SelectedSpeed"/>, so the waveform toolbar's speed dropdown follows.
+    /// </summary>
+    [RelayCommand]
+    private void SetPlaybackSpeed(string? speed)
+    {
+        if (speed == null || !Speeds.Contains(speed))
+        {
+            return;
+        }
+
+        SelectedSpeed = speed;
+        ReapplyPlaybackSpeed();
+        ShowStatus(string.Format(Se.Language.Main.SpeedIsNowX, SelectedSpeed));
+    }
+
+    // The video controls' playback speed button shows the speed (#16306); the docked and the
+    // fullscreen player can both exist, so update every one.
+    partial void OnSelectedSpeedChanged(string value)
+    {
+        foreach (var control in new[] { VideoPlayerControl, _fullScreenVideoPlayerControl, _videoPlayerUndockedViewModel?.VideoPlayerControl })
+        {
+            if (control != null)
+            {
+                control.PlaybackSpeedText = value;
+            }
         }
     }
 
@@ -3009,7 +3038,8 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<AssaSetPositionWindow, AssaSetPositionViewModel>(vm =>
         {
-            vm.Initialize(_subtitle, selectedItem, _videoFileName, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height, GetVideoPlayerControl()?.Position);
+            var videoPlayerControl = GetVideoPlayerControl();
+            vm.Initialize(_subtitle, selectedItem, _videoFileName, _mediaInfo?.Dimension.Width, _mediaInfo?.Dimension.Height, videoPlayerControl?.Position, videoPlayerControl?.VideoPlayer);
         });
 
         if (!result.OkPressed)
@@ -7918,6 +7948,11 @@ public partial class MainViewModel :
             {
                 subtitle.Paragraphs.Add(new Paragraph(lines[i], 0, 0));
             }
+        }
+        else
+        {
+            // grid copy adds the video offset to the clipboard time codes, so take it off again
+            SubtitleGridCopyPasteHelper.RemoveClipboardVideoOffset(text, subtitle);
         }
 
         if (subtitle.Paragraphs.Count == 0)
@@ -15001,8 +15036,6 @@ public partial class MainViewModel :
         }
     }
 
-    private TableView _oldSubtitleGrid = new TableView();
-    private ITextBoxWrapper _oldEditTextBox = new TextBoxWrapper(new TextBox());
     private bool _oldGenerateSpectrogram;
     private string _oldSpectrogramStyle = string.Empty;
 
@@ -15013,8 +15046,6 @@ public partial class MainViewModel :
     [RelayCommand]
     private async Task CommandShowSettings()
     {
-        _oldSubtitleGrid = SubtitleGrid;
-        _oldEditTextBox = EditTextBox;
         _oldGenerateSpectrogram = Se.Settings.Waveform.GenerateSpectrogram;
         _oldSpectrogramStyle = Se.Settings.Waveform.SpectrogramStyle;
 
@@ -15164,6 +15195,40 @@ public partial class MainViewModel :
         }
     }
 
+    /// <summary>
+    /// Switches to the next theme without a settings round trip. Only the theme-keyed parts are
+    /// refreshed - unlike ApplySettings there is no layout rebuild, so a playing video and the
+    /// grid keep their state.
+    /// </summary>
+    [RelayCommand]
+    private void CycleTheme()
+    {
+        Se.Settings.Appearance.Theme = UiTheme.GetNextTheme(Se.Settings.Appearance.Theme);
+        UiTheme.SetCurrentTheme();
+        RebuildToolbar();
+        UpdateAlternatingRowBrush();
+        foreach (var subtitle in Subtitles)
+        {
+            subtitle.RefreshTextRendering();
+        }
+
+        if (AudioVisualizer != null)
+        {
+            WaveformColors.Current.ApplyTo(AudioVisualizer);
+            AudioVisualizer.EmptyBackgroundTile = UiTheme.GetThemeArt(UiTheme.WaveformBackgroundFileName);
+            AudioVisualizer.ResetCache();
+            AudioVisualizer.InvalidateVisual();
+        }
+
+        var videoPlayer = GetVideoPlayerControl();
+        if (videoPlayer != null)
+        {
+            videoPlayer.EmptyBackground = UiTheme.GetThemeArt(UiTheme.VideoBackgroundFileName);
+        }
+
+        ShowStatus($"{Se.Language.General.Theme}: {SettingsViewModel.MapThemeToTranslation(Se.Settings.Appearance.Theme)}");
+    }
+
     public void ApplySettings()
     {
         // Restored at the very end, after the format list refresh below: SetLayout re-creates
@@ -15194,6 +15259,7 @@ public partial class MainViewModel :
         UiUtil.SetFontName(Se.Settings.Appearance.FontName);
         UiTheme.SetCurrentTheme();
         InitMenu.ApplyFontSize(Menu);
+        MainView?.ApplyEditorStyles(); // field font size and height follow the UI font size
 
         if (ToolbarTopSeparator != null)
         {
@@ -15241,17 +15307,8 @@ public partial class MainViewModel :
         if (AudioVisualizer != null)
         {
             AudioVisualizer.DrawGridLines = Se.Settings.Waveform.DrawGridLines;
-            AudioVisualizer.WaveformColor = Se.Settings.Waveform.WaveformColor.FromHexToColor();
-            AudioVisualizer.WaveformBackgroundColor = Se.Settings.Waveform.WaveformBackgroundColor.FromHexToColor();
-            AudioVisualizer.WaveformSelectedColor = Se.Settings.Waveform.WaveformSelectedColor.FromHexToColor();
-            AudioVisualizer.WaveformCursorColor = Se.Settings.Waveform.WaveformCursorColor.FromHexToColor();
-            AudioVisualizer.WaveformShotChangeColor = Se.Settings.Waveform.WaveformShotChangeColor.FromHexToColor();
-            AudioVisualizer.WaveformGridColor = Se.Settings.Waveform.WaveformGridColor.FromHexToColor();
-            AudioVisualizer.WaveformParagraphLeftColor = Se.Settings.Waveform.WaveformParagraphLeftColor.FromHexToColor();
-            AudioVisualizer.WaveformParagraphRightColor = Se.Settings.Waveform.WaveformParagraphRightColor.FromHexToColor();
-            AudioVisualizer.WaveformFancyHighColor = Se.Settings.Waveform.WaveformFancyHighColor.FromHexToColor();
-            AudioVisualizer.ParagraphBackground = Se.Settings.Waveform.ParagraphBackground.FromHexToColor();
-            AudioVisualizer.ParagraphSelectedBackground = Se.Settings.Waveform.ParagraphSelectedBackground.FromHexToColor();
+            WaveformColors.Current.ApplyTo(AudioVisualizer);
+            AudioVisualizer.EmptyBackgroundTile = UiTheme.GetThemeArt(UiTheme.WaveformBackgroundFileName);
             AudioVisualizer.InvertMouseWheel = Se.Settings.Waveform.InvertMouseWheel;
             AudioVisualizer.UpdateTheme();
             AudioVisualizer.IsReadOnly = AreTimeCodesLocked;
@@ -15355,9 +15412,6 @@ public partial class MainViewModel :
         _autoBackupService.StartAutoBackup(this);
 
         _updateAudioVisualizer = true;
-
-        _oldSubtitleGrid = SubtitleGrid;
-        _oldEditTextBox = EditTextBox;
 
         var vp = GetVideoPlayerControl();
         if (vp != null)
@@ -20480,6 +20534,10 @@ public partial class MainViewModel :
         _fullScreenVideoPlayerControl.ToggleSubtitlesCommand = ToggleSubtitlesOnVideoPlayerCommand;
         _fullScreenVideoPlayerControl.SubtitlesOnVideoIsVisible = _mpvReloader.SubtitlesVisible;
         _fullScreenVideoPlayerControl.SubtitleButtonsIsVisible = true;
+        _fullScreenVideoPlayerControl.PlaybackSpeedCommand = SetPlaybackSpeedCommand;
+        _fullScreenVideoPlayerControl.PlaybackSpeeds = Speeds;
+        _fullScreenVideoPlayerControl.PlaybackSpeedText = SelectedSpeed;
+        _fullScreenVideoPlayerControl.PlaybackSpeedIsVisible = true;
         // The fullscreen player is created bare (not via MakeLayoutVideoPlayer), so wire the
         // pause/stop cursor-freeze here as well (issue #12233).
         _fullScreenVideoPlayerControl.PlayPauseRequested += willPause =>
@@ -20540,6 +20598,9 @@ public partial class MainViewModel :
             ReapplySelectedAudioTrack(control);
             var _ = Task.Run(LoadAudioTrackMenuItems);
 
+            // The speed may have been changed while fullscreen (#16306).
+            ReapplyPlaybackSpeed();
+
             // Same for subtitle visibility: the toggle shortcut only reached the fullscreen
             // player, so the docked player must be brought back in line with the shared state.
             if (control!.VideoPlayer is LibMpvDynamicPlayer dockedMpv)
@@ -20565,6 +20626,7 @@ public partial class MainViewModel :
             // over with, and both have to wait for that point:
             ReapplySelectedAudioTrack(readyPlayer); // the selected audio track (#12844)
             RefreshSubtitlePreview();               // and the subtitle itself (#13407)
+            ReapplyPlaybackSpeed();                 // and the playback speed (#16306)
         });
         // Keys that still reach the main window while fullscreen is up are forwarded there (see
         // TryForwardKeyDownToFullScreen) until the user goes back to the main window on purpose -
@@ -22899,11 +22961,11 @@ public partial class MainViewModel :
     private void RefreshRuleProfiles()
     {
         var names = Se.Settings.General.Profiles.Select(p => p.Name).ToList();
-        var current = Se.Settings.General.CurrentProfile;
-        if (!names.Contains(current))
-        {
-            current = names.FirstOrDefault();
-        }
+
+        // A current profile that is not in the list (renamed, deleted, stale settings) shows as
+        // no selection: picking the first name here would apply that profile and overwrite the
+        // user's limits without them choosing it.
+        var current = names.Contains(Se.Settings.General.CurrentProfile) ? Se.Settings.General.CurrentProfile : null;
 
         if (!RuleProfiles.SequenceEqual(names))
         {
@@ -24343,10 +24405,14 @@ public partial class MainViewModel :
         var videoPositionSeconds = atVideoPosition && vp != null ? vp.Position : -1;
         var originalSplit = GetOriginalSplit(s, language, originalHasFocus ? EditTextBoxOriginal.SelectionStart : -1);
 
+        // #16095: optionally SE 4's split at video and text box position - a caret at the end of
+        // the text keeps it all in the first line. Plain "split at cursor" never does (SE 4 too).
+        var allowEmptySecond = atVideoPosition && atTextBoxPosition && Se.Settings.Tools.SplitAtVideoAndTextBoxPositionAllowEmptySecond;
+
         var countBefore = Subtitles.Count;
         RunWithoutChangeDetection(() =>
         {
-            _splitManager.Split(Subtitles, s, videoPositionSeconds, textIndex, language, originalSplit);
+            _splitManager.Split(Subtitles, s, videoPositionSeconds, textIndex, language, originalSplit, allowEmptySecond);
             Renumber();
         });
 
@@ -26971,19 +27037,6 @@ public partial class MainViewModel :
         Dispatcher.UIThread.Post(async () =>
         {
             var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeBdn(subtitle, fileName, false); });
-
-            if (result.OkPressed)
-            {
-                await FinishOcrImportAsync(fileName, result.OcredSubtitle, skipLoadVideo: skipLoadVideo);
-            }
-        });
-    }
-
-    private void ImportAndOcrBinaryParagraphList(string fileName, IBinaryParagraphList binaryParagraphList, Subtitle subtitle, bool skipLoadVideo = false)
-    {
-        Dispatcher.UIThread.Post(async () =>
-        {
-            var result = await ShowDialogAsync<OcrWindow, OcrViewModel>(vm => { vm.InitializeBinaryParagraphList(binaryParagraphList, subtitle, fileName); });
 
             if (result.OkPressed)
             {
@@ -36378,18 +36431,6 @@ public partial class MainViewModel :
         _updateAudioVisualizer = true;
     }
 
-    internal void SubtitleTextOriginalChanged(object? sender, TextChangedEventArgs e)
-    {
-        var selectedSubtitle = SelectedSubtitle;
-        if (selectedSubtitle == null)
-        {
-            return;
-        }
-
-        MakeSubtitleTextInfoOriginal(selectedSubtitle.OriginalText, selectedSubtitle);
-        _updateAudioVisualizer = true;
-    }
-
     /// <summary>
     /// Sets the style of a newly created ASSA/SSA paragraph. Used by the insert paths that bypass
     /// <see cref="IInsertService.InsertBefore"/>/<see cref="IInsertService.InsertAfter"/> - the
@@ -36787,11 +36828,6 @@ public partial class MainViewModel :
 
         var halfWidthInSeconds = (av.Bounds.Width / 2) / (av.WavePeaks.SampleRate * av.ZoomFactor);
         av.StartPositionSeconds = newPositionSeconds - halfWidthInSeconds;
-    }
-
-    internal void AudioVisualizerOnStatus(object sender, ParagraphEventArgs e)
-    {
-        ShowStatus(e.Paragraph.Text, 3000);
     }
 
 
@@ -37640,7 +37676,6 @@ public partial class MainViewModel :
         if (!_changingFormatProgrammatically)
         {
             _formatChangedByUser = true;
-            _formatChangedFrom = e.RemovedItems.Count == 1 ? e.RemovedItems[0] as SubtitleFormat : null;
         }
 
         IsFormatAssa = SelectedSubtitleFormat is AdvancedSubStationAlpha;

@@ -152,6 +152,8 @@ public class SeGeneral
     public bool UndockVideoControls { get; set; }
     public List<SeWindowPosition> WindowPositions { get; set; } = new List<SeWindowPosition>();
     public bool AutoSave { get; set; }
+    public bool CheckSubtitleFileChangedOutside { get; set; }
+    public bool ConfirmOverwriteSubtitleFileChangedOutside { get; set; }
     public bool AutoBackupOn { get; set; }
     public int AutoBackupIntervalMinutes { get; set; }
     public int AutoBackupDeleteAfterDays { get; set; }
@@ -185,6 +187,14 @@ public class SeGeneral
     public bool ColorWordsPerMinute { get; set; }
     public bool ColorTimeCodeOverlap { get; set; }
     public bool ColorGapTooShort { get; set; }
+
+    /// <summary>
+    /// Color the gap when it falls inside [GapRangeMin, GapRangeMax] (inclusive) - the broadcast
+    /// rule that a gap should be either closed (about 2 frames) or at least about 12 frames.
+    /// </summary>
+    public bool ColorGapInRange { get; set; }
+    public MsOrFramesValue GapRangeMin { get; set; } = new() { Milliseconds = 120, Frames = 3 };
+    public MsOrFramesValue GapRangeMax { get; set; } = new() { Milliseconds = 480, Frames = 12 };
     public string ErrorColor { get; set; }
     public bool ColorCustomErrorRules { get; set; }
     public List<SeCustomErrorRule> CustomErrorRules { get; set; } = new();
@@ -334,6 +344,8 @@ public class SeGeneral
         MoveAllLinesCustom1Ms = 10;
         MoveAllLinesCustom2Ms = 1000;
         PromptBeforeDelete = true;
+        CheckSubtitleFileChangedOutside = true;
+        ConfirmOverwriteSubtitleFileChangedOutside = true;
         AutoBackupOn = true;
         AutoBackupIntervalMinutes = 5;
         AutoBackupDeleteAfterDays = 90;

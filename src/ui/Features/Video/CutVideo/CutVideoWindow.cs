@@ -189,7 +189,7 @@ public class CutVideoWindow : Window
         {
             Text = "s",
             Foreground = EditorChrome.FaintTextBrush,
-            FontSize = 11,
+            FontSize = EditorChrome.ScaledFont(11),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 0, 0),
         };
@@ -232,7 +232,7 @@ public class CutVideoWindow : Window
         {
             Content = EditorChrome.MakeInlineRow(
                 new Optris.Icons.Avalonia.Icon { Value = "fa-solid fa-play", FontSize = 11, VerticalAlignment = VerticalAlignment.Center },
-                new TextBlock { Text = Se.Language.Video.CutVideoPreviewTransition, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center }),
+                new TextBlock { Text = Se.Language.Video.CutVideoPreviewTransition, FontSize = EditorChrome.FieldFontSize, VerticalAlignment = VerticalAlignment.Center }),
             Command = vm.PreviewTransitionCommand,
             HorizontalAlignment = HorizontalAlignment.Left,
             [!Button.IsEnabledProperty] = new Binding(nameof(vm.IsPreviewTransitionEnabled)),
@@ -301,13 +301,14 @@ public class CutVideoWindow : Window
 
     private static Border MakeAudioVisualizerView(CutVideoViewModel vm)
     {
+        var colors = WaveformColors.Current;
         vm.AudioVisualizer = new AudioVisualizer { Height = 80, Width = double.NaN, IsReadOnly = false };
         vm.AudioVisualizer.OnVideoPositionChanged += vm.AudioVisualizerPositionChanged;
         vm.AudioVisualizer.OnNewSelectionInsert += vm.AudioVisualizerOnNewSelectionInsert;
         vm.AudioVisualizer.DrawGridLines = Se.Settings.Waveform.DrawGridLines;
-        vm.AudioVisualizer.WaveformColor = Se.Settings.Waveform.WaveformColor.FromHexToColor();
-        vm.AudioVisualizer.WaveformSelectedColor = Se.Settings.Waveform.WaveformSelectedColor.FromHexToColor();
-        vm.AudioVisualizer.WaveformGridColor = Se.Settings.Waveform.WaveformGridColor.FromHexToColor();
+        vm.AudioVisualizer.WaveformColor = colors.Waveform;
+        vm.AudioVisualizer.WaveformSelectedColor = colors.Selected;
+        vm.AudioVisualizer.WaveformGridColor = colors.Grid;
         vm.AudioVisualizer.OnSelectRequested += vm.AudioVisualizerSelectRequested;
         vm.AudioVisualizer.OnPrimarySingleClicked += vm.AudioVisualizerOnPrimarySingleClicked;
         vm.AudioVisualizer.OnPrimaryDoubleClicked += vm.AudioVisualizerOnPrimaryDoubleClicked;
@@ -440,7 +441,7 @@ public class CutVideoWindow : Window
         progressBar.Bind(ProgressBar.IsVisibleProperty, new Binding(nameof(vm.IsGenerating)));
 
         var statusText = EditorChrome.MakeBoundHint(nameof(vm.ProgressText));
-        statusText.FontSize = 12;
+        statusText.FontSize = EditorChrome.FieldFontSize;
 
         var grid = new Grid
         {
@@ -468,7 +469,7 @@ public class CutVideoWindow : Window
         // The source video
         var fileName = UiUtil.MakeFilePathLabel(vm, nameof(vm.VideoFileName));
         fileName.Foreground = EditorChrome.DimTextBrush;
-        fileName.FontSize = 12;
+        fileName.FontSize = EditorChrome.FieldFontSize;
         fileName.VerticalAlignment = VerticalAlignment.Center;
         var source = EditorChrome.MakeInlineRow(
             new Optris.Icons.Avalonia.Icon { Value = "fa-solid fa-file-video", FontSize = 12, Foreground = EditorChrome.FaintTextBrush, VerticalAlignment = VerticalAlignment.Center },

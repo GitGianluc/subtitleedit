@@ -67,7 +67,7 @@ public partial class OcrFixEngine : IOcrFixEngine, IDoSpell
         _threeLetterIsoLanguageName = string.Empty;
         _isLoaded = false;
         _ocrFixReplaceList = new OcrFixReplaceList2(string.Empty);
-        _spellCheckWordLists = new SpellCheckWordLists(string.Empty, this);
+        _spellCheckWordLists = new SpellCheckWordLists(string.Empty);
         _wordSplitList = Array.Empty<string>();
         _fiveLetterName = string.Empty;
     }
@@ -109,7 +109,7 @@ public partial class OcrFixEngine : IOcrFixEngine, IDoSpell
             text = FixHashMisreadAsApostrophe(text);
             text = FixSlashMisreadAsL(text);
             text = FixSpacedThousandsSeparator(text);
-            text = FixSpaceBeforeClosingQuote(text);
+            text = FixSpaceBeforeClosingQuote(text, _threeLetterIsoLanguageName is "fra" or "fre");
         }
 
         var replacedLine = ReplaceLineFixes(index, text, wordsToIgnore);
@@ -466,16 +466,19 @@ public partial class OcrFixEngine : IOcrFixEngine, IDoSpell
     /// <summary>
     /// A closing quote after an italic period gets a word space in front of it ("voorbij. '",
     /// "beginnen. \""): drop it. A quote that opens the next word ("Kom.' 'Nee.'", "'s avonds")
-    /// is not followed by whitespace and stays.
+    /// is not followed by whitespace and stays. French typography puts a space before the
+    /// closing guillemet ("« Il est parti. »"), so that one stays in French and next to a «.
     /// </summary>
-    internal static string FixSpaceBeforeClosingQuote(string text)
+    internal static string FixSpaceBeforeClosingQuote(string text, bool isFrench = false)
     {
         if (string.IsNullOrEmpty(text) || !text.Contains(' '))
         {
             return text;
         }
 
-        return SpaceBeforeClosingQuote().Replace(text, "$1$2");
+        var keepGuillemetSpace = isFrench || text.Contains('«');
+        return SpaceBeforeClosingQuote().Replace(text, m =>
+            keepGuillemetSpace && m.Groups[2].Value == "»" ? m.Value : m.Groups[1].Value + m.Groups[2].Value);
     }
 
     /// <summary>
@@ -865,6 +868,13 @@ public partial class OcrFixEngine : IOcrFixEngine, IDoSpell
             {
                 result = lFixed;
                 word.GuessUsed = true;
+                isWordCorrect = true;
+            }
+
+            // Dutch capitalizes "één" as "Eén" (the capital drops its accent), which the spell checker
+            // lowercases to the non-word "eén" - so the accent fix below turned it into "Een" (#16031).
+            if (!isWordCorrect && IsDutchCapitalizedAccentedWord(result))
+            {
                 isWordCorrect = true;
             }
 
@@ -1289,6 +1299,27 @@ public partial class OcrFixEngine : IOcrFixEngine, IDoSpell
         return new string(lookalikes.Where(ch => ch > 127).Concat(lookalikes.Where(ch => ch <= 127)).ToArray());
     }
 
+    /// <summary>
+    /// "Eén", "Eénmaal": a plain capital followed by the same vowel with an accent is correct Dutch
+    /// when the fully accented lowercase form ("één", "éénmaal") is a dictionary word.
+    /// </summary>
+    private bool IsDutchCapitalizedAccentedWord(string word)
+    {
+        if (_twoLetterIsoLanguageName != "nl" || word.Length < 3 ||
+            "AEIOU".IndexOf(word[0]) < 0 || word[1] <= 127 || !char.IsLower(word[1]))
+        {
+            return false;
+        }
+
+        var baseLetter = word[1].ToString().Normalize(NormalizationForm.FormD)[0];
+        if (baseLetter != char.ToLowerInvariant(word[0]))
+        {
+            return false;
+        }
+
+        return IsSpelledCorrect(word[1] + word.Substring(1).ToLowerInvariant());
+    }
+
     private bool IsAccentCandidate(char c)
     {
         return c > 127 && char.IsLetter(c) && GetAccentLookalikesForLanguage(c).Length > 0;
@@ -1683,12 +1714,12 @@ public partial class OcrFixEngine : IOcrFixEngine, IDoSpell
     {
         try
         {
-            _spellCheckWordLists = new SpellCheckWordLists(_fiveLetterName, this);
+            _spellCheckWordLists = new SpellCheckWordLists(_fiveLetterName);
         }
         catch (Exception exception)
         {
             SpellCheckConfig.LogError("Error loading names for OCR fix engine: " + exception.Message);
-            _spellCheckWordLists = new SpellCheckWordLists(string.Empty, this);
+            _spellCheckWordLists = new SpellCheckWordLists(string.Empty);
         }
 
         // Read the names *after* rebuilding for _fiveLetterName. Reading first returned the

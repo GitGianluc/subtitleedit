@@ -23,7 +23,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Nikse.SubtitleEdit.Features.Main.Layout;
-using Nikse.SubtitleEdit.UiLogic.Common;
 
 namespace Nikse.SubtitleEdit.Features.Options.Settings;
 
@@ -596,6 +595,8 @@ public class SettingsPage : UserControl
 
             MakeSeparator(),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoSave, nameof(_vm.AutoSave)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.CheckSubtitleFileChangedOutside, nameof(_vm.CheckSubtitleFileChangedOutside)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.ConfirmOverwriteSubtitleFileChangedOutside, nameof(_vm.ConfirmOverwriteSubtitleFileChangedOutside)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoBackupOn, nameof(_vm.AutoBackupOn)),
             MakeNumericSettingInt(Se.Language.Options.Settings.AutoBackupIntervalMinutes, nameof(_vm.AutoBackupIntervalMinutes), 1),
             MakeNumericSettingInt(Se.Language.Options.Settings.AutoBackupDeleteAfterDays, nameof(_vm.AutoBackupDeleteAfterDays), 1),
@@ -659,6 +660,24 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.ColorOverlap, nameof(_vm.ColorOverlap)),
             MakeSeparator(),
             MakeCheckboxSetting(Se.Language.Options.Settings.ColorGapTooShort, nameof(_vm.ColorGapTooShort)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.ColorGapInRange, nameof(_vm.ColorGapInRange)),
+            new SettingsItem(Se.Language.Options.Settings.GapRangeMs + " " + Se.Language.Options.Settings.GapRangeFrames, _vm, nameof(_vm.GapRangeLabel), () => new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 5,
+                [!Control.IsEnabledProperty] = new Binding(nameof(_vm.ColorGapInRange)) { Source = _vm },
+                Children =
+                {
+                    MakeNumericUpDownInt(nameof(_vm.GapRangeMinMs), 0, 10_000).WithBindIsVisible(_vm, nameof(_vm.IsMsMode)),
+                    MakeNumericUpDownInt(nameof(_vm.GapRangeMinFrames), 0, 1_000).WithBindIsVisible(_vm, nameof(_vm.UseFrameMode)),
+                    new TextBlock { Text = "-", VerticalAlignment = VerticalAlignment.Center },
+                    MakeNumericUpDownInt(nameof(_vm.GapRangeMaxMs), 0, 10_000).WithBindIsVisible(_vm, nameof(_vm.IsMsMode)),
+                    MakeNumericUpDownInt(nameof(_vm.GapRangeMaxFrames), 0, 1_000).WithBindIsVisible(_vm, nameof(_vm.UseFrameMode)),
+                }
+            })
+            {
+                EnglishLabel = EnglishLabelLookup.English.Options.Settings.GapRangeMs + " " + EnglishLabelLookup.English.Options.Settings.GapRangeFrames,
+            },
             MakeSeparator(),
             new SettingsItem(Se.Language.Options.Settings.CustomErrorRules, () => EditorChrome.MakeSwitch(nameof(_vm.ColorCustomErrorRules), null, _vm))
             {
@@ -966,6 +985,7 @@ public class SettingsPage : UserControl
                     Mode = BindingMode.TwoWay,
                 }
             }),
+            MakeCheckboxSetting(Se.Language.Options.Settings.SplitAtVideoAndTextBoxPositionAllowEmptySecond, nameof(_vm.SplitAtVideoAndTextBoxPositionAllowEmptySecond)),
             new SettingsItem(Se.Language.Options.Settings.SpellCheckEngine, () => new ComboBox
             {
                 MinWidth = 200,
@@ -1007,13 +1027,13 @@ public class SettingsPage : UserControl
                 120,
                 _vm,
                 nameof(_vm.LayoutScale))),
-            new SettingsItem(Se.Language.Options.Settings.FontScale, () => UiUtil.MakeNumericUpDownInt(
-                (int)Math.Round(UiTheme.MinFontScale * 100.0, MidpointRounding.AwayFromZero),
-                (int)Math.Round(UiTheme.MaxFontScale * 100.0, MidpointRounding.AwayFromZero),
-                100,
+            new SettingsItem(Se.Language.Options.Settings.UiFontSize, () => UiUtil.MakeNumericUpDownInt(
+                UiTheme.MinFontSize,
+                UiTheme.MaxFontSize,
+                (int)UiTheme.BaseFontSize,
                 120,
                 _vm,
-                nameof(_vm.FontScale))),
+                nameof(_vm.UiFontSize))),
             new SettingsItem(Se.Language.Options.Settings.TextSelectionOpacity, () => UiUtil.MakeNumericUpDownInt(
                 UiTheme.MinTextSelectionOpacity,
                 100,
@@ -1089,6 +1109,26 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowAssaLayer, nameof(_vm.ShowAssaLayer)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowHorizontalLineAboveToolbar, nameof(_vm.ShowHorizontalLineAboveToolbar)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowPluginsMenu, nameof(_vm.ShowPluginsMenu)),
+            new SettingsItem(!OperatingSystem.IsWindows(), Se.Language.Options.Settings.WindowsRenderingMode, () => new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children =
+                {
+                    new ComboBox
+                    {
+                        MinWidth = 250,
+                        DataContext = _vm,
+                        [!ItemsControl.ItemsSourceProperty] = new Binding(nameof(_vm.WindowsRenderingModes)),
+                        [!SelectingItemsControl.SelectedItemProperty] = new Binding(nameof(_vm.SelectedWindowsRenderingMode))
+                        {
+                            Mode = BindingMode.TwoWay,
+                        },
+                        ItemTemplate = new FuncDataTemplate<WindowsRenderingModeDisplay>((f, _) =>
+                            new TextBlock { Text = f?.Name }, true),
+                    },
+                    UiUtil.MakeLabel(Se.Language.General.RequiresRestart).WithMarginLeft(5).WithOpacity(0.6),
+                }
+            }),
         ]));
 
         sections.Add(new SettingsSection(Se.Language.General.Toolbar, IconNames.DotsHorizontal, "#58c9b4",

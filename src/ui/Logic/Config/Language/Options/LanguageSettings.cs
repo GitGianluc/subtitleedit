@@ -1,5 +1,4 @@
 ﻿using Nikse.SubtitleEdit.Core.Enums;
-using System;
 
 namespace Nikse.SubtitleEdit.Logic.Config.Language.Options;
 
@@ -105,6 +104,8 @@ public class LanguageSettings
     public string ShowRecentFiles { get; set; }
     public string OpenLastFileOnStart { get; set; }
     public string AutoSave { get; set; }
+    public string CheckSubtitleFileChangedOutside { get; set; }
+    public string ConfirmOverwriteSubtitleFileChangedOutside { get; set; }
     public string AutoBackupOn { get; set; }
     public string AutoBackupIntervalMinutes { get; set; }
     public string AutoBackupDeleteAfterDays { get; set; }
@@ -125,6 +126,9 @@ public class LanguageSettings
     public string ColorWordsPerMinute { get; set; }
     public string ColorOverlap { get; set; }
     public string ColorGapTooShort { get; set; }
+    public string ColorGapInRange { get; set; }
+    public string GapRangeMs { get; set; }
+    public string GapRangeFrames { get; set; }
     public string ErrorBackgroundColor { get; set; }
     public string CustomErrorRules { get; set; }
     public string CustomErrorRulesHighlight { get; set; }
@@ -324,6 +328,7 @@ public class LanguageSettings
     public string SplitOddLineActionWeightTop { get; set; }
     public string SplitOddLineActionWeightBottom { get; set; }
     public string SplitOddLinesAction { get; set; }
+    public string SplitAtVideoAndTextBoxPositionAllowEmptySecond { get; set; }
     public string OcrUseWordSplitList { get; set; }
     public string OcrGuessUnknownWords { get; set; }
     public string SpellCheckRememberUseAlwaysList { get; set; }
@@ -353,7 +358,12 @@ public class LanguageSettings
     public string WaveformDoubleClickAction { get; set; }
     public string AllSettings { get; set; }
     public string UiScale { get; set; }
-    public string FontScale { get; set; }
+    public string UiFontSize { get; set; }
+    public string WindowsRenderingMode { get; set; }
+    public string WindowsRenderingModeDefault { get; set; }
+    public string WindowsRenderingModeRedirectionSurface { get; set; }
+    public string WindowsRenderingModeLowLatencySwapChain { get; set; }
+    public string WindowsRenderingModeSoftware { get; set; }
     public string TextSelectionOpacity { get; set; }
     public string WaveformToolbarItems { get; set; }
     public string MatchIconColorToDarkTheme { get; set; }
@@ -485,6 +495,8 @@ public class LanguageSettings
         ShowRecentFiles = "Show recent files (for reopen)";
         OpenLastFileOnStart = "Open last recent file on start";
         AutoSave = "Auto-save (save the open file while editing)";
+        CheckSubtitleFileChangedOutside = "Check for subtitle file changed by another program when activating window";
+        ConfirmOverwriteSubtitleFileChangedOutside = "Ask before overwriting subtitle file changed by another program";
         AutoBackupOn = "Auto-backup";
         AutoBackupIntervalMinutes = "Auto-backup interval (minutes)";
         AutoBackupDeleteAfterDays = "Auto-backup retention (days)";
@@ -505,6 +517,9 @@ public class LanguageSettings
         ColorWordsPerMinute = "Color words/min if too high";
         ColorOverlap = "Color time code overlap";
         ColorGapTooShort = "Color if gap is too short";
+        ColorGapInRange = "Color if gap is in range";
+        GapRangeMs = "Gap range (ms)";
+        GapRangeFrames = "Gap range (frames)";
         ErrorBackgroundColor = "Error background color";
         CustomErrorRules = "Custom error rules";
         CustomErrorRulesHighlight = "Color lines matching a custom error rule";
@@ -703,6 +718,7 @@ public class LanguageSettings
         SplitOddLineActionWeightTop = "Weight top";
         SplitOddLineActionWeightBottom = "Weight bottom";
         SplitOddLinesAction = "Split odd lines action";
+        SplitAtVideoAndTextBoxPositionAllowEmptySecond = "Split at video and text box position: cursor at the end keeps all text in the first line (second line empty)";
         OcrUseWordSplitList = "OCR: use word split list";
         OcrGuessUnknownWords = "OCR: try to guess unknown words";
         SpellCheckRememberUseAlwaysList = "Spell check: remember \"Use always\" list";
@@ -732,7 +748,12 @@ public class LanguageSettings
         WaveformDoubleClickAction = "Waveform double-click action (after single-click action)";
         AllSettings = "All settings";
         UiScale = "UI scale (%)";
-        FontScale = "Font scale (%)";
+        UiFontSize = "UI font size";
+        WindowsRenderingMode = "Window rendering";
+        WindowsRenderingModeDefault = "Default (WinUI composition)";
+        WindowsRenderingModeRedirectionSurface = "Redirection surface (try if the desktop flickers through)";
+        WindowsRenderingModeLowLatencySwapChain = "Low-latency swap chain";
+        WindowsRenderingModeSoftware = "Software (no GPU, no libmpv OpenGL)";
         TextSelectionOpacity = "Text selection opacity (%)";
         WaveformToolbarItems = "Waveform toolbar items";
         MatchIconColorToDarkTheme = "Match icon color to dark theme foreground color";

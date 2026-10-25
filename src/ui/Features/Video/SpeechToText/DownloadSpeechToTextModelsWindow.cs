@@ -1,14 +1,11 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
-using Optris.Icons.Avalonia;
 
 namespace Nikse.SubtitleEdit.Features.Video.SpeechToText;
 
@@ -46,7 +43,7 @@ public class DownloadSpeechToTextModelsWindow : Window
         {
             Text = Se.Language.Video.AudioToText.CustomModelHelp,
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             MaxWidth = 460,
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -69,7 +66,7 @@ public class DownloadSpeechToTextModelsWindow : Window
         var statusText = new TextBlock
         {
             Margin = new Thickness(0, 1, 0, 1),
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         statusText.Bind(TextBlock.TextProperty, new Binding(nameof(vm.ProgressText)));
@@ -92,7 +89,7 @@ public class DownloadSpeechToTextModelsWindow : Window
         var fileText = new TextBlock
         {
             Margin = new Thickness(0, 1, 0, 1),
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = EditorChrome.FaintTextBrush,
             TextTrimming = TextTrimming.CharacterEllipsis,
