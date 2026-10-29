@@ -14884,12 +14884,31 @@ public partial class MainViewModel :
 
         EndToolApply(toolApply, () =>
         {
+            var returnedIds = new HashSet<Guid>();
             foreach (var paragraph in result.FixedSubtitle.Paragraphs)
             {
                 if (paragraph.Id.HasValue && rowByParagraphId.TryGetValue(paragraph.Id.Value, out var row))
                 {
                     row.Text = paragraph.Text;
+                    returnedIds.Add(paragraph.Id.Value);
                 }
+            }
+
+            // A line the dialog no longer returns was deleted there (its Delete, or a fix like
+            // "Remove empty lines") - drop its row too, instead of silently keeping it.
+            var deletedRows = rowByParagraphId
+                .Where(kv => !returnedIds.Contains(kv.Key))
+                .Select(kv => kv.Value)
+                .ToList();
+            foreach (var row in deletedRows)
+            {
+                Subtitles.Remove(row);
+            }
+
+            if (deletedRows.Count > 0)
+            {
+                Renumber();
+                _updateAudioVisualizer = true;
             }
         });
     }
@@ -19087,7 +19106,7 @@ public partial class MainViewModel :
         });
     }
 
-    private async Task<MessageBoxResult> ShowWrapAroundDialog(string message)
+    private async Task<MessageBoxResult> ShowWrapAroundDialog(string message, string? title = null)
     {
         if (Window == null)
         {
@@ -19098,7 +19117,7 @@ public partial class MainViewModel :
         var dialogWindow = (findWin?.IsVisible == true ? findWin : null)
                         ?? (replaceWin?.IsVisible == true ? replaceWin : null);
         var parentWindow = dialogWindow ?? Window!;
-        return await MessageBox.Show(parentWindow, Se.Language.General.ContinueFindTitle,
+        return await MessageBox.Show(parentWindow, title ?? Se.Language.General.ContinueFindTitle,
             message, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
     }
 
@@ -19317,29 +19336,35 @@ public partial class MainViewModel :
             }
             else if (result.ReplaceAllPressed)
             {
-                var replaceCount = _findService.ReplaceAll(result.SearchText, result.ReplaceText);
-
-                for (var i = 0; i < Subtitles.Count && i < subs.Count; i++)
+                // Like SE 4: replace from the current line to the end, then ask before going on
+                // from the top - replacing above the current line without asking surprised users
+                // working down the file (#16453). Both passes are one undo step.
+                var startLine = Math.Max(0, currentLineIndex);
+                int replaceCount;
+                _undoRedoManager.CheckForChanges(null);
+                _undoRedoManager.StopChangeDetection();
+                try
                 {
-                    var s = Subtitles[i];
-                    var newText = subs[i];
-                    if (newText != s.Text)
-                    {
-                        s.Text = newText;
-                    }
-                }
+                    replaceCount = _findService.ReplaceAll(result.SearchText, result.ReplaceText, startLine);
+                    ApplyReplacedLines(subs, origs);
 
-                if (origs != null)
-                {
-                    for (var i = 0; i < Subtitles.Count && i < origs.Count; i++)
+                    if (startLine > 0)
                     {
-                        var s = Subtitles[i];
-                        var newText = origs[i];
-                        if (newText != s.OriginalText)
+                        var message = replaceCount > 0
+                            ? string.Format(Se.Language.General.ReplacedXContinueFromTop, replaceCount)
+                            : Se.Language.General.ReplaceNotFoundContinueFromTop;
+                        var answer = await ShowWrapAroundDialog(message, Se.Language.General.ContinueReplaceTitle);
+                        _shortcutManager.ClearKeys();
+                        if (answer == MessageBoxResult.Yes)
                         {
-                            s.OriginalText = newText;
+                            replaceCount += _findService.ReplaceAll(result.SearchText, result.ReplaceText, 0, startLine);
+                            ApplyReplacedLines(subs, origs);
                         }
                     }
+                }
+                finally
+                {
+                    _undoRedoManager.StartChangeDetection();
                 }
 
                 ShowStatus(string.Format(Se.Language.Main.ReplacedXWithYCountZ, result.SearchText, result.ReplaceText, replaceCount));
@@ -19412,6 +19437,32 @@ public partial class MainViewModel :
             }
 
             ShowFindMatch(idx, _findService.CurrentTextFound, _findService.CurrentLineNumber, _findService.CurrentTextIndex, _findService.CurrentMatchInOriginal);
+        }
+    }
+
+    private void ApplyReplacedLines(List<string> subs, List<string>? origs)
+    {
+        for (var i = 0; i < Subtitles.Count && i < subs.Count; i++)
+        {
+            var s = Subtitles[i];
+            var newText = subs[i];
+            if (newText != s.Text)
+            {
+                s.Text = newText;
+            }
+        }
+
+        if (origs != null)
+        {
+            for (var i = 0; i < Subtitles.Count && i < origs.Count; i++)
+            {
+                var s = Subtitles[i];
+                var newText = origs[i];
+                if (newText != s.OriginalText)
+                {
+                    s.OriginalText = newText;
+                }
+            }
         }
     }
 
@@ -28576,6 +28627,7 @@ public partial class MainViewModel :
             : null;
 
         Subtitles.Clear();
+        UpdateYttPenLookup(subtitle.Header);
         foreach (var p in subtitle.Paragraphs)
         {
             Subtitles.Add(new SubtitleLineViewModel(p, SelectedSubtitleFormat));
@@ -32526,6 +32578,7 @@ public partial class MainViewModel :
             (selectedCount > 1 || (selectedCount == 1 && idx < count - 1));
         AreAssaContentMenuItemsVisible = false;
         AreWebVttContentMenuItemsVisible = false;
+        AreYttContentMenuItemsVisible = false;
         IsWebVttBrowserPreviewVisible = false;
         ShowAutoTranslateSelectedLines = selectedCount > 0;
         HasMultipleLinesSelected = selectedCount > 1;
@@ -32722,6 +32775,11 @@ public partial class MainViewModel :
                 AreWebVttContentMenuItemsVisible = true;
                 IsWebVttBrowserPreviewVisible = WebVttBrowserPreview.IsSupportedVideoFile(_videoFileName);
                 FillWebVttVoicesMenu();
+            }
+            else if (IsFormatYtt && selectedCount > 0)
+            {
+                AreYttContentMenuItemsVisible = true;
+                FillYttMenu();
             }
         }
 
@@ -37438,6 +37496,8 @@ public partial class MainViewModel :
                 // Clear the stored pointer args after use
                 _lastTextEditorPointerArgs = null;
             }
+
+            AddYttTextBoxMenuItems(flyout);
         }
     }
 
@@ -37767,6 +37827,8 @@ public partial class MainViewModel :
         IsFormatSsa = SelectedSubtitleFormat is SubStationAlpha;
         IsFormatAssaOrSsa = SelectedSubtitleFormat is AdvancedSubStationAlpha or SubStationAlpha;
         IsFormatWebVtt = SelectedSubtitleFormat is WebVTT or WebVTTFileWithLineNumber;
+        IsFormatYtt = SelectedSubtitleFormat is YouTubeTimedText;
+        UpdateYttPenLookup(_subtitle.Header);
         IsFormatEbu = SelectedSubtitleFormat is Ebu;
         IsFormatTeletext = SelectedSubtitleFormat is Ebu or DvbTeletext;
         UpdateTeletextLineLength();
@@ -37775,7 +37837,7 @@ public partial class MainViewModel :
 
         UpdateTemporaryFrameMode();
 
-        HasFormatStyle = IsFormatAssaOrSsa || IsFormatWebVtt;
+        HasFormatStyle = IsFormatAssaOrSsa || IsFormatWebVtt || IsFormatYtt;
         ShowActorColumnMenuHeader = IsFormatWebVtt
             ? Se.Language.File.WebVtt.ShowVoiceColumn
             : Se.Language.General.ShowActorColumn;
