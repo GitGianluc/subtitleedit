@@ -3,6 +3,96 @@ Subtitle Edit Changelog
 
 -----------------------------------------------------------------------------------------------------
 
+v5.4.0-rc2 (3rd of November 2026)
+
+* Auto-translate: translate selected rows together, with context - thx mmmsh-125
+* Auto-translate: find and replace in the translation column - thx mmmsh-125
+* Auto-translate: skip more music/lyric line layouts - thx lordvorkosigan1968-cloud
+* Blu-ray sup: add HDR (BT.2020 PQ) palette option - thx Victory61
+* Bookmarks list: add import and export
+* Source view: Ctrl+Enter (Cmd+Enter on macOS) applies changes - thx pdjdev
+* Add Croatian UI translation (machine draft, needs review) - thx lordvorkosigan1968-cloud
+* Update Avalonia to 12.1.5
+* Fix Auto-translate shifting translations when the engine merges two rows - thx mmmsh-125
+* Fix List errors time codes ignoring video offset and leading zero hours - thx accessallareas
+* Fix toolbar drop-downs hidden under undocked tool windows - thx GrampaWildWilly
+* Fix macOS Ctrl+click collapsing a multi-row selection
+* Fix SMPTE timing not being applied until refresh - thx OmrSi
+* Fix copy text shortcuts adding a trailing new line - thx OmrSi
+* Update Chinese Traditional translation - thx love80312
+* Update Italian translation - thx bovirus
+* Update Japanese translation - thx hisui3393
+* Update Korean translation - thx 12si27
+* Update Polish translation - thx potplayer-fanpack
+
+-----------------------------------------------------------------------------------------------------
+
+v5.4.0-rc1 (1st of November 2026)
+
+* New SVG icons in all themes and the About window, sharp at any display scale
+* New layout picker thumbnails drawn in theme colors, restyled spell check and change casing
+* Auto-translate: show source and translation side by side, with more room for text
+* Auto-translate: let CrispASR MADLAD use GPU builds - thx SMAP-git
+* Fix common errors: more compact rules with clearer examples
+* Improve Choose alignment, Go to line number and Command palette
+* More consistent dialogs: Escape, button order, error icons
+* Save as: list favorite subtitle formats first - thx accessallareas
+* More dialog text can now be translated
+* Fix "Save as" doubling the file extension on macOS (.srt.srt) - thx accessallareas
+* Fix OCR line breaks of separated top and bottom text with Auto-break - thx robinfire110
+* Fix error log entry from stopping mpv before it started - thx GrampaWildWilly
+* Fix Auto-translate changing the subtitle when no text is returned - thx Blackspirits
+* Fix Auto-translate losing language variants like pt-PT when switching provider - thx Blackspirits
+* Update Japanese translation - thx hisui3393
+* Update Polish translation - thx potplayer-fanpack
+* Update Portuguese translation - thx Blackspirits
+* Update Turkish translation - thx bilimiyorum
+
+-----------------------------------------------------------------------------------------------------
+
+v5.4.0-beta12 (31st of October 2026)
+
+* FFmpeg player: subtitle overlay closer to the mpv preview (per-line alignment, inline colors, bold/italic, RTL, second subtitle style, opaque box, justify)
+* llama.cpp: pick CPU or Vulkan on Linux, switch builds from the engine settings - thx SMAP-git
+* Bing translate: add Region field for regional Azure resources, show the real token error
+* Classic theme: new video and waveform background art
+* Improve performance of layout 14 timeline and FFmpeg player subtitle preview
+* Improve help: recommended local models for translating from English
+* Fix waveform click selecting the source line instead of its duplicate - thx Rafatenshii
+* Fix "Generate background boxes" emptying the original subtitle - thx bichitoxxx
+* Fix error log entries + Themes.zip unpacked on every start with the System theme - thx GrampaWildWilly
+* Fix Multiple replace ticking excluded preview lines again
+* Fix "push neighbour" shortcuts lengthening a neighbour already under minimum duration
+* Fix OCR ASSA auto-alignment tagging top and bottom text as middle in tall images - thx robinfire110
+* Fix AutoCompleteBox and Source view borders - thx pdjdev
+* seconv: fix LFM vision models losing their OCR prompt
+* seconv: fix --ollama-url with a bare host:port
+* Update Japanese translation - thx hisui3393
+* Update German translation - thx FunkyKnilch
+
+-----------------------------------------------------------------------------------------------------
+
+v5.4.0-beta11 (30th of October 2026)
+
+* Add "Move start/end X ms" shortcuts that push the neighbour line (no default key) - thx doom9 forum
+* Second subtitle: add font name picker
+* Second subtitle: auto-detect if the video offset applies - thx Jamestankw
+* Multiple replace: edit rules directly in the list (Enter/F2/double-click), more compact window
+* ASSA/SSA styles: preview fonts attached in [Fonts]
+* Use Silero VAD for CrispASR Granite by default (better accuracy)
+* Fix spell check undo of "Add to names list" - thx bptrsn
+* Fix arrow keys after type-ahead in Options > Word lists - thx FunkyKnilch
+* Fix uneven 500 ms / custom video steps on quick presses - thx vitonique
+* Fix read-only original moving in waveform/timeline while retiming translation - thx pdjdev
+* Fix "Save as" ignoring format picked via format picker (e.g. Sub Station Alpha/.ssa)
+* Update Japanese translation - thx hisui3393
+* Update German translation - thx FunkyKnilch
+* Update Italian translation - thx bovirus
+* Update Korean translation - thx 12si27
+* Update CrispASR to v0.8.48
+                                                
+-----------------------------------------------------------------------------------------------------
+
 v5.4.0-beta10 (29th of October 2026)
 
 * Add full support for YouTube timed text (.ytt/srv3): pens, positions, preview + styles window

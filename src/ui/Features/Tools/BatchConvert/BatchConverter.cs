@@ -1453,7 +1453,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         item.Subtitle = new Subtitle();
 
         var batchImages = new List<PaddleOcrBatchInput>(numberOfImages);
-        item.Status = "Preparing OCR...";
+        item.Status = Se.Language.Ocr.PreparingOcr;
         for (var i = 0; i < imageSubtitles.Count; i++)
         {
             batchImages.Add(new PaddleOcrBatchInput
@@ -1947,6 +1947,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 FramesPerSecond = profile.FramesPerSecond,
                 IsFullFrame = profile.IsFullFrame,
                 FullFrameBackgroundColor = profile.FullFrameBackgroundColor.FromHexToColor().ToSKColor(),
+                HdrWhiteNits = profile.IsHdrPalette ? profile.HdrWhiteNits : 0,
                 Mode3D = mode3D,
                 Depth3D = profile.Depth3D,
                 Plane3D = plane3D,
@@ -2336,6 +2337,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 FramesPerSecond = profile.FramesPerSecond,
                 IsFullFrame = profile.IsFullFrame,
                 FullFrameBackgroundColor = profile.FullFrameBackgroundColor.FromHexToColor().ToSKColor(),
+                HdrWhiteNits = profile.IsHdrPalette ? profile.HdrWhiteNits : 0,
                 // The text effect configured in the shared export-images dialog - without this
                 // a batch convert silently rendered classic text while the dialog's preview
                 // showed the effect.
@@ -2433,7 +2435,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             s = ChangeSpeed(s);
             s = BridgeGaps(s);
             s = ApplyMinGap(s);
-            s = FixCommonErrors(s);
+            s = await FixCommonErrorsAsync(s);
             s = MergeLinesWithSameText(s);
             s = MergeLinesWithSameTimeCodes(s, Language);
             s = ConvertColorsToDialog(s, Language);
@@ -3359,7 +3361,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         }
     }
 
-    private Subtitle FixCommonErrors(Subtitle subtitle)
+    private async Task<Subtitle> FixCommonErrorsAsync(Subtitle subtitle)
     {
         if (!_config.FixCommonErrors.IsActive || _config.FixCommonErrors.Profile == null)
         {
@@ -3370,7 +3372,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         if (!string.Equals(_namesListFolder, dictionaryFolder, StringComparison.Ordinal) ||
             !string.Equals(_namesListLanguage, Language, StringComparison.Ordinal))
         {
-            _namesList.Load(dictionaryFolder, Language);
+            await _namesList.LoadAsync(dictionaryFolder, Language);
             _namesListFolder = dictionaryFolder;
             _namesListLanguage = Language;
         }
@@ -3821,7 +3823,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         {
             // A row the engine never returned text for keeps its source text rather than
             // being blanked - an engine failure part way through must not empty the rest.
-            if (!string.IsNullOrEmpty(translatedSubtitle[i].TranslatedText))
+            if (!string.IsNullOrWhiteSpace(translatedSubtitle[i].TranslatedText))
             {
                 subtitle.Paragraphs[i].Text = translatedSubtitle[i].TranslatedText;
             }

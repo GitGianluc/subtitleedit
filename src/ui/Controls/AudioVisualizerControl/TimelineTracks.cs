@@ -117,6 +117,13 @@ public class TimelineTracks : Control, IDisposable
     /// <summary>Whether a row stands for a line of the original, which gives it a block in the original row.</summary>
     public Func<SubtitleLineViewModel, bool>? HasOriginalLine { get; set; }
 
+    /// <summary>
+    /// The read-only original's own time codes by line id, or null when the original is editable.
+    /// A read-only original never moves, but the rows' original time codes follow the translation
+    /// while it is retimed.
+    /// </summary>
+    public Func<IReadOnlyDictionary<Guid, (TimeSpan Start, TimeSpan End)>?>? GetReadOnlyOriginalTimeCodes { get; set; }
+
     /// <summary>Writes new time codes to the original line a row stands for.</summary>
     public Action<SubtitleLineViewModel, TimeSpan, TimeSpan>? SetOriginalTimeCodes { get; set; }
 
@@ -643,14 +650,17 @@ public class TimelineTracks : Control, IDisposable
             }
         }
 
-        foreach (var shotChange in source.ShotChanges)
+        // Sorted (see AudioVisualizer.ShotChanges), and this runs per frame.
+        var shotChanges = source.ShotChanges;
+        var firstShotChange = shotChanges.BinarySearch(startSeconds);
+        if (firstShotChange < 0)
         {
-            if (shotChange < startSeconds || shotChange > endSeconds)
-            {
-                continue;
-            }
+            firstShotChange = ~firstShotChange;
+        }
 
-            var x = Math.Round((shotChange - startSeconds) * pixelsPerSecond);
+        for (var i = firstShotChange; i < shotChanges.Count && shotChanges[i] <= endSeconds; i++)
+        {
+            var x = Math.Round((shotChanges[i] - startSeconds) * pixelsPerSecond);
             context.DrawLine(_shotChangePen, new Point(x, row.Y), new Point(x, row.Bottom));
         }
     }
@@ -692,17 +702,6 @@ public class TimelineTracks : Control, IDisposable
             }
         }
 
-        // The original row is drawn from all rows (display-only reference rows included), and
-        // the selection is not culled by the translation's times, which may be off screen.
-        _selectedIds.Clear();
-        if (selected != null)
-        {
-            foreach (var paragraph in selected)
-            {
-                _selectedIds.Add(paragraph.Id);
-            }
-        }
-
         foreach (var paragraph in _paragraphs)
         {
             var x1 = (paragraph.StartTime.TotalSeconds - startSeconds) * pixelsPerSecond;
@@ -720,6 +719,19 @@ public class TimelineTracks : Control, IDisposable
             return;
         }
 
+        // The original row is drawn from all rows (display-only reference rows included), and
+        // the selection is not culled by the translation's times, which may be off screen.
+        // Only built here: hashing a "select all" per frame is a waste without an original row.
+        _selectedIds.Clear();
+        if (selected != null)
+        {
+            foreach (var paragraph in selected)
+            {
+                _selectedIds.Add(paragraph.Id);
+            }
+        }
+
+        var readOnlyTimeCodes = GetReadOnlyOriginalTimeCodes?.Invoke();
         foreach (var row in rows)
         {
             if (!RowHasOriginalLine(row))
@@ -727,8 +739,13 @@ public class TimelineTracks : Control, IDisposable
                 continue;
             }
 
-            var x1 = (row.EffectiveOriginalStartTime.TotalSeconds - startSeconds) * pixelsPerSecond;
-            var x2 = (row.EffectiveOriginalEndTime.TotalSeconds - startSeconds) * pixelsPerSecond;
+            var (start, end) = readOnlyTimeCodes != null &&
+                               row.ReferenceParagraphId is { } id &&
+                               readOnlyTimeCodes.TryGetValue(id, out var timeCodes)
+                ? timeCodes
+                : (row.EffectiveOriginalStartTime, row.EffectiveOriginalEndTime);
+            var x1 = (start.TotalSeconds - startSeconds) * pixelsPerSecond;
+            var x2 = (end.TotalSeconds - startSeconds) * pixelsPerSecond;
             if (!(x2 < 0 || x1 > width))
             {
                 DrawBlock(context, row, GetTrackRect(originalTrack, width), x1, x2, _selectedIds.Contains(row.Id), true);

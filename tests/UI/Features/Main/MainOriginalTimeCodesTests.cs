@@ -160,6 +160,64 @@ public class MainOriginalTimeCodesTests
     }
 
     [AvaloniaFact]
+    public void ReadOnly_RetimingTheTranslation_LeavesTheOriginalsTimeCodesForDrawing()
+    {
+        using var _ = new SettingsScope("General.LockOriginalToTranslation");
+        Se.Settings.General.LockOriginalToTranslation = true;
+        var (window, vm) = CreateMainViewModel();
+        try
+        {
+            AddLine(vm, "Translated one", 0, 2000);
+            AddLine(vm, "Translated two", 4000, 6000);
+            var original = Original(("Original one", 100, 2100), ("Original two", 4000, 6000));
+            ImportOriginal(vm, original, isReadOnly: true);
+
+            vm.Subtitles[0].SetStartTimeKeepDuration(TimeSpan.FromMilliseconds(1000));
+            vm.Subtitles[1].SetStartTimeKeepDuration(TimeSpan.FromMilliseconds(5000));
+
+            var timeCodes = vm.GetReadOnlyOriginalTimeCodes();
+            Assert.NotNull(timeCodes);
+            Assert.Equal((TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(2100)), timeCodes[original.Paragraphs[0].Id!.Value]);
+            Assert.Equal((TimeSpan.FromMilliseconds(4000), TimeSpan.FromMilliseconds(6000)), timeCodes[original.Paragraphs[1].Id!.Value]);
+
+            vm.IsOriginalReadOnly = false;
+            Assert.Null(vm.GetReadOnlyOriginalTimeCodes());
+        }
+        finally
+        {
+            CloseWindow(window, vm);
+        }
+    }
+
+    [AvaloniaFact]
+    public void ReadOnlyOriginalTimeCodes_FollowNewOriginalAndNewLinesAtOnce()
+    {
+        var (window, vm) = CreateMainViewModel();
+        try
+        {
+            AddLine(vm, "Translated one", 0, 2000);
+            var first = Original(("Original one", 100, 2100));
+            ImportOriginal(vm, first, isReadOnly: true);
+            Assert.Single(vm.GetReadOnlyOriginalTimeCodes()!);
+
+            first.Paragraphs.Add(new Paragraph("Original two", 4000, 6000));
+            var timeCodes = vm.GetReadOnlyOriginalTimeCodes()!;
+            Assert.Equal(2, timeCodes.Count);
+            Assert.True(timeCodes.ContainsKey(first.Paragraphs[1].Id!.Value));
+
+            var second = Original(("Other one", 500, 900));
+            ImportOriginal(vm, second, isReadOnly: true);
+            timeCodes = vm.GetReadOnlyOriginalTimeCodes()!;
+            Assert.Single(timeCodes);
+            Assert.Equal((TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(900)), timeCodes[second.Paragraphs[0].Id!.Value]);
+        }
+        finally
+        {
+            CloseWindow(window, vm);
+        }
+    }
+
+    [AvaloniaFact]
     public void Toggle_FlipsTheLock()
     {
         using var _ = new SettingsScope("General.LockOriginalToTranslation");
