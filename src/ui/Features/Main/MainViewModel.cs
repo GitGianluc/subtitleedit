@@ -397,6 +397,13 @@ public partial class MainViewModel :
     /// Each has its own grid column; this gates the shared "Show style column" menu item.
     /// </summary>
     [ObservableProperty] private bool _hasFormatStyle;
+
+    /// <summary>
+    /// True when the current format keeps an actor (ASSA/SSA, WebVTT voice, dialogue-list CSV/Excel
+    /// and transcript formats). Gates the Actor/Voice column and its menu item, so the column
+    /// is not left showing for e.g. SubRip, where actors are lost on save (#16596).
+    /// </summary>
+    [ObservableProperty] private bool _hasFormatActor;
     [ObservableProperty] private bool _isFormatWebVtt;
 
     /// <summary>
@@ -1274,6 +1281,38 @@ public partial class MainViewModel :
         };
 
         StartCheckForUpdates();
+    }
+
+    private static bool _fontFacesPreloadStarted;
+
+    /// <summary>
+    /// Reads every installed font's face name once, in the background, so the first Settings,
+    /// Burn-in, ASSA styles, ... window does not stall while it scans the fonts (the list is
+    /// cached for the rest of the session).
+    /// </summary>
+    private static void PreloadFontFaces()
+    {
+        // Only in the real desktop app - headless unit tests also load this view model.
+        if (_fontFacesPreloadStarted || Application.Current?.ApplicationLifetime is not ClassicDesktopStyleApplicationLifetime)
+        {
+            return;
+        }
+
+        _fontFacesPreloadStarted = true;
+        _ = Task.Run(async () =>
+        {
+            // Let the main window and a start-up file come up first.
+            await Task.Delay(TimeSpan.FromSeconds(3));
+
+            try
+            {
+                FontHelper.GetLibAssaFonts();
+            }
+            catch (Exception ex)
+            {
+                Se.LogError(ex, "Preloading font faces failed");
+            }
+        });
     }
 
     private void StartCheckForUpdates()
@@ -9373,6 +9412,25 @@ public partial class MainViewModel :
         if (result.OkPressed)
         {
             EndToolApply(toolApply, () => ApplyFixedSubtitle(result.FixedSubtitle, idx));
+            SwitchToAssaIfActorsWouldBeLost();
+        }
+    }
+
+    /// <summary>
+    /// Convert actors can fill in actors on e.g. SubRip, which drops them on save and hides the
+    /// Actor column (#16596): switch to ASSA, as auto-cast does, so the result shows and is kept.
+    /// </summary>
+    private void SwitchToAssaIfActorsWouldBeLost()
+    {
+        if (HasFormatActor || !Subtitles.Any(p => !string.IsNullOrWhiteSpace(p.Actor)))
+        {
+            return;
+        }
+
+        var assaFormat = SubtitleFormats.FirstOrDefault(f => f is AdvancedSubStationAlpha);
+        if (assaFormat != null)
+        {
+            SelectedSubtitleFormat = assaFormat;
         }
     }
 
@@ -9416,6 +9474,7 @@ public partial class MainViewModel :
         if (result.OkPressed)
         {
             EndToolApply(toolApply, () => ApplyDialogRows(SpliceSelectedLinesResult(Subtitles, ordered, result.FixedSubtitle), before));
+            SwitchToAssaIfActorsWouldBeLost();
         }
 
         _shortcutManager.ClearKeys();
@@ -23382,6 +23441,7 @@ public partial class MainViewModel :
             return;
         }
 
+        PauseBeforeFrameStep();
         if (Se.Settings.General.CurrentFrameRate >= 10)
         {
             var frameInMs = (int)Math.Round(1000.0 / Se.Settings.General.CurrentFrameRate, MidpointRounding.AwayFromZero);
@@ -23408,6 +23468,7 @@ public partial class MainViewModel :
             return;
         }
 
+        PauseBeforeFrameStep();
         if (Se.Settings.General.CurrentFrameRate >= 10)
         {
             var frameInMs = (int)Math.Round(1000.0 / Se.Settings.General.CurrentFrameRate, MidpointRounding.AwayFromZero);
@@ -23554,6 +23615,20 @@ public partial class MainViewModel :
     /// constant frame rate video the two agree, and where they do not, the grid is the one that
     /// skips or repeats pictures.
     /// </summary>
+    /// <summary>
+    /// One frame back/forward stops playback, as in SE 4 (#16134). mpv's native frame-step and
+    /// the ffmpeg player's step pause by themselves; the seek-based steps (snap to frames, other
+    /// players) would otherwise leave the video playing on.
+    /// </summary>
+    private void PauseBeforeFrameStep()
+    {
+        var vp = GetVideoPlayerControl();
+        if (vp != null && vp.VideoPlayer.IsPlaying)
+        {
+            PauseVideoAndFreezePlayhead(vp);
+        }
+    }
+
     private bool TryStepFfmpegFrame(bool forward)
     {
         if (GetVideoPlayerControl()?.VideoPlayer is not FfmpegPlayer ffmpeg || string.IsNullOrEmpty(_videoFileName))
@@ -23605,6 +23680,7 @@ public partial class MainViewModel :
             return false;
         }
 
+        PauseBeforeFrameStep();
         var frameDur = 1.0 / fps;
         var currentFrame = vp.Position / frameDur;
         var targetFrame = forward
@@ -30235,6 +30311,7 @@ public partial class MainViewModel :
     internal void OnLoaded()
     {
         StartBackgroundWork();
+        PreloadFontFaces();
 
         if (OperatingSystem.IsMacOS())
         {
@@ -38064,6 +38141,7 @@ public partial class MainViewModel :
         UpdateTemporaryFrameMode();
 
         HasFormatStyle = IsFormatAssaOrSsa || IsFormatWebVtt || IsFormatYtt;
+        HasFormatActor = FormatHasActor(SelectedSubtitleFormat);
         ShowActorColumnMenuHeader = IsFormatWebVtt
             ? Se.Language.File.WebVtt.ShowVoiceColumn
             : Se.Language.General.ShowActorColumn;
@@ -38201,6 +38279,15 @@ public partial class MainViewModel :
         {
             SelectAndScrollToRow(idx);
         }
+    }
+
+    /// <summary>The formats that read or write <see cref="Paragraph.Actor"/> (WebVTT as the cue voice).</summary>
+    internal static bool FormatHasActor(SubtitleFormat? format)
+    {
+        return format is AdvancedSubStationAlpha or SubStationAlpha or WebVTT or WebVTTFileWithLineNumber
+            or CsvDaVinci or CsvExcel or CsvNuendo or MsOfficeWorkbook or FinalDraftTemplate2
+            or NVivoTranscript or OtterAi or PodcastIndexer or VocapiaSplit or JsonTypeOnlyLoad6
+            or UnknownSubtitle60 or UnknownSubtitle88 or UnknownSubtitle89;
     }
 
     internal void AutoSelectOnPlayCheckedChanged()
