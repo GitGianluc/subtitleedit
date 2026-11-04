@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.4.0-rc2",
+  "version": "v5.4.0-rc3",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -5227,7 +5227,7 @@
     "title": "Elenca errori",
     "summaryX": "{0} errore/i in {1} di {2} riga/e",
     "noErrors": "Nessun errore rilevato.",
-    "summaryFilesX": "{0} errore/i in {1} riga/e in {2} file/i",
+    "summaryFilesX": "{0} errore/i in {1} riga/e in {2} file",
     "all": "Tutto",
     "tooManyLines": "Troppe righe",
     "charactersPerSecond": "Velocità di lettura",
