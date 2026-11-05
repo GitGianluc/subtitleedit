@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.4.0-rc3",
+  "version": "v5.4.0-rc4",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -1523,6 +1523,8 @@
       "halfTopBottom": "Sopra/Sotto (metà risoluzione)",
       "depth3D": "Profondità",
       "depth3DHint": "Livello di rilievo del sottotitolo rispetto allo schermo. Valori positivi lo portano in avanti, valori negativi lo spingono sullo sfondo",
+      "useAssaStyles": "Usa gli stili ASSA",
+      "useAssaStylesHint": "Disegna ogni riga con il proprio stile ASSA (carattere, colori, bordo, sfondo, allineamento e margini) invece delle impostazioni sottostanti",
       "plane3D": "3D-Plane",
       "plane3DHint": "Applica a ciascun sottotitolo la profondità memorizzata nel Blu-ray 3D tramite un file 3D-Plane (.ofs) creato con BD3D2MK3D o OFSExtractor. La profondità predefinita viene usata nei punti in cui il file 3D-Plane è privo di dati.",
       "openPlane3DTitle": "Apri file 3D-Plane",
@@ -2770,7 +2772,7 @@
       "detectSpeakersNeedsNewerCrispAsr": "“Rileva parlanti” richiede Crisp ASR v{0} o successiva, ma è installata la v{1}.\n\nAggiorna Crisp ASR (pulsante a forma di ingranaggio accanto al motore) oppure disattiva “Rileva parlanti”.",
       "xNeedsNewerCrispAsr": "{0} richiede Crisp ASR v{1} o successiva, ma è installata la v{2}.\n\nScaricare e installare l’aggiornamento ora?",
       "vad": "Rilevamento dell’attività vocale (VAD)",
-      "vadHint": "Rilevamento dell’attività vocale (VAD): viene trascritto solo il parlato, interrompendo il flusso in corrispondenza delle pause di chi parla.\nAuto: Silero e solo per i motori che lo richiedono (Cohere, Mega, Index-Echo).\nSilero, FireRedVAD, Whisper-VAD, WebRTC: sempre attivi, per ogni motore Crisp ASR. FireRedVAD è il più preciso; Whisper-VAD individua i segmenti più ridotti e più puliti, ma è il più lento.\nIndex-Echo utilizza sempre Silero. I parametri --vad, --vad-model o --chunk-seconds nelle impostazioni avanzate hanno la precedenza.",
+      "vadHint": "Rilevamento dell’attività vocale (VAD): viene trascritto solo il parlato, interrompendo il flusso in corrispondenza delle pause di chi parla.\nAuto: Silero e solo per i motori che lo richiedono (Cohere, Mega, Index-Echo, Granite).\nSilero, FireRedVAD, Whisper-VAD, WebRTC: sempre attivi, per ogni motore Crisp ASR. FireRedVAD è il più preciso; Whisper-VAD individua i segmenti più ridotti e più puliti, ma è il più lento.\nIndex-Echo utilizza sempre Silero. I parametri --vad, --vad-model o --chunk-seconds nelle impostazioni avanzate hanno la precedenza.",
       "inputLanguage": "Lingua di ingresso",
       "advancedWhisperSettings": "Parametri avanzati di conversione da voce a testo",
       "downloadingSpeechToTextEngine": "Scaricamento del motore di conversione da voce a testo in corso",
