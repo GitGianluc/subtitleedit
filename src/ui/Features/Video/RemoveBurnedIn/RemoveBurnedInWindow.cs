@@ -7,9 +7,12 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Nikse.SubtitleEdit.Controls;
 using Nikse.SubtitleEdit.Controls.AudioVisualizerControl;
+using Nikse.SubtitleEdit.Features.Video.VideoOcr;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Nikse.SubtitleEdit.Features.Video.RemoveBurnedIn;
 
@@ -82,7 +85,7 @@ public class RemoveBurnedInWindow : Window
 
         var l = Se.Language.Video.RemoveBurnedIn;
         var buttonStart = EditorChrome.MakeActionButton(IconNames.PlayCircle, l.Start, vm.StartCommand)
-            .WithBindEnabled(nameof(vm.IsRunning), InverseBooleanConverter.Instance).AsPrimary();
+            .WithBindEnabled(nameof(vm.CanStart)).AsPrimary();
         var buttonClose = UiUtil.MakeButtonCancel(vm.CancelCommand);
         var buttonPanel = EditorChrome.MakeButtonBar(MakeDonePanel(vm), buttonClose, buttonStart);
 
@@ -143,11 +146,28 @@ public class RemoveBurnedInWindow : Window
             },
         };
 
+        // The selected rectangle line's box, drawn and edited in video pixels over the frame.
+        var rectangleSelector = new CropAreaSelector
+        {
+            DimOutside = false,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            [!Visual.IsVisibleProperty] = new Binding(nameof(vm.IsRectangleSelected)),
+        };
+        rectangleSelector.Bind(CropAreaSelector.VideoWidthProperty, new Binding(nameof(vm.VideoWidth)));
+        rectangleSelector.Bind(CropAreaSelector.VideoHeightProperty, new Binding(nameof(vm.VideoHeight)));
+        rectangleSelector.Bind(CropAreaSelector.SelectionXProperty, new Binding(nameof(vm.SelectedRectX)) { Mode = BindingMode.TwoWay });
+        rectangleSelector.Bind(CropAreaSelector.SelectionYProperty, new Binding(nameof(vm.SelectedRectY)) { Mode = BindingMode.TwoWay });
+        rectangleSelector.Bind(CropAreaSelector.SelectionWidthProperty, new Binding(nameof(vm.SelectedRectWidth)) { Mode = BindingMode.TwoWay });
+        rectangleSelector.Bind(CropAreaSelector.SelectionHeightProperty, new Binding(nameof(vm.SelectedRectHeight)) { Mode = BindingMode.TwoWay });
+        AutomationProperties.SetName(rectangleSelector, l.RectangleHint);
+        SetHint(rectangleSelector, l.RectangleHint);
+
         var frame = new Panel
         {
             Background = Brushes.Black,
             ClipToBounds = true,
-            Children = { image, busy, status },
+            Children = { image, rectangleSelector, busy, status },
         };
 
         var navigation = new StackPanel
@@ -165,7 +185,7 @@ public class RemoveBurnedInWindow : Window
                     MinWidth = 110,
                     TextAlignment = TextAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center,
-                    FontFamily = new FontFamily("Menlo, Consolas, monospace"),
+                    FontFamily = new FontFamily("Cascadia Mono,Consolas,Menlo,Monaco,monospace"),
                     [!TextBlock.TextProperty] = new Binding(nameof(vm.PositionText)),
                 },
                 EditorChrome.CreateToolButton(IconNames.ChevronRight, l.NextFrame, vm.NextFrameCommand, 30, "→"),
@@ -179,7 +199,7 @@ public class RemoveBurnedInWindow : Window
         content.Children.Add(EditorChrome.MakeVideoFrame(frame));
 
         var resultToggle = EditorChrome.MakeSwitchRow(nameof(vm.ShowResult), l.ShowResult);
-        ToolTip.SetTip(resultToggle, l.ShowResultHint);
+        SetHint(resultToggle, l.ShowResultHint);
         return EditorChrome.MakeDockedFillSection(l.Preview, content, resultToggle, first: true);
     }
 
@@ -193,6 +213,10 @@ public class RemoveBurnedInWindow : Window
         {
             Width = double.NaN,
             IsReadOnly = false,
+
+            // OCR lines often touch (no gap): with the default 0.1 s minimum gap such a line could
+            // not be moved or resized against its neighbour. Overlap stays blocked.
+            MinGapSeconds = 0,
             DrawGridLines = Se.Settings.Waveform.DrawGridLines,
             WaveformColor = colors.Waveform,
             WaveformSelectedColor = colors.Selected,
@@ -201,6 +225,9 @@ public class RemoveBurnedInWindow : Window
         av.OnVideoPositionChanged += vm.AudioVisualizerPositionChanged;
         av.OnPrimarySingleClicked += vm.AudioVisualizerParagraphClicked;
         av.OnDragEnded += vm.AudioVisualizerDragEnded;
+        av.OnSelectRequested += vm.AudioVisualizerSelectRequested;
+        av.OnNewSelectionInsert += vm.AudioVisualizerNewSelectionInsert;
+        av.FlyoutMenuOpening += vm.AudioVisualizerFlyoutMenuOpening;
         AutomationProperties.SetName(av, Se.Language.General.Waveform);
         vm.AudioVisualizer = av;
 
@@ -230,7 +257,7 @@ public class RemoveBurnedInWindow : Window
     {
         var l = Se.Language.Video.RemoveBurnedIn;
         var timeConverter = new TimeSpanToDisplayFullConverter();
-        var table = TableViewExtras.MakeTableView(multiSelect: false);
+        var table = TableViewExtras.MakeTableView(multiSelect: true);
         table.DataContext = vm;
         table.Bind(TableView.ItemsSourceProperty, new Binding(nameof(vm.Lines)) { Source = vm });
         table.Bind(TableView.SelectedItemProperty, new Binding(nameof(vm.SelectedLine)) { Source = vm, Mode = BindingMode.TwoWay });
@@ -268,7 +295,49 @@ public class RemoveBurnedInWindow : Window
             Width = new GridLength(1, GridUnitType.Star),
         });
 
-        return EditorChrome.MakeDockedFillSection(l.Lines, EditorChrome.MakeListFrame(table), EditorChrome.MakeBoundHint(nameof(vm.LinesSummary)), first: true);
+        var insert = EditorChrome.MakeTextToolButton(IconNames.Plus, l.InsertRectangle, vm.InsertRectangleCommand)
+            .WithBindEnabled(nameof(vm.IsRunning), InverseBooleanConverter.Instance);
+        SetHint(insert, l.InsertRectangleHint);
+        var delete = EditorChrome.CreateToolButton(IconNames.Trash, Se.Language.General.Delete, vm.DeleteLineCommand, 30, "Delete")
+            .WithBindEnabled(nameof(vm.CanDeleteLine));
+
+        // Right-click menu and Delete key: delete the selected lines, or insert a rectangle.
+        List<RemoveBurnedInLineItem> SelectedItems() => table.SelectedItems?.OfType<RemoveBurnedInLineItem>().ToList() ?? new();
+        var flyout = new MenuFlyout();
+        var menuInsert = new MenuItem { Header = l.InsertRectangle, InputGesture = new KeyGesture(Key.Insert) };
+        menuInsert.Click += (_, _) => vm.InsertRectangleCommand.Execute(null);
+        var menuDelete = new MenuItem { Header = Se.Language.General.Delete, InputGesture = new KeyGesture(Key.Delete) };
+        menuDelete.Click += (_, _) => vm.DeleteLines(SelectedItems());
+        flyout.Items.Add(menuInsert);
+        flyout.Items.Add(menuDelete);
+        flyout.Opening += (_, _) =>
+        {
+            menuInsert.IsEnabled = !vm.IsRunning;
+            menuDelete.IsEnabled = !vm.IsRunning && SelectedItems().Count > 0;
+        };
+        table.ContextFlyout = flyout;
+        UiUtil.AttachMacContextFlyoutHandler(table);
+        table.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None && e.Source is not TextBox)
+            {
+                vm.DeleteLines(SelectedItems());
+                e.Handled = true;
+            }
+        };
+        var toolbar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Margin = new Thickness(0, 6, 0, 0),
+            Children = { insert, delete },
+        };
+
+        var content = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(toolbar, Dock.Bottom);
+        content.Children.Add(toolbar);
+        content.Children.Add(EditorChrome.MakeListFrame(table));
+        return EditorChrome.MakeDockedFillSection(l.Lines, content, EditorChrome.MakeBoundHint(nameof(vm.LinesSummary)), first: true);
     }
 
     // ── settings ─────────────────────────────────────────────────────
@@ -284,24 +353,24 @@ public class RemoveBurnedInWindow : Window
             [!ComboBox.SelectedIndexProperty] = new Binding(nameof(vm.MethodIndex)) { Mode = BindingMode.TwoWay },
         };
         AutomationProperties.SetName(methodCombo, l.Method);
-        ToolTip.SetTip(methodCombo, l.MethodHint);
+        SetHint(methodCombo, l.MethodHint);
 
         var brightness = EditorChrome.MakeField(nameof(vm.BrightnessMinimum), 1, 255, 90);
-        ToolTip.SetTip(brightness, Se.Language.Video.VideoOcr.TextBrightnessMinimumHint);
+        SetHint(brightness, Se.Language.Video.VideoOcr.TextBrightnessMinimumHint);
         var grow = EditorChrome.MakeField(nameof(vm.Grow), 0, 40, 90);
-        ToolTip.SetTip(grow, l.GrowMaskHint);
+        SetHint(grow, l.GrowMaskHint);
         var extraWidth = EditorChrome.MakeField(nameof(vm.ExtraWidth), 0, 100, 90);
-        ToolTip.SetTip(extraWidth, l.ExtraWidthHint);
+        SetHint(extraWidth, l.ExtraWidthHint);
         var outline = EditorChrome.MakeSwitchRow(nameof(vm.RequireOutline), l.RequireOutline);
-        ToolTip.SetTip(outline, l.RequireOutlineHint);
+        SetHint(outline, l.RequireOutlineHint);
         var temporal = EditorChrome.MakeSwitchRow(nameof(vm.Temporal), l.TemporalConsistency);
-        ToolTip.SetTip(temporal, l.TemporalConsistencyHint);
+        SetHint(temporal, l.TemporalConsistencyHint);
 
         // Temporal consistency only applies to inpainting.
         temporal.Bind(Visual.IsVisibleProperty, new Binding(nameof(vm.IsInpaint)));
 
         var blurStrength = EditorChrome.MakeField(nameof(vm.BlurStrength), 1, 100, 90);
-        ToolTip.SetTip(blurStrength, l.BlurStrengthHint);
+        SetHint(blurStrength, l.BlurStrengthHint);
         var blurRow = EditorChrome.MakeLabeledRow(l.BlurStrength, blurStrength, LabelWidth);
         blurRow.Bind(Visual.IsVisibleProperty, new Binding(nameof(vm.IsBlur)));
 
@@ -322,7 +391,7 @@ public class RemoveBurnedInWindow : Window
         outputPanel.Children.Add(browse);
         outputPanel.Children.Add(outputBox);
         var crf = EditorChrome.MakeField(nameof(vm.Crf), 0, 51, 90);
-        ToolTip.SetTip(crf, l.QualityHint);
+        SetHint(crf, l.QualityHint);
         var outputRows = new StackPanel { Spacing = 8 };
         outputRows.Children.Add(EditorChrome.MakeLabeledRow(l.OutputFile, outputPanel, LabelWidth));
         outputRows.Children.Add(EditorChrome.MakeLabeledRow(l.Quality, crf, LabelWidth));
@@ -354,7 +423,7 @@ public class RemoveBurnedInWindow : Window
         {
             Value = IconNames.CheckCircle,
             FontSize = 18,
-            Foreground = new SolidColorBrush(Color.FromRgb(80, 190, 110)),
+            Foreground = EditorChrome.SuccessTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
         var text = new TextBlock
@@ -365,7 +434,7 @@ public class RemoveBurnedInWindow : Window
             [!TextBlock.TextProperty] = new Binding(nameof(vm.DoneText)),
         };
         var open = EditorChrome.MakeActionButton(IconNames.MovieOpenOutline, l.OpenVideo, vm.OpenVideoCommand);
-        var folder = EditorChrome.MakeActionButton(IconNames.FolderOpen, l.ShowInFolder, vm.ShowInFolderCommand);
+        var folder = EditorChrome.MakeActionButton(IconNames.FolderOpen, Se.Language.General.OpenContainingFolder, vm.ShowInFolderCommand);
         return new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -375,9 +444,26 @@ public class RemoveBurnedInWindow : Window
         };
     }
 
+    /// <summary>Tooltips follow the "Show button hints" setting.</summary>
+    private static void SetHint(Control control, string hint)
+    {
+        if (Se.Settings.Appearance.ShowHints)
+        {
+            ToolTip.SetTip(control, hint);
+        }
+    }
+
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         base.OnClosing(e);
+        if (_vm.IsRunning && !_vm.CloseConfirmed)
+        {
+            // Same question as Escape/Cancel before stopping a run.
+            e.Cancel = true;
+            _ = _vm.ConfirmCloseWhileRunning();
+            return;
+        }
+
         _vm.OnClosing();
     }
 

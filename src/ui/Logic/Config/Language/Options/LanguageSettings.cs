@@ -93,6 +93,7 @@ public class LanguageSettings
     public string AutoBreakPreferBottomHeavy { get; set; }
     public string AutoBreakPreferBottomPercent { get; set; }
     public string UseDoNotBreakAfterList { get; set; }
+    public string DoNotBreakAfterListRegionHint { get; set; }
     public string NewEmptyDefaultMs { get; set; }
     public string TimeCodeUpDownStepMs { get; set; }
     public string MoveSelectedLinesStepMs { get; set; }
@@ -212,6 +213,7 @@ public class LanguageSettings
     public string ShowSecondarySubtitleDialog { get; set; }
     public string RememberSecondarySubtitleFile { get; set; }
     public string AutoOpenVideoFile { get; set; }
+    public string AutoDetectSmpteTiming { get; set; }
     public string DownloadMpv { get; set; }
     public string DownloadVlc { get; set; }
     public string AllowSingleLetterShortcutsInTextbox { get; set; }
@@ -486,6 +488,7 @@ public class LanguageSettings
         AutoBreakPreferBottomHeavy = "Auto-break prefer bottom heavy";
         AutoBreakPreferBottomPercent = "Auto-break bottom heavy percentage";
         UseDoNotBreakAfterList = "Use do-not-break-after list";
+        DoNotBreakAfterListRegionHint = "Each list is used for all regions of its language, for example the Portuguese list for both Portugal (pt-PT) and Brazil (pt-BR).";
         NewEmptyDefaultMs = "Default new subtitle duration (ms)";
         TimeCodeUpDownStepMs = "Time up/down increment (ms)";
         MoveSelectedLinesStepMs = "Move selected lines shortcut step (ms)";
@@ -598,6 +601,7 @@ public class LanguageSettings
         ShowSecondarySubtitleDialog = "Show style dialog when opening a second subtitle file";
         RememberSecondarySubtitleFile = "Remember second subtitle file";
         AutoOpenVideoFile = "Auto-open video file when opening subtitle";
+        AutoDetectSmpteTiming = "Auto-enable SMPTE timing for Timed Text files with non-drop SMPTE time codes";
         DownloadMpv = "Download mpv";
         DownloadVlc = "Download VLC";
         AllowSingleLetterShortcutsInTextbox = "Allow single-letter shortcuts in text box";

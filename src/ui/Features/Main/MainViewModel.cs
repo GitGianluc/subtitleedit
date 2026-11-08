@@ -945,6 +945,11 @@ public partial class MainViewModel :
     public MenuItem MenuItemExtendToLineAfter { get; internal set; }
     public MenuItem MenuItemMerge { get; internal set; }
     public MenuItem MenuItemAudioVisualizerInsertNewSelection { get; set; }
+    public MenuItem MenuItemAudioVisualizerGenerateWaveform { get; set; }
+    public Separator MenuItemAudioVisualizerGenerateWaveformSeparator { get; set; }
+    public MenuItem MenuItemAudioVisualizerGuessTimeCodes { get; set; }
+    public MenuItem MenuItemAudioVisualizerSeekSilence { get; set; }
+    public MenuItem MenuItemAudioVisualizerShowSpeechOnly { get; set; }
     public MenuItem MenuItemAudioVisualizerPasteNewSelection { get; set; }
     public MenuItem MenuIteminsertSubtitleFileAtPositionMenuItem { get; set; }
     public MenuItem MenuItemAudioVisualizerDelete { get; set; }
@@ -1078,6 +1083,11 @@ public partial class MainViewModel :
         MenuItemExtendToLineAfter = new MenuItem();
         MenuItemMerge = new MenuItem();
         MenuItemAudioVisualizerInsertNewSelection = new MenuItem();
+        MenuItemAudioVisualizerGenerateWaveform = new MenuItem();
+        MenuItemAudioVisualizerGenerateWaveformSeparator = new Separator();
+        MenuItemAudioVisualizerGuessTimeCodes = new MenuItem();
+        MenuItemAudioVisualizerSeekSilence = new MenuItem();
+        MenuItemAudioVisualizerShowSpeechOnly = new MenuItem();
         MenuItemAudioVisualizerPasteNewSelection = new MenuItem();
         MenuIteminsertSubtitleFileAtPositionMenuItem = new MenuItem();
         MenuItemAudioVisualizerDelete = new MenuItem();
@@ -1567,6 +1577,32 @@ public partial class MainViewModel :
                 AutoFitColumns();
             });
         }
+    }
+
+    /// <summary>
+    /// Switches layout 14's track rows above the waveform on or off for the other layouts
+    /// (#16354) and rebuilds the layout to show it. Posted, as the menu item that calls this
+    /// lives in the waveform the rebuild replaces.
+    /// </summary>
+    [RelayCommand]
+    internal void ToggleWaveformTimelineTracks()
+    {
+        _shortcutManager.ClearKeys();
+        Se.Settings.Waveform.ShowTimelineTracks = !Se.Settings.Waveform.ShowTimelineTracks;
+        if (Se.Settings.General.LayoutNumber == 14)
+        {
+            return; // the editor-style layout always has them
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (AreVideoControlsUndocked)
+            {
+                VideoRedockControls();
+            }
+
+            SetLayout(Se.Settings.General.LayoutNumber);
+        });
     }
 
     private void SetLayout(int layoutNumber)
@@ -4869,12 +4905,15 @@ public partial class MainViewModel :
     {
         if (recentFile.VideoIsSmpte)
         {
-            IsSmpteTimingEnabled = false;
-            ToggleSmpteTiming();
+            if (!IsSmpteTimingEnabled)
+            {
+                ToggleSmpteTiming();
+            }
         }
-        else
+        else if (IsSmpteTimingEnabled && !IsSmpteTimingAutoDetected())
         {
-            IsSmpteTimingEnabled = false;
+            // Through the toggle, not just the flag, so the waveform leaves drop-frame time too.
+            ToggleSmpteTiming();
         }
 
         Se.Settings.General.CurrentVideoOffsetInMs = recentFile.VideoOffsetInMs;
@@ -6729,13 +6768,14 @@ public partial class MainViewModel :
     private async Task ShowWaveformSeekSilence()
     {
         var vp = GetVideoPlayerControl();
-        if (Window == null || AudioVisualizer?.WavePeaks == null || vp == null)
+        var audioPeaks = AudioPeaks;
+        if (Window == null || audioPeaks == null || vp == null)
         {
             return;
         }
 
         var result =
-            await ShowDialogAsync<WaveformSeekSilenceWindow, WaveformSeekSilenceViewModel>(vm => { vm.Initialize(AudioVisualizer.WavePeaks); });
+            await ShowDialogAsync<WaveformSeekSilenceWindow, WaveformSeekSilenceViewModel>(vm => { vm.Initialize(audioPeaks); });
 
         if (!result.OkPressed || !result.SilenceMaxVolume.HasValue || !result.SilenceMinDuration.HasValue)
         {
@@ -6762,7 +6802,7 @@ public partial class MainViewModel :
     private void SeekSilenceBack()
     {
         var vp = GetVideoPlayerControl();
-        if (AudioVisualizer?.WavePeaks == null || vp == null)
+        if (AudioPeaks == null || vp == null)
         {
             return;
         }
@@ -6779,7 +6819,7 @@ public partial class MainViewModel :
     private void SeekSilenceForward()
     {
         var vp = GetVideoPlayerControl();
-        if (AudioVisualizer?.WavePeaks == null || vp == null)
+        if (AudioPeaks == null || vp == null)
         {
             return;
         }
@@ -6848,7 +6888,7 @@ public partial class MainViewModel :
             return Se.Language.Main.Waveform.GuessStartTimeCodesLocked;
         }
 
-        if (AudioVisualizer?.WavePeaks == null)
+        if (AudioPeaks == null)
         {
             return Se.Language.Main.Waveform.GuessStartNoWaveform;
         }
@@ -7027,7 +7067,7 @@ public partial class MainViewModel :
             return Se.Language.Main.Waveform.GuessEndTimeCodesLocked;
         }
 
-        if (AudioVisualizer?.WavePeaks == null)
+        if (AudioPeaks == null)
         {
             return Se.Language.Main.Waveform.GuessEndNoWaveform;
         }
@@ -7239,8 +7279,8 @@ public partial class MainViewModel :
 
             var arguments = FfmpegGenerator.ExtractAudioClipFromVideoParameters(
                 _videoFileName,
-                line.StartTime.TotalSeconds,
-                line.Duration.TotalSeconds,
+                ToVideoSeconds(line.StartTime.TotalSeconds),
+                ToVideoSeconds(line.Duration.TotalSeconds),
                 false,
                 outputFileName,
                 _audioTrack?.FfIndex ?? -1,
@@ -7379,8 +7419,8 @@ public partial class MainViewModel :
             // cloning engine resamples it to whatever its backend wants on import.
             var arguments = FfmpegGenerator.ExtractAudioClipFromVideoParameters(
                 _videoFileName,
-                line.StartTime.TotalSeconds,
-                line.Duration.TotalSeconds,
+                ToVideoSeconds(line.StartTime.TotalSeconds),
+                ToVideoSeconds(line.Duration.TotalSeconds),
                 false,
                 clipFileName,
                 _audioTrack?.FfIndex ?? -1,
@@ -7564,7 +7604,7 @@ public partial class MainViewModel :
     private async Task ShowWaveformGuessTimeCodes()
     {
         var vp = GetVideoPlayerControl();
-        if (Window == null || AudioVisualizer?.WavePeaks == null || vp == null)
+        if (Window == null || AudioPeaks == null || vp == null)
         {
             return;
         }
@@ -8365,7 +8405,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<CutVideoWindow, CutVideoViewModel>(vm =>
         {
-            vm.Initialize(_videoFileName, AudioVisualizer?.WavePeaks, GetUpdateSubtitle(), SelectedSubtitleFormat, this);
+            vm.Initialize(_videoFileName, AudioPeaks, GetUpdateSubtitle(), SelectedSubtitleFormat, this);
         });
 
         if (!result.OkPressed)
@@ -8401,7 +8441,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<CutVideoWindow, CutVideoViewModel>(vm =>
         {
-            vm.Initialize(_videoFileName, AudioVisualizer?.WavePeaks, GetUpdateSubtitle(), SelectedSubtitleFormat, this, selectedItems);
+            vm.Initialize(_videoFileName, AudioPeaks, GetUpdateSubtitle(), SelectedSubtitleFormat, this, selectedItems);
         });
 
         if (!result.OkPressed)
@@ -8456,7 +8496,7 @@ public partial class MainViewModel :
         var toolApply = BeginToolApply(Se.Language.Video.SyncToAudioTitle);
         var result = await ShowDialogAsync<SyncToAudioWindow, SyncToAudioViewModel>(vm =>
         {
-            vm.Initialize(Subtitles, AudioVisualizer?.WavePeaks, (double)(_mediaInfo?.FramesRate ?? 0), _subtitleFileName ?? _videoFileName);
+            vm.Initialize(Subtitles, AudioPeaks, (double)(_mediaInfo?.FramesRate ?? 0), _subtitleFileName ?? _videoFileName);
         });
 
         if (result.OkPressed && result.Result != null)
@@ -11292,6 +11332,15 @@ public partial class MainViewModel :
         _audioTrackLangauge = language;
     }
 
+    /// <summary>
+    /// A row time (or duration) on the video file's clock, for ffmpeg: with SMPTE timing the rows
+    /// run on the time code clock, where t is t * 1.001 in the video.
+    /// </summary>
+    private double ToVideoSeconds(double rowSeconds)
+    {
+        return IsSmpteTimingEnabled ? rowSeconds * SmptePreviewStretch.Factor : rowSeconds;
+    }
+
     private async Task<bool> SpeechToTextSelectedLines(bool promptEngineAndLanguage, string? language)
     {
         var selectedItems = SubtitleGridSelectedItems.Cast<SubtitleLineViewModel>().ToList();
@@ -11306,7 +11355,7 @@ public partial class MainViewModel :
             return false;
         }
 
-        var resultGetAudioClips = await ShowDialogAsync<GetAudioClipsWindow, GetAudioClipsViewModel>(vm => { vm.Initialize(_videoFileName ?? string.Empty, selectedItems, _audioTrack?.FfIndex ?? -1); });
+        var resultGetAudioClips = await ShowDialogAsync<GetAudioClipsWindow, GetAudioClipsViewModel>(vm => { vm.Initialize(_videoFileName ?? string.Empty, selectedItems, _audioTrack?.FfIndex ?? -1, IsSmpteTimingEnabled); });
 
         if (!resultGetAudioClips.OkPressed || resultGetAudioClips.AudioClips.Count == 0)
         {
@@ -11340,10 +11389,18 @@ public partial class MainViewModel :
                 {
                     // generate new subtitles
                     deleteLines.Add(selectedLine);
+                    // The clip was cut on the video's clock; with SMPTE timing its times are
+                    // brought back to the rows' clock (1.001 slower) before they are placed.
+                    var rowTimeFactor = IsSmpteTimingEnabled ? 1.0 / SmptePreviewStretch.Factor : 1.0;
                     foreach (var p in transcribedLine.Transcription.Paragraphs)
                     {
                         var newLine = new SubtitleLineViewModel(p, SelectedSubtitleFormat);
-                        newLine.SetStartTimeKeepDuration(TimeSpanExtensions.FromMillisecondsWholeMilliseconds(selectedLine.StartTime.TotalMilliseconds + p.StartTime.TotalMilliseconds));
+                        newLine.SetStartTimeKeepDuration(TimeSpanExtensions.FromMillisecondsWholeMilliseconds(selectedLine.StartTime.TotalMilliseconds + p.StartTime.TotalMilliseconds * rowTimeFactor));
+                        if (IsSmpteTimingEnabled)
+                        {
+                            newLine.EndTime = TimeSpanExtensions.FromMillisecondsWholeMilliseconds(selectedLine.StartTime.TotalMilliseconds + p.EndTime.TotalMilliseconds * rowTimeFactor);
+                        }
+
                         newLine.Style = selectedLine.Style; // the lines replace selectedLine, so they keep its style
                         newLines.Add(newLine);
                     }
@@ -12286,6 +12343,25 @@ public partial class MainViewModel :
         _updateAudioVisualizer = true;
     }
 
+    /// <summary>
+    /// Opt-in (Settings > Video player): a Timed Text file with non-drop SMPTE time codes at an
+    /// NTSC rate turns SMPTE timing on once both it and a video are loaded.
+    /// </summary>
+    private bool IsSmpteTimingAutoDetected()
+    {
+        return Se.Settings.Video.AutoDetectSmpteTiming && SmpteTimingDetector.IsSmpteTimedText(_subtitle?.Header);
+    }
+
+    private void AutoEnableSmpteTiming()
+    {
+        if (IsSmpteTimingEnabled || IsEmpty || string.IsNullOrEmpty(_videoFileName) || !IsSmpteTimingAutoDetected())
+        {
+            return;
+        }
+
+        ToggleSmpteTiming();
+    }
+
     [RelayCommand]
     private void ToggleSmpteTiming()
     {
@@ -13199,7 +13275,7 @@ public partial class MainViewModel :
             // its reference from the video, and the original line - not the translation being
             // dubbed - is what is spoken in that clip.
             vm.Initialize(subtitle, SelectedSubtitleFormat,
-                _videoFileName ?? string.Empty, AudioVisualizer?.WavePeaks, Path.GetTempPath(),
+                _videoFileName ?? string.Empty, AudioPeaks, Path.GetTempPath(),
                 originalSubtitle);
         });
 
@@ -27101,6 +27177,9 @@ public partial class MainViewModel :
             // would otherwise persist the entry without it.
             RestoreRememberedSecondarySubtitle(rememberedSecondaryFileName);
 
+            // For a video that was already open and stayed open: ResetSubtitle turned SMPTE off.
+            AutoEnableSmpteTiming();
+
             // Pass the index explicitly: SelectAndScrollToRow applies the selection via a
             // dispatcher post that may not have run yet, so reading SelectedSubtitleIndex
             // here could persist 0 and erase the remembered line.
@@ -29621,7 +29700,7 @@ public partial class MainViewModel :
 
     internal void UpdateWaveformOriginalSubtitleCues(AudioVisualizer audioVisualizer)
     {
-        if (!ShowColumnOriginalText || !Se.Settings.Waveform.ShowOriginalSubtitle || _subtitleOriginal == null)
+        if (!ShowColumnOriginalText || !(Se.Settings.Waveform.ShowOriginalSubtitle || IsWaveformEditingOriginal) || _subtitleOriginal == null)
         {
             audioVisualizer.SetOriginalSubtitleCues(null);
             return;
@@ -30082,7 +30161,8 @@ public partial class MainViewModel :
             Se.Settings.General.CurrentVideoOffsetInMs,
             IsSmpteTimingEnabled,
             _audioTrack?.Id ?? -1,
-            _subtitleSecondaryFileName ?? string.Empty);
+            _subtitleSecondaryFileName ?? string.Empty,
+            IsEmptyWaveformChosen(_videoFileName) ? true : null);
         Se.SaveSettings();
 
         if (updateMenu)
@@ -30739,6 +30819,9 @@ public partial class MainViewModel :
             AddToRecentVideoFiles(videoFileName);
         }
 
+        // Before the recent-file write below, so the entry remembers it.
+        AutoEnableSmpteTiming();
+
         // Persist the media association as soon as the file opens so reopening this subtitle
         // reloads the same video/audio even if the app is force-quit before OnClosing runs.
         // Guarded by a known subtitle name so opening media without a subtitle doesn't create
@@ -30809,7 +30892,8 @@ public partial class MainViewModel :
 
         if (AudioVisualizer != null)
         {
-            AudioVisualizer.ClickToGenerateText = Se.Language.Main.ClickToGenerateWaveform;
+            AudioVisualizer.ClickToGenerateText = Se.Language.Main.GenerateWaveform;
+            AudioVisualizer.UseEmptyWaveformText = Se.Language.Main.UseEmptyWaveform;
         }
 
         CachedWaveform cached;
@@ -30842,6 +30926,14 @@ public partial class MainViewModel :
             else
             {
                 ShowClickToGenerateWaveformHint();
+
+                // "Use empty waveform" was picked for this subtitle and video before: go straight
+                // to it instead of asking again.
+                if (IsEmptyWaveformChosen(videoFileName) || IsEmptyWaveformRemembered(videoFileName))
+                {
+                    _emptyWaveformVideoFileName = videoFileName;
+                    Dispatcher.UIThread.Post(() => _ = ShowPlaceholderWaveformAsync());
+                }
             }
 
             return;
@@ -30931,6 +31023,78 @@ public partial class MainViewModel :
         });
     }
 
+    // "Use empty waveform" on the timeline: show the subtitles without extracting the audio, and
+    // remember the choice for this subtitle and video so reopening them does the same.
+    internal void AudioVisualizerOnUseEmptyWaveformRequested(object? sender, EventArgs e)
+    {
+        _emptyWaveformVideoFileName = _videoFileName;
+        _ = ShowPlaceholderWaveformAsync();
+        AddToRecentFiles(false);
+    }
+
+    // The video "Use empty waveform" was picked for - this session or remembered with the subtitle
+    // in the recent files. Cleared by "Generate waveform".
+    private string? _emptyWaveformVideoFileName;
+
+    private bool IsEmptyWaveformChosen(string? videoFileName) =>
+        !string.IsNullOrEmpty(videoFileName) && string.Equals(_emptyWaveformVideoFileName, videoFileName, StringComparison.Ordinal);
+
+    private bool IsEmptyWaveformRemembered(string videoFileName)
+    {
+        var subtitleFileName = _subtitleFileName;
+        return !string.IsNullOrEmpty(subtitleFileName) && Se.Settings.File.RecentFiles.Any(rf =>
+            rf.UseEmptyWaveform &&
+            string.Equals(rf.SubtitleFileName, subtitleFileName, StringComparison.Ordinal) &&
+            string.Equals(rf.VideoFileName, videoFileName, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The real audio peaks of the current video, or null when there are none - the silent
+    /// placeholder that only gives the timeline a time scale does not count.
+    /// </summary>
+    private WavePeakData2? AudioPeaks => AudioVisualizer?.WavePeaks is { IsPlaceholder: false } peaks ? peaks : null;
+
+    /// <summary>
+    /// "Use empty waveform": with no waveform generated (auto-generate off, generation cancelled,
+    /// ffmpeg missing), give the timeline silent placeholder peaks so the subtitles, the time
+    /// ruler and the cursor are shown and can be edited without extracting any audio (#16710).
+    /// "Generate waveform" then moves to a small button in the timeline's top right corner. Real
+    /// peaks replace the placeholder as soon as they are generated.
+    /// </summary>
+    private async Task ShowPlaceholderWaveformAsync()
+    {
+        var videoFileName = _videoFileName;
+        var vp = GetVideoPlayerControl();
+        if (AudioVisualizer == null || vp == null || string.IsNullOrEmpty(videoFileName) || AudioPeaks != null)
+        {
+            return;
+        }
+
+        try
+        {
+            await vp.WaitForPlayersReadyAsync(10_000);
+        }
+        catch (Exception exception)
+        {
+            Se.LogError(exception, "Waiting for the video player before showing the placeholder waveform failed");
+            return;
+        }
+
+        var duration = vp.VideoPlayer.Duration;
+        var av = AudioVisualizer;
+        if (av == null || AudioPeaks != null || _videoFileName != videoFileName || !av.ShowClickToGenerateHint || duration <= 0)
+        {
+            return;
+        }
+
+        // Cover subtitles that run past the end of the video too, so they can still be reached.
+        var lastEnd = Subtitles.Count > 0 ? Subtitles.Max(p => p.EndTime.TotalSeconds) : 0;
+        av.WavePeaks = WavePeakData2.CreatePlaceholder(Math.Max(duration, lastEnd));
+        CenterAudioVisualizerOnCurrentVideoPosition();
+        _updateAudioVisualizer = true;
+        av.InvalidateVisual();
+    }
+
     /// <summary>
     /// Reads cached wave peaks, discarding the cache file when it cannot be read.
     /// </summary>
@@ -31002,12 +31166,7 @@ public partial class MainViewModel :
             // The auto-on-open path must not pop a modal (session restore, drag/drop, CLI opens),
             // so show the click-to-generate hint instead - clicking it runs RequireFfmpegOk,
             // which offers the download (or explains how to install ffmpeg on Linux).
-            if (AudioVisualizer != null)
-            {
-                AudioVisualizer.ShowClickToGenerateHint = true;
-                AudioVisualizer.InvalidateVisual();
-            }
-
+            ShowClickToGenerateWaveformHint();
             ShowStatus(Se.Language.Main.WaveformFfmpegNotFoundClickToSetUp);
             return;
         }
@@ -31055,6 +31214,17 @@ public partial class MainViewModel :
         if (string.IsNullOrEmpty(_videoFileName))
         {
             return;
+        }
+
+        // Picking "Generate waveform" ends "Use empty waveform" for this subtitle and video.
+        _emptyWaveformVideoFileName = null;
+        var remembered = Se.Settings.File.RecentFiles.Where(rf => rf.UseEmptyWaveform &&
+            string.Equals(rf.SubtitleFileName, _subtitleFileName, StringComparison.Ordinal) &&
+            string.Equals(rf.VideoFileName, _videoFileName, StringComparison.Ordinal)).ToList();
+        if (remembered.Count > 0)
+        {
+            remembered.ForEach(rf => rf.UseEmptyWaveform = false);
+            Se.SaveSettings();
         }
 
         // Explicit user action, so a modal "download ffmpeg?" prompt is fine here (#14390).
@@ -31542,9 +31712,13 @@ public partial class MainViewModel :
                 {
                     if (AudioVisualizer != null)
                     {
-                        AudioVisualizer.WavePeaks = null;
-                        AudioVisualizer.ShowClickToGenerateHint = true;
-                        AudioVisualizer.InvalidateVisual();
+                        // Back to how it was before: the empty waveform stays if it was in use.
+                        if (!AudioVisualizer.HasPlaceholderPeaks)
+                        {
+                            AudioVisualizer.WavePeaks = null;
+                        }
+
+                        ShowClickToGenerateWaveformHint();
                     }
                 });
             }
@@ -35345,6 +35519,11 @@ public partial class MainViewModel :
         {
             SetOriginalTextInPreview(false);
         }
+
+        if (!value)
+        {
+            IsWaveformEditingOriginal = false;
+        }
     }
 
     private void MakeSubtitleTextInfoOriginal(string text, SubtitleLineViewModel item)
@@ -37013,8 +37192,8 @@ public partial class MainViewModel :
                                        FfmpegMediaInfo.Parse(videoFileName).HasFrontCenterAudio(-1);
             var arguments = FfmpegGenerator.ExtractAudioClipFromVideoParameters(
                 videoFileName,
-                paragraph.StartTime.TotalSeconds,
-                paragraph.Duration.TotalSeconds,
+                ToVideoSeconds(paragraph.StartTime.TotalSeconds),
+                ToVideoSeconds(paragraph.Duration.TotalSeconds),
                 useCenterChannelOnly,
                 outputFileName);
 
@@ -37866,6 +38045,16 @@ public partial class MainViewModel :
         // Remembered so "Insert subtitle file at video position..." anchors the file at the
         // right-clicked waveform position instead of wherever the play-head happens to be.
         _waveformContextMenuSeconds = e.PositionInSeconds;
+
+        // On the empty (placeholder) waveform: offer generating the real one, and hide what
+        // needs real audio to work on (#16710).
+        var isEmptyWaveform = AudioVisualizer?.HasPlaceholderPeaks == true;
+        var canGenerateWaveform = isEmptyWaveform && !IsWaveformGenerating;
+        MenuItemAudioVisualizerGenerateWaveform.IsVisible = canGenerateWaveform;
+        MenuItemAudioVisualizerGenerateWaveformSeparator.IsVisible = canGenerateWaveform;
+        MenuItemAudioVisualizerGuessTimeCodes.IsVisible = !isEmptyWaveform;
+        MenuItemAudioVisualizerSeekSilence.IsVisible = !isEmptyWaveform;
+        MenuItemAudioVisualizerShowSpeechOnly.IsVisible = !isEmptyWaveform;
 
         MenuItemAudioVisualizerInsertNewSelection.IsVisible = false;
         MenuItemAudioVisualizerPasteNewSelection.IsVisible = false;
