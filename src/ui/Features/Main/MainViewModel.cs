@@ -363,6 +363,7 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _showUpDownEndTime;
     [ObservableProperty] private bool _showUpDownDuration;
     [ObservableProperty] private bool _showUpDownLabels;
+    [ObservableProperty] private bool _showTimeCodeModeInStatusBar;
     [ObservableProperty] private bool _isColumnLayerVisible;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(AreTimeCodesEditable))]
@@ -731,6 +732,17 @@ public partial class MainViewModel :
     private bool _mpvPreviewRefreshBusy; // a refresh is in flight; skip ticks until it lands
     private string? _subtitleFileName;
     private string? _subtitleFileNameOriginal;
+
+    /// <summary>
+    /// The answer to the "original does not line up" question, and the original it was given for.
+    /// Stored with the recent file so reopening the pair does not ask again (#16752). Paired with
+    /// the file name rather than cleared on every path that swaps the original: a choice only
+    /// counts while that same original is open.
+    /// </summary>
+    private OriginalMismatchChoice? _originalMismatchChoice;
+    private string? _originalMismatchChoiceFileName;
+
+    private readonly record struct OriginalMismatchChoice(bool ShowAllLines, bool AllowEdit);
     private bool _converted;
 
     // A file name the app derived on the user's behalf (auto-translate picking a target
@@ -1185,6 +1197,7 @@ public partial class MainViewModel :
         ShowUpDownEndTime = Se.Settings.Appearance.ShowUpDownEndTime;
         ShowUpDownDuration = Se.Settings.Appearance.ShowUpDownDuration;
         ShowUpDownLabels = Se.Settings.Appearance.ShowUpDownLabels;
+        ShowTimeCodeModeInStatusBar = Se.Settings.Appearance.ShowTimeCodeModeInStatusBar;
         SelectCurrentSubtitleWhilePlaying = Se.Settings.General.SelectCurrentSubtitleWhilePlaying;
         WaveformCenter = Se.Settings.Waveform.CenterVideoPosition;
         EditTextBoxOriginal = new TextBoxWrapper(new TextBox());
@@ -3463,20 +3476,31 @@ public partial class MainViewModel :
     /// as a step after "Subtitle loaded", a freshly opened pair had an undo step waiting, and the
     /// first Ctrl+Z took the original away (#14634).
     /// </summary>
-    private async Task RestoreRememberedOriginal(int selectedIndex, string? originalFileName, string subtitleFileName)
+    private async Task RestoreRememberedOriginal(int selectedIndex, RecentFile recentFile)
     {
+        var originalFileName = recentFile.SubtitleFileNameOriginal;
         if (string.IsNullOrEmpty(originalFileName) || !File.Exists(originalFileName))
         {
             return;
         }
 
-        await SubtitleOpenOriginal(selectedIndex, originalFileName);
+        // The pair was opened before: a mismatch was already answered for it, so apply that
+        // answer again instead of asking on every reopen (#16752).
+        OriginalMismatchChoice? rememberedChoice = recentFile is { OriginalShowAllLines: { } showAll, OriginalAllowEdit: { } allowEdit }
+            ? new OriginalMismatchChoice(showAll, allowEdit)
+            : null;
+
+        await SubtitleOpenOriginal(selectedIndex, originalFileName, rememberedChoice);
 
         _undoRedoManager.Reset();
-        _undoRedoManager.Do(MakeUndoRedoObject(string.Format(Se.Language.General.SubtitleLoadedX, subtitleFileName)));
+        _undoRedoManager.Do(MakeUndoRedoObject(string.Format(Se.Language.General.SubtitleLoadedX, recentFile.SubtitleFileName)));
     }
 
-    private async Task<bool> SubtitleOpenOriginal(int selectedIndex, string fileName)
+    /// <param name="rememberedChoice">
+    /// The answer given last time this pair was open (see <see cref="RestoreRememberedOriginal"/>).
+    /// When set, a mismatching original opens that way without asking.
+    /// </param>
+    private async Task<bool> SubtitleOpenOriginal(int selectedIndex, string fileName, OriginalMismatchChoice? rememberedChoice = null)
     {
         // Replacing an editable original discards it - settle unsaved edits first (#13594).
         if (!await ContinueNewOrExitOriginal())
@@ -3520,12 +3544,14 @@ public partial class MainViewModel :
         {
             // Nothing loaded yet: scaffold a blank translation from the original so the user
             // can start translating from scratch, instead of reporting a line-count mismatch.
+            SetOriginalMismatchChoice(null, fileName);
             ImportOriginalIntoEmptySubtitle(fileName, subtitle);
             return true;
         }
 
         if (subtitle.Paragraphs.Count == Subtitles.Count)
         {
+            SetOriginalMismatchChoice(null, fileName);
             ImportOriginalSubtitle(selectedIndex, fileName, subtitle);
             return true;
         }
@@ -3539,27 +3565,34 @@ public partial class MainViewModel :
             var match = ImportOriginalHelper.MatchOriginalLines(Subtitles, subtitle);
             var originalWithTextCount = match.Projection.Paragraphs.Count(p => !string.IsNullOrEmpty(p.Text));
 
-            var prompt = await ShowDialogAsync<OpenOriginalMismatchWindow, OpenOriginalMismatchViewModel>(vm =>
+            var choice = rememberedChoice;
+            if (choice == null)
             {
-                // Empty original lines never become display-only rows (see InsertReferenceOnlyRows),
-                // so they are not counted as lines the choice would show or hide either.
-                vm.Initialize(subtitle.Paragraphs.Count, Subtitles.Count, originalWithTextCount, match.Unmatched.Count(p => !string.IsNullOrWhiteSpace(p.Text)));
-            });
+                var prompt = await ShowDialogAsync<OpenOriginalMismatchWindow, OpenOriginalMismatchViewModel>(vm =>
+                {
+                    // Empty original lines never become display-only rows (see InsertReferenceOnlyRows),
+                    // so they are not counted as lines the choice would show or hide either.
+                    vm.Initialize(subtitle.Paragraphs.Count, Subtitles.Count, originalWithTextCount, match.Unmatched.Count(p => !string.IsNullOrWhiteSpace(p.Text)));
+                });
 
-            if (!prompt.OkPressed)
-            {
-                return false;
+                if (!prompt.OkPressed)
+                {
+                    return false;
+                }
+
+                // Both choices are remembered, so the next mismatching original opens the way this one did.
+                Se.Settings.General.AllowEditOfOriginalSubtitle = prompt.AllowEditOfOriginal;
+                Se.Settings.General.ShowOriginalNonMatchingLines = prompt.ShowAllOriginalLines;
+                choice = new OriginalMismatchChoice(prompt.ShowAllOriginalLines, prompt.AllowEditOfOriginal);
             }
 
-            // Both choices are remembered, so the next mismatching original opens the way this one did.
-            Se.Settings.General.AllowEditOfOriginalSubtitle = prompt.AllowEditOfOriginal;
-            Se.Settings.General.ShowOriginalNonMatchingLines = prompt.ShowAllOriginalLines;
-            var isReadOnly = !prompt.AllowEditOfOriginal;
+            var isReadOnly = !choice.Value.AllowEdit;
 
-            if (prompt.ShowAllOriginalLines)
+            if (choice.Value.ShowAllLines)
             {
                 // The whole original: matched lines in their working row, the rest as display-only
                 // rows. Nothing of it is dropped, so editing it stays lossless.
+                SetOriginalMismatchChoice(choice, fileName);
                 ImportOriginalSubtitle(selectedIndex, fileName, subtitle, match, isReadOnly);
                 return true;
             }
@@ -3567,6 +3600,7 @@ public partial class MainViewModel :
             if (originalWithTextCount > 0)
             {
                 // The old SE mode: the matching lines only, with no rows for the rest.
+                SetOriginalMismatchChoice(choice, fileName);
                 ImportOriginalSubtitle(selectedIndex, fileName, match.Projection, isReadOnly: isReadOnly);
                 return true;
             }
@@ -4888,7 +4922,7 @@ public partial class MainViewModel :
 
             await SubtitleOpen(recentFile.SubtitleFileName, recentFile.VideoFileName, recentFile.SelectedLine, rememberedEncoding, desiredAudioTrackId: recentFile.AudioTrack, videoOffsetToRestoreMs: recentFile.VideoOffsetInMs);
 
-            await RestoreRememberedOriginal(recentFile.SelectedLine, recentFile.SubtitleFileNameOriginal, recentFile.SubtitleFileName);
+            await RestoreRememberedOriginal(recentFile.SelectedLine, recentFile);
 
             SetRecentFileProperties(recentFile);
 
@@ -11359,6 +11393,7 @@ public partial class MainViewModel :
 
         if (!resultGetAudioClips.OkPressed || resultGetAudioClips.AudioClips.Count == 0)
         {
+            GetAudioClipsViewModel.DeleteAudioClipFiles(resultGetAudioClips.AudioClips);
             return false;
         }
 
@@ -11366,6 +11401,10 @@ public partial class MainViewModel :
         {
             vm.InitializeBatch(resultGetAudioClips.AudioClips, _audioTrack?.FfIndex ?? -1, !promptEngineAndLanguage, language);
         });
+
+        // The transcriptions are in memory now - the "se_audioclip_*.wav" temp files were left
+        // behind after every run (#16760).
+        GetAudioClipsViewModel.DeleteAudioClipFiles(resultGetAudioClips.AudioClips);
 
         if (!resultSpeechToText.OkPressed)
         {
@@ -15700,6 +15739,7 @@ public partial class MainViewModel :
         ShowUpDownEndTime = Se.Settings.Appearance.ShowUpDownEndTime;
         ShowUpDownDuration = Se.Settings.Appearance.ShowUpDownDuration;
         ShowUpDownLabels = Se.Settings.Appearance.ShowUpDownLabels;
+        ShowTimeCodeModeInStatusBar = Se.Settings.Appearance.ShowTimeCodeModeInStatusBar;
 
         _errorColor = Se.Settings.General.ErrorColor.FromHexToColor();
         _errorBrush = new ImmutableSolidColorBrush(_errorColor);
@@ -20777,7 +20817,15 @@ public partial class MainViewModel :
     [RelayCommand]
     private void FocusSelectedLine()
     {
-        var idx = SelectedSubtitleIndex ?? -1;
+        // Go to the topmost selected line like SE4's "Go to first selected line" - the current
+        // row is the moving end of a shift-selection, so it was the last line when selecting
+        // downwards and the first only when selecting upwards (#16751).
+        var idx = FirstSelectedSubtitleIndex;
+        if (idx < 0)
+        {
+            idx = SelectedSubtitleIndex ?? -1;
+        }
+
         if (Subtitles.Count == 0 || idx < 0 || idx >= Subtitles.Count)
         {
             return;
@@ -30094,6 +30142,13 @@ public partial class MainViewModel :
         var oldSubtitleFileNameOriginal = _subtitleFileNameOriginal;
         var oldSubtitleOriginalFileName = _subtitleOriginal.FileName;
 
+        var oldOriginalMismatchChoiceFileName = _originalMismatchChoiceFileName;
+        if (string.Equals(_originalMismatchChoiceFileName, _subtitleFileNameOriginal, StringComparison.Ordinal))
+        {
+            // Same original under a new name: its mismatch choice still applies.
+            _originalMismatchChoiceFileName = fileName;
+        }
+
         _subtitleFileNameOriginal = fileName;
         _subtitleOriginal.FileName = fileName;
 
@@ -30107,6 +30162,7 @@ public partial class MainViewModel :
         {
             _subtitleFileNameOriginal = oldSubtitleFileNameOriginal;
             _subtitleOriginal.FileName = oldSubtitleOriginalFileName;
+            _originalMismatchChoiceFileName = oldOriginalMismatchChoiceFileName;
             return false;
         }
 
@@ -30144,6 +30200,13 @@ public partial class MainViewModel :
         return false;
     }
 
+    /// <summary>Set before the original is imported: the import itself writes the recent-file entry.</summary>
+    private void SetOriginalMismatchChoice(OriginalMismatchChoice? choice, string fileName)
+    {
+        _originalMismatchChoice = choice;
+        _originalMismatchChoiceFileName = fileName;
+    }
+
     private void AddToRecentFiles(bool updateMenu, int? selectedLine = null)
     {
         if (_loading || !Se.Settings.File.ShowRecentFiles)
@@ -30152,6 +30215,10 @@ public partial class MainViewModel :
         }
 
         var idx = selectedLine ?? SelectedSubtitleIndex ?? 0;
+        var mismatchChoice = !string.IsNullOrEmpty(_subtitleFileNameOriginal) &&
+                             string.Equals(_originalMismatchChoiceFileName, _subtitleFileNameOriginal, StringComparison.Ordinal)
+            ? _originalMismatchChoice
+            : null;
         Se.Settings.File.AddToRecentFiles(
             _subtitleFileName ?? string.Empty,
             _subtitleFileNameOriginal ?? string.Empty,
@@ -30162,7 +30229,9 @@ public partial class MainViewModel :
             IsSmpteTimingEnabled,
             _audioTrack?.Id ?? -1,
             _subtitleSecondaryFileName ?? string.Empty,
-            IsEmptyWaveformChosen(_videoFileName) ? true : null);
+            IsEmptyWaveformChosen(_videoFileName) ? true : null,
+            mismatchChoice?.ShowAllLines,
+            mismatchChoice?.AllowEdit);
         Se.SaveSettings();
 
         if (updateMenu)
@@ -30533,7 +30602,7 @@ public partial class MainViewModel :
 
                         // Restore the original/translator-mode file too - otherwise only the
                         // translation comes back on start-up, unlike the Reopen menu (issue #12705).
-                        await RestoreRememberedOriginal(first.SelectedLine, first.SubtitleFileNameOriginal, first.SubtitleFileName);
+                        await RestoreRememberedOriginal(first.SelectedLine, first);
 
                         SetRecentFileProperties(first);
 
@@ -33762,7 +33831,8 @@ public partial class MainViewModel :
 
     private static bool IsAlphaNumericWordChar(char c)
     {
-        return char.IsLetterOrDigit(c) || c == '_';
+        // Combining marks (e.g. Arabic tanween) belong to the word (#16750).
+        return CombiningMarkWordSelection.IsWordChar(c) || c == '_';
     }
 
     private readonly Lock _onKeyDownHandlerLock = new();
