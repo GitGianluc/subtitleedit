@@ -637,6 +637,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
         newOptions.Add(ForcedAlignerOption.CanaryCtc());
         newOptions.Add(ForcedAlignerOption.Qwen3());
+        newOptions.Add(ForcedAlignerOption.Qwen3Ultra());
         // wav2vec2 "WhisperX aligner zoo" — 12 language-specific CTC aligners
         // that work on top of any Crisp ASR backend via `-am <path>`.
         newOptions.AddRange(ForcedAlignerOption.Wav2Vec2All());
@@ -4600,7 +4601,8 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// </summary>
     private bool CanSendSourceFileToEngine(string videoFileName)
     {
-        if (_useCenterChannelOnly || string.IsNullOrEmpty(videoFileName) || !File.Exists(videoFileName))
+        if (_useCenterChannelOnly || string.IsNullOrEmpty(videoFileName) || !File.Exists(videoFileName) ||
+            !IsDirectDecodeContainer(videoFileName))
         {
             return false;
         }
@@ -4617,6 +4619,24 @@ public partial class SpeechToTextViewModel : ObservableObject
             SeLogger.Error(exception, $"Unable to read audio tracks from: {videoFileName}");
             return false;
         }
+    }
+
+    private static readonly HashSet<string> DirectDecodeExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".m4v", ".mkv", ".webm", ".mov",
+        ".m4a", ".mp3", ".flac", ".ogg", ".opus", ".wav",
+    };
+
+    /// <summary>
+    /// Containers the engines' own decoder reads reliably. Anything else goes through SE's WAV,
+    /// which ffmpeg always extracts first anyway. AVI is the case that made this an allowlist: AVI
+    /// often carries VBR MP3 that the engines' decoder rejects ("Header missing"), so XXL decoded
+    /// 0 seconds of audio and the file failed, while the ffmpeg command line extracts the same
+    /// audio fine (#16772). SE 4 only ever sent .mkv/.mp4 directly.
+    /// </summary>
+    internal static bool IsDirectDecodeContainer(string fileName)
+    {
+        return DirectDecodeExtensions.Contains(Path.GetExtension(fileName));
     }
 
     private Process GetWhisperProcess(

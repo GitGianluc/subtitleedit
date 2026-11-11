@@ -114,7 +114,8 @@ public class LanguageSettings
     public string SettingsBackupOn { get; set; }
     public string SettingsBackupIntervalDays { get; set; }
     public string SettingsBackupMaxCount { get; set; }
-    public string AutoConvertToUtf8 { get; set; }
+    public string TargetEncodingOnOpen { get; set; }
+    public string TargetEncodingAsIs { get; set; }
     public string AutoTrimWhiteSpace { get; set; }
     public string RemoveBlankLinesWhenOpening { get; set; }
     public string DefaultEncoding { get; set; }
@@ -231,6 +232,7 @@ public class LanguageSettings
     public string WriteToolsLog { get; set; }
     public string ShowSettingsFile { get; set; }
     public string ShowAssaLayer { get; set; }
+    public string ShowActorBox { get; set; }
     public string WaveformCursorColor { get; set; }
     public string WaveformShotChangeColor { get; set; }
     public string WaveformGridColor { get; set; }
@@ -510,7 +512,8 @@ public class LanguageSettings
         SettingsBackupOn = "Auto-backup settings (Settings.json)";
         SettingsBackupIntervalDays = "Settings backup interval (days, 0 = every start)";
         SettingsBackupMaxCount = "Settings backups to keep";
-        AutoConvertToUtf8 = "Auto-convert encoding to UTF-8 on open";
+        TargetEncodingOnOpen = "Target encoding auto-selected on open";
+        TargetEncodingAsIs = "As is";
         AutoTrimWhiteSpace = "Auto-trim white-space";
         RemoveBlankLinesWhenOpening = "Remove blank lines when opening a subtitle";
         DefaultEncoding = "Default encoding";
@@ -627,6 +630,7 @@ public class LanguageSettings
         WriteToolsLog = "Write tools log";
         ShowSettingsFile = "Show settings file";
         ShowAssaLayer = "Show ASSA layer box";
+        ShowActorBox = "Show actor box";
         WaveformCursorColor = "Waveform cursor/head color";
         WaveformShotChangeColor = "Waveform shot change color";
         WaveformGridColor = "Waveform grid color";

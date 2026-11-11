@@ -458,6 +458,7 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _hasMultipleLinesSelected;
     [ObservableProperty] private bool _showShotChangesListMenuItem;
     [ObservableProperty] private bool _showLayer;
+    [ObservableProperty] private bool _showActorBox;
     [ObservableProperty] private bool _showLayerFilterIcon;
     [ObservableProperty] private bool _showColumnLayerFlyoutMenuItem;
     [ObservableProperty] private bool _isVideoLoaded;
@@ -6803,7 +6804,7 @@ public partial class MainViewModel :
     {
         var vp = GetVideoPlayerControl();
         var audioPeaks = AudioPeaks;
-        if (Window == null || audioPeaks == null || vp == null)
+        if (Window == null || audioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -6836,7 +6837,7 @@ public partial class MainViewModel :
     private void SeekSilenceBack()
     {
         var vp = GetVideoPlayerControl();
-        if (AudioPeaks == null || vp == null)
+        if (AudioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -6853,7 +6854,7 @@ public partial class MainViewModel :
     private void SeekSilenceForward()
     {
         var vp = GetVideoPlayerControl();
-        if (AudioPeaks == null || vp == null)
+        if (AudioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -6922,7 +6923,7 @@ public partial class MainViewModel :
             return Se.Language.Main.Waveform.GuessStartTimeCodesLocked;
         }
 
-        if (AudioPeaks == null)
+        if (AudioPeaks == null || AudioVisualizer == null)
         {
             return Se.Language.Main.Waveform.GuessStartNoWaveform;
         }
@@ -7101,7 +7102,7 @@ public partial class MainViewModel :
             return Se.Language.Main.Waveform.GuessEndTimeCodesLocked;
         }
 
-        if (AudioPeaks == null)
+        if (AudioPeaks == null || AudioVisualizer == null)
         {
             return Se.Language.Main.Waveform.GuessEndNoWaveform;
         }
@@ -7638,7 +7639,7 @@ public partial class MainViewModel :
     private async Task ShowWaveformGuessTimeCodes()
     {
         var vp = GetVideoPlayerControl();
-        if (Window == null || AudioPeaks == null || vp == null)
+        if (Window == null || AudioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -15740,6 +15741,7 @@ public partial class MainViewModel :
         ShowUpDownDuration = Se.Settings.Appearance.ShowUpDownDuration;
         ShowUpDownLabels = Se.Settings.Appearance.ShowUpDownLabels;
         ShowTimeCodeModeInStatusBar = Se.Settings.Appearance.ShowTimeCodeModeInStatusBar;
+        ShowActorBox = HasFormatActor && !IsFormatWebVtt && Se.Settings.Appearance.ShowActor;
 
         _errorColor = Se.Settings.General.ErrorColor.FromHexToColor();
         _errorBrush = new ImmutableSolidColorBrush(_errorColor);
@@ -24644,7 +24646,7 @@ public partial class MainViewModel :
     /// this list, so shortcut "1" sets the first actor, "2" the second, etc. - and keeps doing
     /// so when a new actor is added.
     /// </summary>
-    private List<string> GetActorsInSubtitle()
+    internal List<string> GetActorsInSubtitle()
     {
         return _actorOrder.GetOrdered(Subtitles.Select(p => p.Actor));
     }
@@ -27129,9 +27131,15 @@ public partial class MainViewModel :
                 SelectedEncoding = otherEncoding ?? Encodings.First(p => p.DisplayName == TextEncoding.Utf8WithBom);
             }
 
-            if (Se.Settings.General.AutoConvertToUtf8 && !SelectedEncoding.DisplayName.StartsWith("utf-8", StringComparison.OrdinalIgnoreCase))
+            // (#9382) No "not UTF-8 yet" guard: the option normalises every opened file, including
+            // one that already is UTF-8 but carries the other BOM variant - that file used to be
+            // left exactly as it was, which is what made the option look broken.
+            if (Se.Settings.General.AutoConvertToUtf8)
             {
-                SelectedEncoding = Encodings.FirstOrDefault(p => p.DisplayName.StartsWith("utf-8", StringComparison.OrdinalIgnoreCase)) ?? SelectedEncoding;
+                var utf8Variant = Se.Settings.General.AutoConvertToUtf8WithoutBom
+                    ? TextEncoding.Utf8WithoutBom
+                    : TextEncoding.Utf8WithBom;
+                SelectedEncoding = Encodings.First(p => p.DisplayName == utf8Variant);
             }
 
             _subtitleFileName = fileName;
@@ -38441,6 +38449,7 @@ public partial class MainViewModel :
             ? Se.Language.File.WebVtt.ShowVoiceColumn
             : Se.Language.General.ShowActorColumn;
         ShowLayer = IsFormatAssa && Se.Settings.Appearance.ShowLayer;
+        ShowActorBox = HasFormatActor && !IsFormatWebVtt && Se.Settings.Appearance.ShowActor;
         ShowLayerFilterIcon = IsFormatAssa && Se.Settings.Appearance.ShowLayer && _visibleLayers != null;
 
         if (!IsFormatAssa)

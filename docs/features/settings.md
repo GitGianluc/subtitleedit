@@ -43,7 +43,7 @@ The subtitle rules that drive error checking, the grid's warning colors, and too
 - **Store times on video frames (not frames within each second)** — Only for *Frames (hh:mm:ss:ff)*, off by default. Stores each time at the exact time of a real video frame, so the milliseconds in a saved `.srt` match the video and a Blu-ray sup export. See [Frames and video frames](#frames-and-video-frames) below.
 - **Limit number of lines in subtitle text box**
 - **Open last recent file on start**
-- **Auto-convert encoding to UTF-8 on open**, **Force CR+LF on save (text subtitle files)** (also used by [Batch convert](batch-convert.md)), **Auto-trim white-space**
+- **Target encoding auto-selected on open** (presets the encoding the file will be saved with, to **UTF-8 with BOM**, **UTF-8 without BOM**, or **As is**; the file itself keeps its own encoding until it is saved), **Force CR+LF on save (text subtitle files)** (also used by [Batch convert](batch-convert.md)), **Auto-trim white-space**
 - **Warn on save when lines exceed the format's limits (e.g. SCC 32 chars/line)**
 - **Remove blank lines when opening a subtitle** — Off by default
 - **Copy text via xclip/wl-copy (keeps accented characters)** — Linux only
@@ -168,6 +168,8 @@ Proxy settings for every download and online engine: **address**, **username**, 
 
 - **Check for updates when the app starts** — Hidden for store-managed installs (e.g. Flatpak), which update through the store
 - **Notify about** — **Stable versions only**, or **Stable and beta versions**
+
+See [Check for Updates](check-for-updates.md) for in-app updating and which installs support it.
 
 ## File Type Associations
 
