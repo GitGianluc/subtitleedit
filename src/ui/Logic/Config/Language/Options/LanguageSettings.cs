@@ -73,6 +73,8 @@ public class LanguageSettings
     public string ShowGridLines { get; set; }
     public string ShowHorizontalLineAboveToolbar { get; set; }
     public string BookmarkColor { get; set; }
+    public string BookmarkColor2 { get; set; }
+    public string BookmarkColor3 { get; set; }
     public string SpellCheckHighlightColor { get; set; }
     public string SingleLineMaxLength { get; set; }
     public string OptimalCharsPerSec { get; set; }
@@ -146,6 +148,7 @@ public class LanguageSettings
     public string WaveformUseSkiaRenderer { get; set; }
     public string WaveformShowNumberAndDuration { get; set; }
     public string WaveformShowCps { get; set; }
+    public string WaveformShowBookmarks { get; set; }
     public string WaveformCenterVideoPositionAlsoWhenPaused { get; set; }
     public string WaveformSelectCurrentSubtitleWhilePaused { get; set; }
     public string WaveformRememberZoom { get; set; }
@@ -294,6 +297,7 @@ public class LanguageSettings
     public string SubtitleSingleClickAction { get; set; }
     public string SubtitleDoubleClickAction { get; set; }
     public string SubtitleGridCenterSelectedRow { get; set; }
+    public string CopyTextBlankLineBetweenSubtitles { get; set; }
     public string SaveAsBehavior { get; set; }
     public string FileChangedOutsideAction { get; set; }
     public string FileChangedOutsideReloadWhenUnmodified { get; set; }
@@ -471,6 +475,8 @@ public class LanguageSettings
         ShowGridLines = "Show grid lines";
         ShowHorizontalLineAboveToolbar = "Show horizontal line above toolbar";
         BookmarkColor = "Bookmark color";
+        BookmarkColor2 = "Bookmark color 2";
+        BookmarkColor3 = "Bookmark color 3";
         SpellCheckHighlightColor = "Spell check highlight color";
         SingleLineMaxLength = "Single line max length";
         OptimalCharsPerSec = "Optimal chars/sec";
@@ -544,6 +550,7 @@ public class LanguageSettings
         WaveformUseSkiaRenderer = "Use experimental fast renderer";
         WaveformShowNumberAndDuration = "Show # + duration";
         WaveformShowCps = "Show chars/sec";
+        WaveformShowBookmarks = "Show bookmarks";
         WaveformFocusOnMouseOver = "Focus on mouse over";
         WaveformCenterVideoPositionAlsoWhenPaused = "Center video position also while paused";
         WaveformSelectCurrentSubtitleWhilePaused = "Select current subtitle also while paused";
@@ -691,6 +698,7 @@ public class LanguageSettings
         SubtitleSingleClickAction = "Subtitle grid single-click action";
         SubtitleDoubleClickAction = "Subtitle grid double-click action";
         SubtitleGridCenterSelectedRow = "Subtitle grid, center when selecting prev/next row";
+        CopyTextBlankLineBetweenSubtitles = "Copy text, empty line between subtitles";
         SaveAsBehavior = "\"Save as\" behavior";
         FileChangedOutsideAction = "Subtitle file changed by another program";
         FileChangedOutsideReloadWhenUnmodified = "Reload if nothing is unsaved, otherwise ask";
