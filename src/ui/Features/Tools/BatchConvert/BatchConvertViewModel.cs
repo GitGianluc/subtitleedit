@@ -46,7 +46,6 @@ using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.UiLogic.SubtitleLoading;
 using Nikse.SubtitleEdit.Logic.Config;
-using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.UiLogic.BatchConvert;
 using Nikse.SubtitleEdit.Logic.Media;
 using Nikse.SubtitleEdit.Logic.Plugins;
@@ -186,7 +185,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private SpeechToTextModelDisplay? _selectedCrispAsrModel;
     [ObservableProperty] private bool _crispAsrModelComboIsVisible;
     [ObservableProperty] private bool _llamaCppAdvancedButtonIsVisible;
-    [ObservableProperty] private bool _llamaCppSettingsButtonIsVisible;
+    [ObservableProperty] private bool _translateSettingsButtonIsVisible;
     [ObservableProperty] private bool _llamaCppEngineSettingsButtonIsVisible;
     [ObservableProperty] private ObservableCollection<LlamaCppModelDisplay> _llamaCppModels = new();
     [ObservableProperty] private LlamaCppModelDisplay? _selectedLlamaCppModel;
@@ -1735,10 +1734,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (Configuration.IsRunningOnWindows && !File.Exists(Path.Combine(Se.PaddleOcrFolder, "paddleocr.exe")))
         {
+            var gpuHint = await GpuBuildHint.GetAsync(GpuBuild.Cpu, GpuBuild.Cuda11, GpuBuild.Cuda12);
             var answer = await MessageBox.Show(
                 Window,
                 "Download Paddle OCR?",
                 $"{Environment.NewLine}\"Paddle OCR\" requires downloading Paddle OCR.{Environment.NewLine}{Environment.NewLine}Download and use Paddle OCR?",
+                gpuHint,
                 MessageBoxButtons.Cancel,
                 MessageBoxIcon.Question,
                 "CPU",
@@ -1777,10 +1778,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         }
         else if (Configuration.IsRunningOnLinux && !File.Exists(Path.Combine(Se.PaddleOcrFolder, "paddleocr.bin")))
         {
+            var gpuHint = await GpuBuildHint.GetAsync(GpuBuild.Cpu, GpuBuild.Cuda11, GpuBuild.Cuda12);
             var answer = await MessageBox.Show(
                 Window,
                 "Download Paddle OCR?",
                 $"{Environment.NewLine}\"Paddle OCR\" requires downloading Paddle OCR.{Environment.NewLine}{Environment.NewLine}Download and use Paddle OCR?",
+                gpuHint,
                 MessageBoxButtons.Cancel,
                 MessageBoxIcon.Question,
                 "CPU",
@@ -1900,12 +1903,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         }
 
         // Same guard as the interactive Auto-translate window: an engine whose API key box is
-        // shown (except LibreTranslate, where the key is optional) cannot run with an empty key -
+        // shown (except those where the key is optional) cannot run with an empty key -
         // the engine's Initialize() skips creating its HTTP client, and every file would fail
         // with a NullReferenceException instead of a readable message (#12288).
         if (AutoTranslateApiKeyIsVisible &&
             string.IsNullOrWhiteSpace(AutoTranslateApiKey) &&
-            config.AutoTranslate.Translator is not LibreTranslate)
+            !AutoTranslateViewModel.ApiKeyIsOptional(config.AutoTranslate.Translator))
         {
             await MessageBox.Show(
                 Window,
@@ -3236,7 +3239,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             var openAiUrl = !string.IsNullOrWhiteSpace(AutoTranslateUrl)
                 ? AutoTranslateUrl.Trim()
                 : isOpenAiCompatible ? OpenAiCompatibleTranslate.DefaultUrl : LmStudioAdvancedTranslate.DefaultUrl;
-            var apiKey = isOpenAiCompatible ? AutoTranslateApiKey : null;
+            var apiKey = AutoTranslateApiKey; // a server that asks for a key asks for it on the model list too
             var openAiResult = await _windowService.ShowDialogAsync<PickOllamaModelWindow, PickOllamaModelViewModel>(Window!,
                 vm => { vm.InitializeOpenAiCompatible(Se.Language.General.PickModel, AutoTranslateModel, openAiUrl, apiKey); });
 
@@ -3263,9 +3266,10 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         var isAdvanced = SelectedAutoTranslator is OllamaAdvancedTranslate;
         var model = isAdvanced ? Se.Settings.AutoTranslate.OllamaAdvancedModel : Se.Settings.AutoTranslate.OllamaModel;
         var url = isAdvanced ? Se.Settings.AutoTranslate.OllamaAdvancedUrl : Se.Settings.AutoTranslate.OllamaUrl;
+        var ollamaApiKey = isAdvanced ? AutoTranslateApiKey : Se.Settings.AutoTranslate.OllamaApiKey;
 
         var result = await _windowService.ShowDialogAsync<PickOllamaModelWindow, PickOllamaModelViewModel>(Window!,
-            vm => { vm.Initialize(Se.Language.General.PickOllamaModel, model, url); });
+            vm => { vm.Initialize(Se.Language.General.PickOllamaModel, model, url, apiKey: ollamaApiKey); });
 
         if (result is { OkPressed: true, SelectedModel: not null })
         {
@@ -3356,12 +3360,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         RefreshAutoTranslateEngineDots?.Invoke(); // the engine binary just changed - amber -> green
     }
 
-    // Prompt (plus request delay, max bytes and the merge strategy) for the regular llama.cpp
-    // engine - the same window the Auto-translate window's settings button opens, editing the same
-    // shared settings. Its OK writes both Se.Settings.AutoTranslate and Configuration.Settings.Tools,
+    // Prompt (plus request delay, max bytes, keep music lines and the merge strategy) for the
+    // selected engine - the same window the Auto-translate window's settings button opens, editing
+    // the same shared settings. Its OK writes both Se.Settings.AutoTranslate and Configuration.Settings.Tools,
     // so a prompt edited here reaches the batch run too.
     [RelayCommand]
-    private async Task ShowLlamaCppTranslateSettings()
+    private async Task ShowTranslateSettings()
     {
         if (Window == null || SelectedAutoTranslator == null)
         {
@@ -3691,19 +3695,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         return JsonSerializer.Deserialize(JsonSerializer.Serialize(value, typeInfo), typeInfo) ?? new T();
     }
 
-    internal void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            Window?.Close();
-        }
-        else if (UiUtil.IsHelp(e))
-        {
-            e.Handled = true;
-            UiUtil.ShowHelp("features/batch-convert");
-        }
-    }
+    internal void OnKeyDown(KeyEventArgs e) => UiUtil.CloseOnEscapeOrShowHelp(e, Window, "features/batch-convert");
 
     private BatchConvertConfig MakeBatchConvertConfig()
     {
@@ -4056,7 +4048,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         };
     }
 
-    private void UpdateAutoTranslateSettings()
+    internal void UpdateAutoTranslateSettings()
     {
         var translator = SelectedAutoTranslator;
         if (translator == null)
@@ -4121,6 +4113,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 Configuration.Settings.Tools.LmStudioApiUrl = Se.Settings.AutoTranslate.LmStudioApiUrl;
             }
 
+            // Optional, so an emptied box means no key. Like the URL it is only applied to the
+            // run: the Auto-translate window owns the saved pair.
+            Configuration.Settings.Tools.LmStudioApiKey = AutoTranslateApiKey.Trim();
             Configuration.Settings.Tools.LmStudioModel = AutoTranslateModel.Trim();
         }
 
@@ -4138,7 +4133,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
                 Configuration.Settings.Tools.LlamaCppApiUrl = apiUrl;
                 Se.Settings.AutoTranslate.LlamaCppApiUrl = apiUrl;
+                Se.Settings.AutoTranslate.LlamaCppApiKey = AutoTranslateApiKey.Trim();
             }
+
+            // Both llama.cpp engines read the key from here. It belongs to the external server:
+            // the one Subtitle Edit starts itself asks for none and must not be sent the saved key.
+            Configuration.Settings.Tools.LlamaCppApiKey = LlamaCppUseRemoteServer ? AutoTranslateApiKey.Trim() : string.Empty;
         }
 
         if (engineType == typeof(OllamaTranslate))
@@ -4168,6 +4168,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             {
                 Se.Settings.AutoTranslate.OllamaAdvancedModel = AutoTranslateModel.Trim();
             }
+
+            // Optional, so an emptied box clears the stored key.
+            Se.Settings.AutoTranslate.OllamaAdvancedApiKey = AutoTranslateApiKey.Trim();
         }
 
         if (engineType == typeof(LmStudioAdvancedTranslate))
@@ -4179,6 +4182,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             }
 
             Se.Settings.AutoTranslate.LmStudioAdvancedModel = AutoTranslateModel.Trim();
+            Se.Settings.AutoTranslate.LmStudioAdvancedApiKey = AutoTranslateApiKey.Trim();
         }
 
         if (engineType == typeof(NoLanguageLeftBehindServe))
@@ -4411,6 +4415,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             LlamaCppModelComboIsVisible = false;
             LlamaCppEngineSettingsButtonIsVisible = false;
             AutoTranslateUrlIsVisible = true;
+            AutoTranslateApiKeyIsVisible = true;
             LlamaCppModels.Clear();
             SelectedLlamaCppModel = null;
             return;
@@ -4419,6 +4424,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         LlamaCppModelComboIsVisible = true;
         LlamaCppEngineSettingsButtonIsVisible = true;
         AutoTranslateUrlIsVisible = false;
+        AutoTranslateApiKeyIsVisible = false;
         var savedModelName = Path.GetFileName(Se.Settings.AutoTranslate.LlamaCppModel ?? string.Empty);
         SelectedLlamaCppModel = LlamaCppDownloadHelper.PopulateModels(LlamaCppModels, GetLlamaCppModelsForEngine(), savedModelName);
     }
@@ -4455,9 +4461,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // (local or remote llama-server) and Ollama.
         LlamaCppAdvancedButtonIsVisible = engine is LlamaCppAdvancedTranslate or OllamaAdvancedTranslate or LmStudioAdvancedTranslate;
 
-        // The regular llama.cpp engine has no advanced window - its prompt (and the shared
-        // delay/max-bytes/merge settings) live in the translate settings dialog instead.
-        LlamaCppSettingsButtonIsVisible = engine is LlamaCppTranslate;
+        // The translate settings dialog holds the prompt and the shared delay/max-bytes/merge/
+        // keep-music-lines settings, like in the Auto-translate window. The advanced engines run
+        // their own batch loop that bypasses all of these (their settings live in the Advanced
+        // window), so the dialog would only show options without effect there.
+        TranslateSettingsButtonIsVisible = engine != null && !LlamaCppAdvancedButtonIsVisible;
 
         if (engine is CrispAsrMadladTranslate)
         {
@@ -4479,6 +4487,9 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModelIsVisible = true;
             AutoTranslateUrl = string.Empty;
             AutoTranslateUrlIsVisible = false;
+
+            // No key box without the URL box: this engine runs against the address saved in the
+            // Auto-translate window, and with the key saved there.
             AutoTranslateApiKey = string.Empty;
             AutoTranslateApiKeyIsVisible = false;
         }
@@ -4491,8 +4502,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModelIsVisible = true;
             AutoTranslateUrl = Se.Settings.AutoTranslate.OllamaAdvancedUrl;
             AutoTranslateUrlIsVisible = true;
-            AutoTranslateApiKey = string.Empty;
-            AutoTranslateApiKeyIsVisible = false;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.OllamaAdvancedApiKey;
+            AutoTranslateApiKeyIsVisible = true;
         }
         else if (engine is LmStudioAdvancedTranslate)
         {
@@ -4502,8 +4513,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModelIsVisible = true;
             AutoTranslateUrl = Se.Settings.AutoTranslate.LmStudioAdvancedUrl;
             AutoTranslateUrlIsVisible = true;
-            AutoTranslateApiKey = string.Empty;
-            AutoTranslateApiKeyIsVisible = false;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.LmStudioAdvancedApiKey;
+            AutoTranslateApiKeyIsVisible = true;
         }
         else if (engine is LibreTranslate)
         {
@@ -4535,8 +4546,8 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModelIsVisible = false;
             AutoTranslateUrl = Se.Settings.AutoTranslate.LmStudioApiUrl;
             AutoTranslateUrlIsVisible = true;
-            AutoTranslateApiKey = string.Empty;
-            AutoTranslateApiKeyIsVisible = false;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.LmStudioApiKey;
+            AutoTranslateApiKeyIsVisible = true;
         }
         else if (engine is LlamaCppTranslate or LlamaCppAdvancedTranslate)
         {
@@ -4544,11 +4555,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModelBrowseIsVisible = false;
             AutoTranslateModelIsVisible = false;
             AutoTranslateUrl = Se.Settings.AutoTranslate.LlamaCppApiUrl;
-            AutoTranslateApiKey = string.Empty;
-            AutoTranslateApiKeyIsVisible = false;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.LlamaCppApiKey;
 
-            // Local vs. external server: the URL field is only shown for an external server, and a
-            // remote server serves whatever model it was started with, so the model combo hides.
+            // Local vs. external server: the URL and API key fields are only shown for an external
+            // server, and a remote server serves whatever model it was started with, so the model
+            // combo hides.
             _suppressLlamaCppRemoteToggle = true;
             LlamaCppUseRemoteServer = Se.Settings.Tools.BatchConvert.LlamaCppUseRemoteServer;
             _suppressLlamaCppRemoteToggle = false;
@@ -4599,12 +4610,12 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         UpdateTargetLanguages(engine);
     }
 
-    private void UpdateSourceLanguages(IAutoTranslator autoTranslator)
+    private void UpdateSourceLanguages(IAutoTranslator? autoTranslator)
     {
         UpdateSourceLanguages(autoTranslator, SourceLanguages);
     }
 
-    private void UpdateSourceLanguages(IAutoTranslator autoTranslator, ObservableCollection<TranslationPair> sourceLanguages)
+    private void UpdateSourceLanguages(IAutoTranslator? autoTranslator, ObservableCollection<TranslationPair> sourceLanguages)
     {
         SourceLanguages.Clear();
         if (autoTranslator == null)
@@ -4645,7 +4656,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         }
     }
 
-    private void UpdateTargetLanguages(IAutoTranslator autoTranslator)
+    private void UpdateTargetLanguages(IAutoTranslator? autoTranslator)
     {
         // Read before clearing: emptying the list the combo boxes show resets their selection
         var extraCodes = ExtraTargetLanguages.Select(p => p.SelectedLanguage?.Code).ToList();

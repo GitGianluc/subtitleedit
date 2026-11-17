@@ -1779,12 +1779,6 @@ public static class UiUtil
         return control;
     }
 
-    public static Label WithBold(this Label control)
-    {
-        control.FontWeight = FontWeight.Bold;
-        return control;
-    }
-
     public static Label WithOpacity(this Label control, double opacity)
     {
         control.Opacity = opacity;
@@ -1814,12 +1808,6 @@ public static class UiUtil
     public static Button WithPadding(this Button control, int padding)
     {
         control.Padding = new Thickness(padding);
-        return control;
-    }
-
-    public static Button WithBold(this Button control)
-    {
-        control.FontWeight = FontWeight.Bold;
         return control;
     }
 
@@ -3426,6 +3414,36 @@ public static class UiUtil
             {
                 throw;
             }
+        }
+    }
+
+    /// <summary>
+    /// The key handling most dialogs share: Escape closes <paramref name="window"/>.
+    /// </summary>
+    internal static void CloseOnEscape(KeyEventArgs e, Window? window)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            window?.Close();
+        }
+    }
+
+    /// <summary>
+    /// The key handling most dialogs share: Escape closes <paramref name="window"/> and the help
+    /// shortcut opens the help page <paramref name="helpName"/> (at <paramref name="section"/>).
+    /// </summary>
+    internal static void CloseOnEscapeOrShowHelp(KeyEventArgs e, Window? window, string helpName, string section = "")
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            window?.Close();
+        }
+        else if (IsHelp(e))
+        {
+            e.Handled = true;
+            ShowHelp(helpName, section);
         }
     }
 

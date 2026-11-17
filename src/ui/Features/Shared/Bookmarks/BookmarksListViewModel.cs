@@ -171,7 +171,7 @@ public partial class BookmarksListViewModel : ObservableObject
         {
             var result = await MessageBox.Show(
                 Window,
-                Se.Language.General.DeleteCurrentLine,
+                Se.Language.General.Delete,
                 Se.Language.General.BookmarkDeleteSelectedQuestion,
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
@@ -202,19 +202,7 @@ public partial class BookmarksListViewModel : ObservableObject
         Window?.Close();
     }
 
-    internal void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            Window?.Close();
-        }
-        else if (UiUtil.IsHelp(e))
-        {
-            e.Handled = true;
-            UiUtil.ShowHelp("features/subtitle-grid", "bookmarks");
-        }
-    }
+    internal void OnKeyDown(KeyEventArgs e) => UiUtil.CloseOnEscapeOrShowHelp(e, Window, "features/subtitle-grid", "bookmarks");
 
     internal void Initialize(List<SubtitleLineViewModel> allSubtitles)
     {
@@ -231,11 +219,6 @@ public partial class BookmarksListViewModel : ObservableObject
     internal void GridSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         HasBookmarks = SelectedSubtitle != null;
-    }
-
-    internal void OnBookmarksGridDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        Dispatcher.UIThread.Invoke(() => { GoTo(); });
     }
 
     internal void GridKeyDown(KeyEventArgs e)

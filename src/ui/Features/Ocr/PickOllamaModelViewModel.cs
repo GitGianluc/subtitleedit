@@ -3,6 +3,7 @@ using Avalonia.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.UiLogic.AutoTranslate;
 using System;
 using System.Collections.Generic;
@@ -64,9 +65,10 @@ public partial class PickOllamaModelViewModel : ObservableObject
     /// Populates the picker from the Ollama server's model list. <paramref name="visionOnly"/> is for the
     /// OCR callers, which can only use vision-capable models; text callers (auto-translate, AI review, AI
     /// assistant) pass false and see every installed model - filtering those to vision models would hide
-    /// exactly the ones they want.
+    /// exactly the ones they want. <paramref name="apiKey"/> is sent as a Bearer token when given, for
+    /// an Ollama server that asks for one.
     /// </summary>
-    public void Initialize(string title, string? selectedModel, string url, bool visionOnly = false)
+    public void Initialize(string title, string? selectedModel, string url, bool visionOnly = false, string? apiKey = null)
     {
         Title = title;
         Models.Clear();
@@ -75,7 +77,7 @@ public partial class PickOllamaModelViewModel : ObservableObject
         ShowAllModels = !visionOnly;
         _ = Task.Run(async () =>
         {
-            var fetched = await GetModelsWithCapabilitiesAsync(url);
+            var fetched = await GetModelsWithCapabilitiesAsync(url, apiKey);
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 _allModels = fetched;
@@ -151,7 +153,18 @@ public partial class PickOllamaModelViewModel : ObservableObject
         }
     }
 
-    private async Task<List<(string Name, bool IsVision)>> GetModelsWithCapabilitiesAsync(string url)
+    private static HttpRequestMessage MakeRequest(HttpMethod method, string url, string? apiKey)
+    {
+        var request = new HttpRequestMessage(method, url);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + apiKey.Trim());
+        }
+
+        return request;
+    }
+
+    private async Task<List<(string Name, bool IsVision)>> GetModelsWithCapabilitiesAsync(string url, string? apiKey)
     {
         var result = new List<(string, bool)>();
         var baseUrl = GetBaseUrl(url);
@@ -161,7 +174,8 @@ public partial class PickOllamaModelViewModel : ObservableObject
         List<string> names;
         try
         {
-            using var response = await _httpClient.GetAsync(tagsUrl);
+            using var request = MakeRequest(HttpMethod.Get, tagsUrl, apiKey);
+            using var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
             await using var stream = await response.Content.ReadAsStreamAsync();
@@ -185,8 +199,9 @@ public partial class PickOllamaModelViewModel : ObservableObject
         {
             try
             {
-                var body = new StringContent($"{{\"name\":\"{name}\"}}", Encoding.UTF8, "application/json");
-                using var response = await _httpClient.PostAsync(showUrl, body);
+                using var request = MakeRequest(HttpMethod.Post, showUrl, apiKey);
+                request.Content = new StringContent($"{{\"name\":\"{name}\"}}", Encoding.UTF8, "application/json");
+                using var response = await _httpClient.SendAsync(request);
                 if (!response.IsSuccessStatusCode)
                 {
                     return (name, false);
@@ -241,12 +256,5 @@ public partial class PickOllamaModelViewModel : ObservableObject
         Window?.Close();
     }
 
-    internal void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            Window?.Close();
-        }
-    }
+    internal void OnKeyDown(KeyEventArgs e) => UiUtil.CloseOnEscape(e, Window);
 }

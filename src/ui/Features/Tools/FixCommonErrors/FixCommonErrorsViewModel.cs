@@ -567,7 +567,10 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
     private void RebuildVisibleFixes()
     {
         VisibleFixes.Clear();
-        foreach (var item in Fixes)
+
+        // Fixes are collected rule by rule, so show them in line order like SE4 did (#16905).
+        // OrderBy is stable, so several fixes on one line keep the order their rules ran in.
+        foreach (var item in Fixes.OrderBy(f => f.Number))
         {
             if (PassesFixFilter(item))
             {
@@ -1061,19 +1064,7 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
         return Se.Language.Options.Settings.DialogStyleDashBothLinesWithSpace;
     }
 
-    internal void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            Window?.Close();
-        }
-        else if (UiUtil.IsHelp(e))
-        {
-            e.Handled = true;
-            UiUtil.ShowHelp("features/fix-common-errors");
-        }
-    }
+    internal void OnKeyDown(KeyEventArgs e) => UiUtil.CloseOnEscapeOrShowHelp(e, Window, "features/fix-common-errors");
 
     partial void OnSearchTextChanged(string value)
     {

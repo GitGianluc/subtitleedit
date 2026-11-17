@@ -703,13 +703,6 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         WriteToImageBasedFormat(item, imageSubtitle, cancellationToken);
     }
 
-    public class TransportStreamResult
-    {
-        public bool IsImage { get; set; }
-        public IOcrSubtitle? OcrSubtitle { get; set; }
-        public Subtitle? Subtitle { get; set; }
-    }
-
     public static List<IBinaryParagraphWithPosition> LoadDvbFromMatroska(MatroskaTrackInfo track, MatroskaFile matroska, ref Subtitle subtitle)
     {
         var sub = matroska.GetSubtitle(track.TrackNumber, null);
@@ -3910,7 +3903,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
         Configuration.Settings.Tools.OllamaPrompt = Se.Settings.AutoTranslate.OllamaPrompt;
         Configuration.Settings.Tools.OllamaApiUrl = Se.Settings.AutoTranslate.OllamaUrl;
+        Configuration.Settings.Tools.OllamaApiKey = Se.Settings.AutoTranslate.OllamaApiKey;
         Configuration.Settings.Tools.OllamaModel = Se.Settings.AutoTranslate.OllamaModel;
+
+        // The LM Studio prompt is edited in the translate settings dialog but only lives in
+        // Se.Settings across restarts - bridge it like the other prompts so a batch run uses it.
+        Configuration.Settings.Tools.LmStudioPrompt = Se.Settings.AutoTranslate.LmStudioPrompt;
 
         // The user-edited llama.cpp prompt lives in Se.Settings; without this a batch run would
         // fall back to the built-in default (a curated model's own prompt still wins - see
