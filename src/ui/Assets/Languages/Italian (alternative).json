@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.5.0-beta8",
+  "version": "v5.5.0-beta9",
   "translatedBy": "GitGianluc",
   "cultureName": "it-IT",
   "general": {
@@ -553,6 +553,7 @@
     "searchFontNames": "Ricerca nomi carattere…",
     "searchSubtitleFormats": "Ricerca formati sottotitolo",
     "searchLanguages": "Ricerca lingue",
+    "noMatches": "Nessuna corrispondenza",
     "seconds": "Secondi",
     "selectAll": "Seleziona tutto",
     "selectFilesToConvert": "Seleziona file da convertire",
@@ -3100,6 +3101,8 @@
       "qwen3TtsSettings": "Impostazioni Qwen3 TTS",
       "kokoroTtsSettings": "Impostazioni Kokoro TTS",
       "chatterboxTtsSettings": "Impostazioni Chatterbox TTS",
+      "referenceLanguage": "Lingua di riferimento",
+      "referenceLanguageHint": "La lingua parlata nei file WAV di riferimento importati (per una modalità di clonazione che prevede più lingue).",
       "piperSettings": "Impostazioni Piper",
       "voiceInstruction": "Creazione della voce",
       "voiceInstructionHint": "Opzionale – p. es. “Parla con tono pacato e amichevole”",
@@ -4713,6 +4716,7 @@
     "vobSubIsolateColorsHint": "Rigenera le immagini VobSub con un contrasto bianco e nero più netto prima dell’OCR, mantenendo il colore principale (il testo) ed eliminando i colori dei bordi e dell’anti-alias. Migliora il riconoscimento sui dischi in cui i contorni grigi fondono insieme i caratteri.",
     "llamaCppOcrSettingsTitle": "Impostazioni OCR con llama.cpp",
     "selectTesseractDictionary": "Seleziona dizionario Tesseract:",
+    "pleaseSelectTesseractDictionaryToDownload": "Seleziona un dizionario di Tesseract da scaricare.",
     "inspectBinaryOcrAdditionsTitle": "Ispeziona aggiunte OCR binario",
     "llamaCppOcr": "OCR con llama.cpp",
     "llamaCppOcrDescription": "Server locale llama.cpp (modello multimodale) utilizzato per l’OCR.",
