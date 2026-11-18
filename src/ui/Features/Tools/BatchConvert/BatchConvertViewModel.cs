@@ -554,6 +554,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             new OllamaAdvancedTranslate(),
             new LibreTranslate(),
             new OpenAiCompatibleTranslate(),
+            new OpenAiCompatibleAdvancedTranslate(),
             new LmStudioTranslate(),
             new LmStudioAdvancedTranslate(),
             new LlamaCppTranslate(),
@@ -3233,12 +3234,15 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     private async Task AutoTranslateBrowseModel()
     {
         // OpenAI-compatible servers list their models at GET {base}/v1/models instead of /api/tags.
-        if (SelectedAutoTranslator is OpenAiCompatibleTranslate or LmStudioAdvancedTranslate)
+        if (SelectedAutoTranslator is OpenAiCompatibleTranslate or OpenAiCompatibleAdvancedTranslate or LmStudioTranslate or LmStudioAdvancedTranslate)
         {
             var isOpenAiCompatible = SelectedAutoTranslator is OpenAiCompatibleTranslate;
+            var isOpenAiCompatibleAdvanced = SelectedAutoTranslator is OpenAiCompatibleAdvancedTranslate;
+            var isLmStudio = SelectedAutoTranslator is LmStudioTranslate;
             var openAiUrl = !string.IsNullOrWhiteSpace(AutoTranslateUrl)
                 ? AutoTranslateUrl.Trim()
-                : isOpenAiCompatible ? OpenAiCompatibleTranslate.DefaultUrl : LmStudioAdvancedTranslate.DefaultUrl;
+                : isOpenAiCompatible || isOpenAiCompatibleAdvanced ? OpenAiCompatibleTranslate.DefaultUrl
+                : isLmStudio ? LmStudioTranslate.DefaultUrl : LmStudioAdvancedTranslate.DefaultUrl;
             var apiKey = AutoTranslateApiKey; // a server that asks for a key asks for it on the model list too
             var openAiResult = await _windowService.ShowDialogAsync<PickOllamaModelWindow, PickOllamaModelViewModel>(Window!,
                 vm => { vm.InitializeOpenAiCompatible(Se.Language.General.PickModel, AutoTranslateModel, openAiUrl, apiKey); });
@@ -3249,6 +3253,14 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 if (isOpenAiCompatible)
                 {
                     Se.Settings.AutoTranslate.OpenAiCompatibleModel = openAiResult.SelectedModel;
+                }
+                else if (isOpenAiCompatibleAdvanced)
+                {
+                    Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedModel = openAiResult.SelectedModel;
+                }
+                else if (isLmStudio)
+                {
+                    Se.Settings.AutoTranslate.LmStudioModel = openAiResult.SelectedModel;
                 }
                 else
                 {
@@ -3265,8 +3277,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // so the advanced engine's /v1/chat/completions URL works as-is (it strips the path).
         var isAdvanced = SelectedAutoTranslator is OllamaAdvancedTranslate;
         var model = isAdvanced ? Se.Settings.AutoTranslate.OllamaAdvancedModel : Se.Settings.AutoTranslate.OllamaModel;
-        var url = isAdvanced ? Se.Settings.AutoTranslate.OllamaAdvancedUrl : Se.Settings.AutoTranslate.OllamaUrl;
-        var ollamaApiKey = isAdvanced ? AutoTranslateApiKey : Se.Settings.AutoTranslate.OllamaApiKey;
+
+        // The models of the server in the URL box, asked with the key next to it - both may be
+        // typed and not saved yet.
+        var url = TypedUrlOr(isAdvanced ? Se.Settings.AutoTranslate.OllamaAdvancedUrl : Se.Settings.AutoTranslate.OllamaUrl);
+        var ollamaApiKey = AutoTranslateApiKey;
 
         var result = await _windowService.ShowDialogAsync<PickOllamaModelWindow, PickOllamaModelViewModel>(Window!,
             vm => { vm.Initialize(Se.Language.General.PickOllamaModel, model, url, apiKey: ollamaApiKey); });
@@ -4048,6 +4063,21 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         };
     }
 
+    /// <summary>
+    /// The URL typed in the URL box, or the saved one while the box is empty.
+    /// </summary>
+    private string TypedUrlOr(string savedUrl)
+    {
+        return string.IsNullOrWhiteSpace(AutoTranslateUrl) ? savedUrl : AutoTranslateUrl.Trim();
+    }
+
+    /// <summary>
+    /// Applies the URL, key and model boxes of the selected engine when a run starts. A typed URL
+    /// is used for the run and saved: the engines read Configuration.Settings.Tools, which SE5
+    /// never persists, and BatchConverter.AutoTranslate copies several of the saved URLs over it
+    /// before each file - so a URL that only went to Configuration is gone after a restart, or
+    /// never reaches the engine at all.
+    /// </summary>
     internal void UpdateAutoTranslateSettings()
     {
         var translator = SelectedAutoTranslator;
@@ -4056,6 +4086,13 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             return;
         }
 
+        // The boxes are filled straight from the saved settings, and a saved value can be null
+        // (closing Auto-translate copies libse's LmStudioApiKey, which defaults to null), so
+        // every engine below would crash trimming it.
+        AutoTranslateUrl ??= string.Empty;
+        AutoTranslateApiKey ??= string.Empty;
+        AutoTranslateModel ??= string.Empty;
+
         var engineType = translator.GetType();
 
         if (engineType == typeof(LibreTranslate))
@@ -4063,21 +4100,16 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             if (!string.IsNullOrEmpty(AutoTranslateUrl.Trim()))
             {
                 Configuration.Settings.Tools.AutoTranslateLibreUrl = AutoTranslateUrl.Trim();
+                Se.Settings.AutoTranslate.LibreTranslateUrl = AutoTranslateUrl.Trim();
             }
             else if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.LibreTranslateUrl))
             {
                 Configuration.Settings.Tools.AutoTranslateLibreUrl = Se.Settings.AutoTranslate.LibreTranslateUrl;
             }
 
-            if (!string.IsNullOrEmpty(AutoTranslateApiKey.Trim()))
-            {
-                Configuration.Settings.Tools.AutoTranslateLibreApiKey = AutoTranslateApiKey.Trim();
-                Se.Settings.AutoTranslate.LibreTranslateApiKey = AutoTranslateApiKey.Trim();
-            }
-            else if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.LibreTranslateApiKey))
-            {
-                Configuration.Settings.Tools.AutoTranslateLibreApiKey = Se.Settings.AutoTranslate.LibreTranslateApiKey;
-            }
+            // Optional, so an emptied box clears the stored key.
+            Configuration.Settings.Tools.AutoTranslateLibreApiKey = AutoTranslateApiKey.Trim();
+            Se.Settings.AutoTranslate.LibreTranslateApiKey = AutoTranslateApiKey.Trim();
         }
 
         if (engineType == typeof(OpenAiCompatibleTranslate))
@@ -4102,21 +4134,34 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             Se.Settings.AutoTranslate.OpenAiCompatibleModel = AutoTranslateModel.Trim();
         }
 
+        if (engineType == typeof(OpenAiCompatibleAdvancedTranslate))
+        {
+            // As for OpenAI Compatible above, in SE's own settings only, like the other advanced engines.
+            var apiUrl = AutoTranslateUrl.Trim();
+            Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedUrl = string.IsNullOrEmpty(apiUrl) ? OpenAiCompatibleTranslate.DefaultUrl : apiUrl;
+            Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedApiKey = AutoTranslateApiKey.Trim();
+            Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedModel = AutoTranslateModel.Trim();
+        }
+
         if (engineType == typeof(LmStudioTranslate))
         {
             if (!string.IsNullOrEmpty(AutoTranslateUrl.Trim()))
             {
                 Configuration.Settings.Tools.LmStudioApiUrl = AutoTranslateUrl.Trim();
+                Se.Settings.AutoTranslate.LmStudioApiUrl = AutoTranslateUrl.Trim();
             }
             else if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.LmStudioApiUrl))
             {
                 Configuration.Settings.Tools.LmStudioApiUrl = Se.Settings.AutoTranslate.LmStudioApiUrl;
             }
 
-            // Optional, so an emptied box means no key. Like the URL it is only applied to the
-            // run: the Auto-translate window owns the saved pair.
+            // Optional, so an emptied box clears the stored key.
             Configuration.Settings.Tools.LmStudioApiKey = AutoTranslateApiKey.Trim();
+            Se.Settings.AutoTranslate.LmStudioApiKey = AutoTranslateApiKey.Trim();
+
+            // Optional, so an emptied box clears the stored model: LM Studio then uses the model it has loaded.
             Configuration.Settings.Tools.LmStudioModel = AutoTranslateModel.Trim();
+            Se.Settings.AutoTranslate.LmStudioModel = AutoTranslateModel.Trim();
         }
 
         if (engineType == typeof(LlamaCppTranslate) || engineType == typeof(LlamaCppAdvancedTranslate))
@@ -4143,10 +4188,15 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (engineType == typeof(OllamaTranslate))
         {
+            Se.Settings.AutoTranslate.OllamaUrl = TypedUrlOr(Se.Settings.AutoTranslate.OllamaUrl);
             if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.OllamaUrl))
             {
                 Configuration.Settings.Tools.OllamaApiUrl = Se.Settings.AutoTranslate.OllamaUrl;
             }
+
+            // Optional, so an emptied box clears the stored key.
+            Configuration.Settings.Tools.OllamaApiKey = AutoTranslateApiKey.Trim();
+            Se.Settings.AutoTranslate.OllamaApiKey = AutoTranslateApiKey.Trim();
 
             if (!string.IsNullOrEmpty(AutoTranslateModel))
             {
@@ -4187,6 +4237,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (engineType == typeof(NoLanguageLeftBehindServe))
         {
+            Se.Settings.AutoTranslate.NllbServeUrl = TypedUrlOr(Se.Settings.AutoTranslate.NllbServeUrl);
             if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.NllbServeUrl))
             {
                 Configuration.Settings.Tools.AutoTranslateNllbServeUrl = Se.Settings.AutoTranslate.NllbServeUrl;
@@ -4195,6 +4246,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (engineType == typeof(NoLanguageLeftBehindApi))
         {
+            Se.Settings.AutoTranslate.NllbApiUrl = TypedUrlOr(Se.Settings.AutoTranslate.NllbApiUrl);
             if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.NllbApiUrl))
             {
                 Configuration.Settings.Tools.AutoTranslateNllbApiUrl = Se.Settings.AutoTranslate.NllbApiUrl;
@@ -4203,6 +4255,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (engineType == typeof(DeepLTranslate))
         {
+            Se.Settings.AutoTranslate.DeepLUrl = TypedUrlOr(Se.Settings.AutoTranslate.DeepLUrl);
             if (!string.IsNullOrEmpty(Se.Settings.AutoTranslate.DeepLUrl))
             {
                 Configuration.Settings.Tools.AutoTranslateDeepLUrl = Se.Settings.AutoTranslate.DeepLUrl;
@@ -4459,7 +4512,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // Batch size, context history and the synopsis/glossary/style prompt only exist on the
         // advanced engines; they are shared settings, so the same window serves both llama.cpp
         // (local or remote llama-server) and Ollama.
-        LlamaCppAdvancedButtonIsVisible = engine is LlamaCppAdvancedTranslate or OllamaAdvancedTranslate or LmStudioAdvancedTranslate;
+        LlamaCppAdvancedButtonIsVisible = engine is LlamaCppAdvancedTranslate or OllamaAdvancedTranslate or LmStudioAdvancedTranslate or OpenAiCompatibleAdvancedTranslate;
 
         // The translate settings dialog holds the prompt and the shared delay/max-bytes/merge/
         // keep-music-lines settings, like in the Auto-translate window. The advanced engines run
@@ -4485,13 +4538,10 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateModel = Se.Settings.AutoTranslate.OllamaModel;
             AutoTranslateModelBrowseIsVisible = true;
             AutoTranslateModelIsVisible = true;
-            AutoTranslateUrl = string.Empty;
-            AutoTranslateUrlIsVisible = false;
-
-            // No key box without the URL box: this engine runs against the address saved in the
-            // Auto-translate window, and with the key saved there.
-            AutoTranslateApiKey = string.Empty;
-            AutoTranslateApiKeyIsVisible = false;
+            AutoTranslateUrl = Se.Settings.AutoTranslate.OllamaUrl;
+            AutoTranslateUrlIsVisible = true;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.OllamaApiKey;
+            AutoTranslateApiKeyIsVisible = true;
         }
         else if (engine is OllamaAdvancedTranslate)
         {
@@ -4539,11 +4589,23 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
             AutoTranslateApiKey = Se.Settings.AutoTranslate.OpenAiCompatibleApiKey;
             AutoTranslateApiKeyIsVisible = true;
         }
+        else if (engine is OpenAiCompatibleAdvancedTranslate)
+        {
+            // Url, key and model as for OpenAI Compatible above, from its own settings.
+            AutoTranslateModel = Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedModel;
+            AutoTranslateModelBrowseIsVisible = true;
+            AutoTranslateModelIsVisible = true;
+            AutoTranslateUrl = Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedUrl;
+            AutoTranslateUrlIsVisible = true;
+            AutoTranslateApiKey = Se.Settings.AutoTranslate.OpenAiCompatibleAdvancedApiKey;
+            AutoTranslateApiKeyIsVisible = true;
+        }
         else if (engine is LmStudioTranslate)
         {
-            AutoTranslateModel = string.Empty;
-            AutoTranslateModelBrowseIsVisible = false;
-            AutoTranslateModelIsVisible = false;
+            // Empty model = whatever model LM Studio has loaded; "Browse" asks /v1/models.
+            AutoTranslateModel = Se.Settings.AutoTranslate.LmStudioModel;
+            AutoTranslateModelBrowseIsVisible = true;
+            AutoTranslateModelIsVisible = true;
             AutoTranslateUrl = Se.Settings.AutoTranslate.LmStudioApiUrl;
             AutoTranslateUrlIsVisible = true;
             AutoTranslateApiKey = Se.Settings.AutoTranslate.LmStudioApiKey;

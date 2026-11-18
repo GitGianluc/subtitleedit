@@ -39,7 +39,7 @@ public class BatchConvertAutoTranslateEngineTests
         var original = Se.Settings.AutoTranslate.LlamaCppAdvanced;
         try
         {
-            var engines = new AdvancedTranslatorBase[] { new LlamaCppAdvancedTranslate(), new OllamaAdvancedTranslate(), new LmStudioAdvancedTranslate() };
+            var engines = new AdvancedTranslatorBase[] { new LlamaCppAdvancedTranslate(), new OllamaAdvancedTranslate(), new LmStudioAdvancedTranslate(), new OpenAiCompatibleAdvancedTranslate() };
             var replaced = new SeLlamaCppAdvanced { BatchSize = 7 };
             Se.Settings.AutoTranslate.LlamaCppAdvanced = replaced;
 
@@ -109,8 +109,7 @@ public class BatchConvertAutoTranslateEngineTests
     /// <summary>
     /// A llama.cpp, Ollama or LM Studio server can ask for an API key. The key box goes with the URL
     /// box: shown with each engine's own saved key where the URL is editable, hidden for the server
-    /// Subtitle Edit starts itself and for the classic Ollama engine, whose address (and key) come
-    /// from the Auto-translate window.
+    /// Subtitle Edit starts itself.
     /// </summary>
     [AvaloniaFact]
     public void LocalServerEngines_ShowTheKeyBoxNextToTheUrlBox()
@@ -140,8 +139,10 @@ public class BatchConvertAutoTranslateEngineTests
             Assert.Equal("lmstudio-advanced-key", viewModel.AutoTranslateApiKey);
 
             Select(typeof(OllamaTranslate));
-            Assert.False(viewModel.AutoTranslateUrlIsVisible);
-            Assert.False(viewModel.AutoTranslateApiKeyIsVisible);
+            Assert.True(viewModel.AutoTranslateUrlIsVisible);
+            Assert.Equal(keys.OllamaUrl, viewModel.AutoTranslateUrl);
+            Assert.True(viewModel.AutoTranslateApiKeyIsVisible);
+            Assert.Equal("ollama-key", viewModel.AutoTranslateApiKey);
 
             foreach (var llamaCpp in new[] { typeof(LlamaCppTranslate), typeof(LlamaCppAdvancedTranslate) })
             {
@@ -197,6 +198,106 @@ public class BatchConvertAutoTranslateEngineTests
     }
 
     /// <summary>
+    /// The engines read their URL from Configuration.Settings.Tools, which is not persisted, and a
+    /// run copies several of the saved URLs over it. So a URL typed in the box has to land in both
+    /// places, or it is ignored (LibreTranslate, NLLB, DeepL) or gone after a restart (LM Studio).
+    /// An emptied box keeps the saved URL.
+    /// </summary>
+    [AvaloniaFact]
+    public void TypedUrl_IsUsedForTheRunAndSaved()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        var se = Se.Settings.AutoTranslate;
+        var tools = Configuration.Settings.Tools;
+        var viewModel = MakeViewModel();
+        var engines = new (Type Engine, Func<string> Saved, Func<string> Used)[]
+        {
+            (typeof(LibreTranslate), () => se.LibreTranslateUrl, () => tools.AutoTranslateLibreUrl),
+            (typeof(NoLanguageLeftBehindServe), () => se.NllbServeUrl, () => tools.AutoTranslateNllbServeUrl),
+            (typeof(NoLanguageLeftBehindApi), () => se.NllbApiUrl, () => tools.AutoTranslateNllbApiUrl),
+            (typeof(DeepLTranslate), () => se.DeepLUrl, () => tools.AutoTranslateDeepLUrl),
+            (typeof(LmStudioTranslate), () => se.LmStudioApiUrl, () => tools.LmStudioApiUrl),
+            (typeof(OllamaTranslate), () => se.OllamaUrl, () => tools.OllamaApiUrl),
+        };
+
+        foreach (var (engine, savedUrl, usedUrl) in engines)
+        {
+            viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t.GetType() == engine);
+            viewModel.OnAutoTranslatorChanged();
+            Assert.True(viewModel.AutoTranslateUrlIsVisible, engine.Name);
+
+            var typed = "http://typed.example/" + engine.Name + "/";
+            viewModel.AutoTranslateUrl = " " + typed + " ";
+            viewModel.UpdateAutoTranslateSettings();
+            Assert.Equal(typed, usedUrl());
+            Assert.Equal(typed, savedUrl());
+
+            viewModel.AutoTranslateUrl = string.Empty;
+            viewModel.UpdateAutoTranslateSettings();
+            Assert.Equal(typed, usedUrl());
+            Assert.Equal(typed, savedUrl());
+        }
+    }
+
+    /// <summary>
+    /// The key goes with the URL: what is typed for Ollama or LM Studio reaches the run and is
+    /// saved, and an emptied box clears it.
+    /// </summary>
+    [AvaloniaFact]
+    public void OllamaAndLmStudio_TypedKeyIsUsedForTheRunAndSaved()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        var se = Se.Settings.AutoTranslate;
+        var tools = Configuration.Settings.Tools;
+        var viewModel = MakeViewModel();
+        var engines = new (Type Engine, Func<string> Saved, Func<string> Used)[]
+        {
+            (typeof(OllamaTranslate), () => se.OllamaApiKey, () => tools.OllamaApiKey),
+            (typeof(LmStudioTranslate), () => se.LmStudioApiKey, () => tools.LmStudioApiKey),
+        };
+
+        foreach (var (engine, savedKey, usedKey) in engines)
+        {
+            viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t.GetType() == engine);
+            viewModel.OnAutoTranslatorChanged();
+
+            viewModel.AutoTranslateApiKey = " typed-key ";
+            viewModel.UpdateAutoTranslateSettings();
+            Assert.Equal("typed-key", usedKey());
+            Assert.Equal("typed-key", savedKey());
+
+            viewModel.AutoTranslateApiKey = string.Empty;
+            viewModel.UpdateAutoTranslateSettings();
+            Assert.Equal(string.Empty, usedKey());
+            Assert.Equal(string.Empty, savedKey());
+        }
+    }
+
+    /// <summary>
+    /// LibreTranslate's key is optional too (a self-hosted server asks for none), so an emptied box
+    /// clears the saved key, as the Auto-translate window does. The run used to send it anyway.
+    /// </summary>
+    [AvaloniaFact]
+    public void LibreTranslate_EmptiedKeyBoxClearsTheSavedKey()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        Se.Settings.AutoTranslate.LibreTranslateApiKey = "saved-key";
+        var viewModel = MakeViewModel();
+        viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t is LibreTranslate);
+        viewModel.OnAutoTranslatorChanged();
+
+        // The box shows the saved key, and left as it is, the run uses it.
+        Assert.Equal("saved-key", viewModel.AutoTranslateApiKey);
+        viewModel.UpdateAutoTranslateSettings();
+        Assert.Equal("saved-key", Configuration.Settings.Tools.AutoTranslateLibreApiKey);
+
+        viewModel.AutoTranslateApiKey = string.Empty;
+        viewModel.UpdateAutoTranslateSettings();
+        Assert.Equal(string.Empty, Configuration.Settings.Tools.AutoTranslateLibreApiKey);
+        Assert.Equal(string.Empty, Se.Settings.AutoTranslate.LibreTranslateApiKey);
+    }
+
+    /// <summary>
     /// The generic OpenAI-compatible engine (vLLM, a hand-started llama-server, hosted providers)
     /// has no model list to browse, so all three of URL, API key and model are free-text and come
     /// from its own settings.
@@ -219,6 +320,152 @@ public class BatchConvertAutoTranslateEngineTests
         Assert.Equal("http://example.local:8000/v1/chat/completions", viewModel.AutoTranslateUrl);
         Assert.Equal("sk-test", viewModel.AutoTranslateApiKey);
         Assert.Equal("gemma-3-12b", viewModel.AutoTranslateModel);
+    }
+
+    /// <summary>
+    /// The OpenAI Compatible advanced engine takes url, key and model like the regular OpenAI
+    /// Compatible engine, from its own settings: the boxes and Browse show its saved values, a run
+    /// saves what is typed, an emptied url box falls back to the default url, and an emptied key or
+    /// model box clears it.
+    /// </summary>
+    [AvaloniaFact]
+    public void OpenAiCompatibleAdvanced_ShowsItsOwnUrlKeyAndModel_AndARunSavesThem()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        var se = Se.Settings.AutoTranslate;
+        (se.OpenAiCompatibleUrl, se.OpenAiCompatibleModel, se.OpenAiCompatibleApiKey) = ("http://regular.example/v1/chat/completions", "regular-model", "regular-key");
+        (se.OpenAiCompatibleAdvancedUrl, se.OpenAiCompatibleAdvancedModel, se.OpenAiCompatibleAdvancedApiKey) = ("https://hosted.example/api/v1/chat/completions", "vendor/model", "advanced-key");
+        var viewModel = MakeViewModel();
+
+        viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t is OpenAiCompatibleAdvancedTranslate);
+        viewModel.OnAutoTranslatorChanged();
+
+        Assert.True(viewModel.AutoTranslateUrlIsVisible);
+        Assert.True(viewModel.AutoTranslateApiKeyIsVisible);
+        Assert.True(viewModel.AutoTranslateModelIsVisible);
+        Assert.True(viewModel.AutoTranslateModelBrowseIsVisible);
+        Assert.True(viewModel.LlamaCppAdvancedButtonIsVisible);
+        Assert.Equal("https://hosted.example/api/v1/chat/completions", viewModel.AutoTranslateUrl);
+        Assert.Equal("advanced-key", viewModel.AutoTranslateApiKey);
+        Assert.Equal("vendor/model", viewModel.AutoTranslateModel);
+
+        viewModel.AutoTranslateUrl = " http://typed.example/v1/chat/completions ";
+        viewModel.AutoTranslateApiKey = " typed-key ";
+        viewModel.AutoTranslateModel = " typed/model ";
+        viewModel.UpdateAutoTranslateSettings();
+        Assert.Equal("http://typed.example/v1/chat/completions", se.OpenAiCompatibleAdvancedUrl);
+        Assert.Equal("typed-key", se.OpenAiCompatibleAdvancedApiKey);
+        Assert.Equal("typed/model", se.OpenAiCompatibleAdvancedModel);
+
+        viewModel.AutoTranslateUrl = string.Empty;
+        viewModel.AutoTranslateApiKey = string.Empty;
+        viewModel.AutoTranslateModel = string.Empty;
+        viewModel.UpdateAutoTranslateSettings();
+        Assert.Equal(OpenAiCompatibleTranslate.DefaultUrl, se.OpenAiCompatibleAdvancedUrl);
+        Assert.Equal(string.Empty, se.OpenAiCompatibleAdvancedApiKey);
+        Assert.Equal(string.Empty, se.OpenAiCompatibleAdvancedModel);
+
+        // The regular engine's settings are its own.
+        Assert.Equal(("http://regular.example/v1/chat/completions", "regular-model", "regular-key"), (se.OpenAiCompatibleUrl, se.OpenAiCompatibleModel, se.OpenAiCompatibleApiKey));
+    }
+
+    /// <summary>
+    /// LM Studio's model box opens with the model saved in the Auto-translate window, so a run
+    /// uses that model instead of clearing it.
+    /// </summary>
+    [AvaloniaFact]
+    public void LmStudio_RunUsesTheSavedModel()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        Se.Settings.AutoTranslate.LmStudioModel = "saved-model";
+        Configuration.Settings.Tools.LmStudioModel = string.Empty;
+        var viewModel = MakeViewModel();
+        viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t is LmStudioTranslate);
+        viewModel.OnAutoTranslatorChanged();
+        Assert.True(viewModel.AutoTranslateModelIsVisible);
+        Assert.Equal("saved-model", viewModel.AutoTranslateModel);
+
+        viewModel.UpdateAutoTranslateSettings();
+
+        Assert.Equal("saved-model", Configuration.Settings.Tools.LmStudioModel);
+        Assert.Equal("saved-model", Se.Settings.AutoTranslate.LmStudioModel);
+    }
+
+    /// <summary>
+    /// A model typed for LM Studio is used for the run and saved, and an emptied box clears it:
+    /// LM Studio then uses the model it has loaded, as in the Auto-translate window.
+    /// </summary>
+    [AvaloniaFact]
+    public void LmStudio_TypedModelIsUsedAndSaved_EmptiedBoxClearsIt()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        Se.Settings.AutoTranslate.LmStudioModel = "saved-model";
+        var viewModel = MakeViewModel();
+        viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t is LmStudioTranslate);
+        viewModel.OnAutoTranslatorChanged();
+        Assert.True(viewModel.AutoTranslateModelBrowseIsVisible);
+
+        viewModel.AutoTranslateModel = " typed-model ";
+        viewModel.UpdateAutoTranslateSettings();
+        Assert.Equal("typed-model", Configuration.Settings.Tools.LmStudioModel);
+        Assert.Equal("typed-model", Se.Settings.AutoTranslate.LmStudioModel);
+
+        viewModel.AutoTranslateModel = string.Empty;
+        viewModel.UpdateAutoTranslateSettings();
+        Assert.Equal(string.Empty, Configuration.Settings.Tools.LmStudioModel);
+        Assert.Equal(string.Empty, Se.Settings.AutoTranslate.LmStudioModel);
+    }
+
+    /// <summary>
+    /// UpdateAutoTranslateSettings writes URLs, keys, models and more to both static settings
+    /// objects; this puts every string and bool property of both back afterwards.
+    /// </summary>
+    /// <summary>
+    /// Closing Auto-translate copies libse's LmStudioApiKey (null by default) into the saved
+    /// settings; a Batch convert run with LM Studio then crashed trimming the null key.
+    /// </summary>
+    [AvaloniaFact]
+    public void LmStudio_NullSavedApiKey_DoesNotCrash()
+    {
+        using var _ = new TranslateSettingsSnapshot();
+        Se.Settings.AutoTranslate.LmStudioApiKey = null!;
+        Se.Settings.AutoTranslate.LmStudioApiUrl = null!;
+        var viewModel = MakeViewModel();
+        viewModel.SelectedAutoTranslator = viewModel.AutoTranslators.First(t => t is LmStudioTranslate);
+        viewModel.OnAutoTranslatorChanged();
+
+        viewModel.UpdateAutoTranslateSettings();
+
+        Assert.Equal(string.Empty, Configuration.Settings.Tools.LmStudioApiKey);
+        Assert.Equal(string.Empty, Se.Settings.AutoTranslate.LmStudioApiKey);
+    }
+
+    private sealed class TranslateSettingsSnapshot : IDisposable
+    {
+        private readonly List<(object Target, System.Reflection.PropertyInfo Property, object? Value)> _values = new();
+
+        public TranslateSettingsSnapshot()
+        {
+            foreach (var target in new object[] { Se.Settings.AutoTranslate, Configuration.Settings.Tools })
+            {
+                foreach (var property in target.GetType().GetProperties())
+                {
+                    if ((property.PropertyType == typeof(string) || property.PropertyType == typeof(bool)) &&
+                        property.CanRead && property.CanWrite && property.GetIndexParameters().Length == 0)
+                    {
+                        _values.Add((target, property, property.GetValue(target)));
+                    }
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var (target, property, value) in _values)
+            {
+                property.SetValue(target, value);
+            }
+        }
     }
 
     private static BatchConvertViewModel MakeViewModel()

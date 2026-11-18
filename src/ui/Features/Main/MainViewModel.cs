@@ -12243,6 +12243,13 @@ public partial class MainViewModel :
             return;
         }
 
+        // yt-dlp needs ffmpeg to merge the separate video and audio streams most sites serve;
+        // without one it leaves two unmerged files and the download fails (#17001).
+        if (!await RequireFfmpegOk())
+        {
+            return;
+        }
+
         var suggestedName = await MakeDownloadSuggestedFileNameAsync(url);
         var outputPath = await _fileHelper.PickSaveFile(Window, ".mkv", suggestedName, Se.Language.General.SaveVideoAsVideoTitle);
         if (string.IsNullOrEmpty(outputPath))
@@ -31948,7 +31955,9 @@ public partial class MainViewModel :
             {
                 WaveformGeneratingText = Se.Language.Main.GeneratingWaveformDotDotDot;
                 using var waveFile = new WavePeakGenerator2(tempWaveFileName);
-                var wavePeaks = waveFile.GeneratePeaks(0, peakWaveFileName);
+                // The wave file starts at the file's start time; the player may not (#16966).
+                var delayMilliseconds = WaveFileExtractor.GetTimelineOffsetMilliseconds(videoFileName);
+                var wavePeaks = waveFile.GeneratePeaks(delayMilliseconds, peakWaveFileName);
 
                 if (WasCancelled())
                 {
@@ -31959,7 +31968,7 @@ public partial class MainViewModel :
                 if (Se.Settings.Waveform.GenerateSpectrogram)
                 {
                     WaveformGeneratingText = Se.Language.Main.GeneratingSpectrogramDotDotDot;
-                    var spectrogram = waveFile.GenerateSpectrogram(0, spectrogramFolderName, _videoOpenTokenSource.Token);
+                    var spectrogram = waveFile.GenerateSpectrogram(delayMilliseconds, spectrogramFolderName, _videoOpenTokenSource.Token);
                     // On the UI thread: SetSpectrogram synchronously disposes the SKBitmaps
                     // DrawSpectrogram is handing to Skia, and this method runs on the
                     // extraction worker (everything else here marshals the same way).
@@ -32090,6 +32099,9 @@ public partial class MainViewModel :
         var argumentsFormat = Se.Settings.Video.ShowChangesFFmpegArguments;
         var arguments = string.Format(argumentsFormat, videoFileName, threshold);
 
+        // ffmpeg's "pts_time" counts from the file's start time, the player may not (#16966).
+        var timelineOffsetSeconds = WaveFileExtractor.GetTimelineOffsetMilliseconds(videoFileName) / 1000.0;
+
         // Filled on ffmpeg's stderr callback thread; the UI only ever gets snapshots of it
         // (see PublishShotChanges). The waveform render loop binary-searches ShotChanges at
         // ~60 fps, so handing it a list a background thread keeps Add'ing to could tear a
@@ -32111,7 +32123,7 @@ public partial class MainViewModel :
                 {
                     lock (collected)
                     {
-                        collected.Add(seconds);
+                        collected.Add(seconds + timelineOffsetSeconds);
                     }
                 }
             }
