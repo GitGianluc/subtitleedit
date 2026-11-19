@@ -204,6 +204,7 @@ using Nikse.SubtitleEdit.Logic.Plugins;
 using Nikse.SubtitleEdit.Logic.UndoRedo;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.Ffmpeg;
+using Nikse.SubtitleEdit.Logic.VideoPlayers;
 using Nikse.SubtitleEdit.Logic.VideoPlayers.LibMpvDynamic;
 using System;
 using System.Collections.Generic;
@@ -5305,6 +5306,50 @@ public partial class MainViewModel :
             ShowStatus(Se.Language.Video.SubtitlesOnVideoPlayerOff);
         }
 
+        _shortcutManager.ClearKeys();
+    }
+
+    /// <summary>
+    /// Cycles the video flip: off, horizontal (mirror), vertical, both (#17012). Only the video
+    /// is flipped - mpv draws the subtitles after its video filters, so they stay readable.
+    /// The flip is for this session only, and shared by every mpv player (docked, undocked,
+    /// fullscreen).
+    /// </summary>
+    [RelayCommand]
+    private void CycleVideoFlip()
+    {
+        var players = new[] { VideoPlayerControl, _fullScreenVideoPlayerControl, _videoPlayerUndockedViewModel?.VideoPlayerControl }
+            .Select(p => p?.VideoPlayer)
+            .OfType<LibMpvDynamicPlayer>()
+            .Distinct()
+            .ToList();
+        if (players.Count == 0)
+        {
+            ShowStatus(Se.Language.Video.VideoFlipRequiresMpv);
+            _shortcutManager.ClearKeys();
+            return;
+        }
+
+        var flip = LibMpvDynamicPlayer.SessionVideoFlip switch
+        {
+            VideoFlipMode.None => VideoFlipMode.Horizontal,
+            VideoFlipMode.Horizontal => VideoFlipMode.Vertical,
+            VideoFlipMode.Vertical => VideoFlipMode.HorizontalAndVertical,
+            _ => VideoFlipMode.None,
+        };
+        LibMpvDynamicPlayer.SessionVideoFlip = flip;
+        foreach (var mpv in players)
+        {
+            mpv.ApplyVideoFlip();
+        }
+
+        ShowStatus(flip switch
+        {
+            VideoFlipMode.Horizontal => Se.Language.Video.VideoFlipHorizontal,
+            VideoFlipMode.Vertical => Se.Language.Video.VideoFlipVertical,
+            VideoFlipMode.HorizontalAndVertical => Se.Language.Video.VideoFlipHorizontalAndVertical,
+            _ => Se.Language.Video.VideoFlipOff,
+        });
         _shortcutManager.ClearKeys();
     }
 
@@ -12002,6 +12047,11 @@ public partial class MainViewModel :
             case OpenFromUrlMode.OpenOnline:
                 await VideoOpenFile(url);
                 SetSubtitleFileNameFromVideoIfEmpty(url);
+                if (!await WaitForOnlineVideoLoadedAsync(url))
+                {
+                    break;
+                }
+
                 if (result.DownloadSubtitles)
                 {
                     // No video on disk — fetch subs to a temp dir, show picker, then
@@ -12029,6 +12079,65 @@ public partial class MainViewModel :
                 break;
         }
     }
+
+    /// <summary>
+    /// Shows "Loading online video..." until the stream opened by "Open online" is playable.
+    /// Opening a URL returns as soon as the player has queued it, while the player still has to
+    /// resolve it via yt-dlp and buffer the stream - often many seconds of an empty player with
+    /// no sign that anything is happening (#17001). The player reports no load failure, so the
+    /// wait ends on a known duration, on Cancel (which closes the video), when another video
+    /// replaces this one, or after a timeout. Returns false when the user cancelled.
+    /// </summary>
+    private async Task<bool> WaitForOnlineVideoLoadedAsync(string url, int timeoutSeconds = 90)
+    {
+        var vp = GetVideoPlayerControl();
+        if (vp == null || Window == null || IsOnlineVideoReady(vp))
+        {
+            return true;
+        }
+
+        var pleaseWaitVm = _windowService.ShowWindow<PleaseWaitWindow, PleaseWaitViewModel>(Window, (_, vm) =>
+        {
+            vm.StatusText = Se.Language.Video.OpenFromUrlLoadingVideo;
+            vm.CanCancel = true;
+        });
+
+        try
+        {
+            var end = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+            while (DateTime.UtcNow < end)
+            {
+                if (pleaseWaitVm.IsCancelled)
+                {
+                    if (_videoFileName == url)
+                    {
+                        VideoCloseFile();
+                    }
+
+                    return false;
+                }
+
+                // A video opened meanwhile (the wait window is not modal) or a layout rebuild
+                // that disposed the control ends this wait - it is no longer about this stream.
+                vp = GetVideoPlayerControl();
+                if (vp == null || vp.IsDisposed || _videoFileName != url || IsOnlineVideoReady(vp))
+                {
+                    return true;
+                }
+
+                await Task.Delay(200);
+            }
+
+            ShowStatus(Se.Language.Video.OpenFromUrlStillLoadingVideo, 6000);
+            return true;
+        }
+        finally
+        {
+            pleaseWaitVm.Close();
+        }
+    }
+
+    private static bool IsOnlineVideoReady(VideoPlayerControl vp) => vp.VideoPlayer.Duration > 0.001;
 
     /// <summary>
     /// Streaming-mode helper: runs yt-dlp once to write every available subtitle
@@ -12360,7 +12469,7 @@ public partial class MainViewModel :
         // tried out without reopening it; "Cancel" just closes and keeps what was applied.
         await ShowDialogAsync<SetVideoOffsetWindow, SetVideoOffsetViewModel>(vm =>
         {
-            vm.Initialize(ApplyVideoOffset, ResetVideoOffset);
+            vm.Initialize(ApplyVideoOffset, ResetVideoOffset, _videoFileName);
         });
     }
 
@@ -21113,6 +21222,7 @@ public partial class MainViewModel :
         _fullScreenVideoPlayerControl.PreviousSubtitleCommand = PlayPreviousCommand;
         _fullScreenVideoPlayerControl.NextSubtitleCommand = PlayNextCommand;
         _fullScreenVideoPlayerControl.ToggleSubtitlesCommand = ToggleSubtitlesOnVideoPlayerCommand;
+        _fullScreenVideoPlayerControl.CycleVideoFlipCommand = CycleVideoFlipCommand;
         _fullScreenVideoPlayerControl.SubtitlesOnVideoIsVisible = _mpvReloader.SubtitlesVisible;
         _fullScreenVideoPlayerControl.SubtitleButtonsIsVisible = true;
         _fullScreenVideoPlayerControl.PlaybackSpeedCommand = SetPlaybackSpeedCommand;

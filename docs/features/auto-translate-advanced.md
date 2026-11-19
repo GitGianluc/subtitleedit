@@ -20,7 +20,7 @@ With an advanced engine selected, click **Advanced...** in the engine settings r
 
 ### Context
 
-- **Synopsis** — Optional description of the content (genre, setting, tone), included in every request so the model picks a fitting style. **Generate with AI** drafts it, with names and terms, from the whole subtitle: llama.cpp advanced uses the local model, the other advanced engines their own server, model and key
+- **Synopsis** — Optional description of the content (genre, setting, tone), included in every request so the model picks a fitting style. **Generate with AI** drafts it, with names and terms, from the whole subtitle: llama.cpp advanced uses the local model, or your own server when **Use external server (URL)** is on, the other advanced engines their own server, model and key
 - **Glossary** — Terms the model must translate a certain way, one per line: `source term = translation`
 - **Prompt text** — Custom system instructions replacing the built-in prompt (`{0}` = source language, `{1}` = target language); leave empty to use the built-in prompt
 - **Previous lines as context** — How many already-translated lines before the batch are sent as history for consistency (default 12)
@@ -32,13 +32,13 @@ With an advanced engine selected, click **Advanced...** in the engine settings r
 
 `-1` means the model/server default is used.
 
-- **Temperature** — Randomness. When unset, Subtitle Edit uses the curated value for the model, or 0.2 — low temperatures keep terminology consistent across batches
+- **Temperature** — Randomness. When unset, Subtitle Edit uses the curated value for a local llama.cpp model, or 0.2 — low temperatures keep terminology consistent across batches
 - **Top-p**, **Top-k**, **Repeat penalty** — Standard sampling options, passed through when set
 - **Max tokens per reply** — Response length cap; unset means no cap is sent
 - **Server context size (tokens)** — The context window for the locally started llama.cpp server (default 16384). Bigger batches, more history, and a long synopsis/glossary need more context. Only affects the local llama.cpp server; Ollama and LM Studio manage their own context
 - **Extra server parameters** — Additional `llama-server` command-line arguments, e.g. `-ngl 30 --no-mmap`, applied when the local server starts. They are appended after Subtitle Edit's own flags, so a repeated flag overrides Subtitle Edit's value
 - **Use only these parameters** — Start `llama-server` with the parameters above instead of Subtitle Edit's own tuning; only the model, host and port are still set. Ignored while the field is empty
-- **Extra request JSON** — A JSON object merged into every request after Subtitle Edit's own fields, so its fields win: provider switches such as a reasoning on/off field, or sampling fields the dialog does not have (`{"top_k": 40}`). A `null` value removes a field. `messages` and `response_format` cannot be set. Like the other settings here, it is shared by all advanced engines
+- **Extra request JSON** — A JSON object merged into every request after Subtitle Edit's own fields, so its fields win: provider switches such as a reasoning on/off field, or sampling fields the dialog does not have (`{"top_k": 40}`). A `null` value removes a field. `messages` and `response_format` cannot be set. Like the other settings here, it is shared by all advanced engines. **Generate with AI** sends it too, as it stands in the box
 
 ## llama.cpp Engine Settings
 
