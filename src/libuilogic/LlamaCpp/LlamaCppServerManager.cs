@@ -234,6 +234,19 @@ public static class LlamaCppServerManager
         // Trained on a fixed prompt (PromptTemplate below, with language NAMES - the generic prompt
         // makes it answer in Chinese) and Tencent-recommended sampling. Embedded chat template works
         // as-is, so no ChatTemplate/NoJinja overrides.
+        // Hy-MT2 30B-A3B - the same family as a mixture-of-experts model (30B total, ~3B active per
+        // token), as mradermacher's imatrix IQ3_XXS: Tencent's own GGUFs start at Q4_K_M (18.2 GB).
+        // Tested 2026-11-20 (seconv, 24 dialog lines EN->DE/FR/JA, M4 24 GB): the only model of the
+        // list that renders idioms by meaning instead of word by word ("That ship has sailed" ->
+        // "Le train est déjà parti" / "もう手遅れだよ", "not holding my breath" right in all three),
+        // clearly ahead of the 7B ("Avant-propos", "Jure-moi", a stray "<br") and faster than
+        // Index-Translate 9B (13-31 s vs ~40 s per language). Its slips were small: a dropped
+        // apostrophe/word in French ("qu un", "jusqu'lundi"), one Japanese line given twice, and a
+        // space after dialogue dashes. TranslateGemma 27B at the same size (IQ3_XXS, 10.7 GB) was
+        // tested alongside and is not offered: stray "< />" fragments on many lines, and 15-25x slower.
+        new LlamaCppModel("Hy-MT2 30B-A3B (IQ3_XXS) - 33 languages, no Nordic", "Hy-MT2-30B-A3B.i1-IQ3_XXS.gguf", "11.6 GB",
+            "https://huggingface.co/mradermacher/Hy-MT2-30B-A3B-i1-GGUF/resolve/main/Hy-MT2-30B-A3B.i1-IQ3_XXS.gguf",
+            PromptTemplate: HyMt2PromptTemplate, Temperature: 0.7, TopP: 0.6, TopK: 20, RepeatPenalty: 1.05),
         new LlamaCppModel("Hy-MT2 7B (Q4_K_M) - 33 languages, no Nordic", "Hy-MT2-7B-Q4_K_M.gguf", "4.6 GB",
             "https://huggingface.co/tencent/Hy-MT2-7B-GGUF/resolve/main/Hy-MT2-7B-Q4_K_M.gguf",
             PromptTemplate: HyMt2PromptTemplate, Temperature: 0.7, TopP: 0.6, TopK: 20, RepeatPenalty: 1.05),
@@ -780,6 +793,15 @@ public static class LlamaCppServerManager
         return candidates.FirstOrDefault(File.Exists);
     }
 
+    /// <summary>
+    /// True for an OCR-only vision model (GLM-OCR, HunyuanOCR, LightOnOCR, PaddleOCR-VL...): it reads
+    /// text off an image and cannot translate or review, so it is kept out of those model lists.
+    /// </summary>
+    internal static bool IsOcrModelFileName(string fileName)
+    {
+        return fileName.Contains("ocr", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>True when the file name is a vision projector rather than a model in its own right.</summary>
     private static bool IsMmprojFileName(string fileName)
     {
@@ -866,6 +888,14 @@ public static class LlamaCppServerManager
                     continue;
                 }
                 if (IsMmprojFileName(name))
+                {
+                    continue;
+                }
+
+                // An OCR model left over from an older curated list (LightOnOCR 1B after LightOnOCR-3
+                // replaced it) is no longer "known", so it showed up as a custom translate model -
+                // and only answers with the prompt's "<translation of line 1>" example.
+                if (!requireVisionProjector && IsOcrModelFileName(name))
                 {
                     continue;
                 }

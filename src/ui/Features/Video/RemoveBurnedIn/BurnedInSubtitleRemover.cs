@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace Nikse.SubtitleEdit.Features.Video.RemoveBurnedIn;
 
-/// <summary>How the burned-in lines are removed (the order of the method combo box).</summary>
+/// <summary>How the burned-in lines are removed. Values are persisted in settings.</summary>
 public enum BurnedInMethod
 {
     Inpaint,
@@ -54,12 +54,14 @@ public sealed class BurnedInRemovalOptions
 
     /// <summary>Extra mask width in px on the left and right of each line.</summary>
     public int ExtraWidth { get; init; } = 5;
+    public bool ExpandDarkEdges { get; init; } = true;
     public bool Temporal { get; init; } = true;
 
     /// <summary>Box blur radius in px (blur method).</summary>
     public int BlurStrength { get; init; } = 20;
 
     public int Crf { get; init; } = 18;
+    public string ProPainterExecutable { get; init; } = string.Empty;
     public string CrispEmbedExecutable { get; init; } = string.Empty;
     public string ModelFileName { get; init; } = string.Empty;
 }
@@ -68,11 +70,11 @@ public sealed class BurnedInRemovalOptions
 public readonly record struct BurnedInRectangle(TimeSpan Start, TimeSpan End, int X, int Y, int Width, int Height);
 
 /// <summary>
-/// Removes burned-in subtitles from a video with CrispEmbed's MI-GAN inpainting.
+/// Removes burned-in subtitles from a video with MI-GAN or ProPainter inpainting.
 /// <list type="number">
 /// <item>Pass 1 decodes only the scan area (gray) of the frames inside the OCR line spans and
 /// builds one text mask per line (<see cref="BurnedInMaskBuilder"/>).</item>
-/// <item>Pass 2 pipes every frame as raw RGB through <c>crispembed --inpaint-stream</c>
+/// <item>Pass 2 pipes every frame as raw RGB through the selected inpainting engine
 /// (frame + mask in, inpainted frame out, with temporal consistency) into an ffmpeg encoder
 /// that copies the audio from the source. No frames touch the disk.</item>
 /// </list>
@@ -82,7 +84,45 @@ public readonly record struct BurnedInRectangle(TimeSpan Start, TimeSpan End, in
 /// </summary>
 public sealed class BurnedInSubtitleRemover
 {
-    public sealed record ProgressInfo(double Percent, int Pass, long Frame, long TotalFrames, double FramesPerSecond);
+    public enum ProPainterPhase { Starting, EstimatingMotion, CompletingMotion, Inpainting }
+
+    public sealed record ProPainterStatus(ProPainterPhase Phase, int Frame = 0, int Total = 0);
+
+    public sealed record ProgressInfo(double Percent, int Pass, long Frame, long TotalFrames, double FramesPerSecond,
+        ProPainterStatus? ProPainter = null);
+
+    internal static ProPainterStatus? ParseProPainterStatus(string line)
+    {
+        if (line == "Completed optical flow")
+        {
+            return new ProPainterStatus(ProPainterPhase.Inpainting);
+        }
+
+        const string raft = "RAFT ";
+        const string inpainted = "Inpainted window at frame ";
+        var isRaft = line.StartsWith(raft, StringComparison.Ordinal);
+        if (!isRaft && !line.StartsWith(inpainted, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var counts = line.AsSpan(isRaft ? raft.Length : inpainted.Length);
+        var slash = counts.IndexOf('/');
+        if (slash < 0 ||
+            !int.TryParse(counts[..slash], NumberStyles.None, CultureInfo.InvariantCulture, out var frame) ||
+            !int.TryParse(counts[(slash + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var total) ||
+            frame < 1 || frame > total)
+        {
+            return null;
+        }
+
+        if (isRaft && frame == total)
+        {
+            return new ProPainterStatus(ProPainterPhase.CompletingMotion);
+        }
+
+        return new ProPainterStatus(isRaft ? ProPainterPhase.EstimatingMotion : ProPainterPhase.Inpainting, frame, total);
+    }
 
     private readonly StringBuilder _log = new();
 
@@ -159,7 +199,7 @@ public sealed class BurnedInSubtitleRemover
     public static BurnedInMaskBuilder MakeMaskBuilder(BurnedInRemovalOptions o, IEnumerable<(long StartFrame, long EndFrame)> spans)
     {
         return new BurnedInMaskBuilder(o.VideoWidth, o.VideoHeight, o.RegionX, o.RegionY, o.RegionWidth, o.RegionHeight,
-            spans, o.BrightnessMinimum, o.RequireOutline, o.Grow, GetPadFrames(o), (int)Math.Round(1.5 * o.FrameRate), o.ExtraWidth);
+            spans, o.BrightnessMinimum, o.RequireOutline, o.Grow, GetPadFrames(o), (int)Math.Round(1.5 * o.FrameRate), o.ExtraWidth, o.ExpandDarkEdges);
     }
 
     /// <summary>BT.709 for HD, BT.601 below - used for both the RGB decode and the encode, so
@@ -190,10 +230,18 @@ public sealed class BurnedInSubtitleRemover
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Pass 2: decode -> mask -> crispembed -> encode, or an ffmpeg blur/delogo of each line's box.
-        return o.Method is BurnedInMethod.Blur or BurnedInMethod.Delogo
-            ? await FilterAsync(o, builder, totalFrames, progress, cancellationToken)
-            : await InpaintAsync(o, builder, totalFrames, progress, cancellationToken);
+        // Pass 2: decode -> mask -> inpaint -> encode, or an ffmpeg blur/delogo of each line's box.
+        if (o.Method is BurnedInMethod.Blur or BurnedInMethod.Delogo)
+        {
+            return await FilterAsync(o, builder, totalFrames, progress, cancellationToken);
+        }
+
+        if (string.IsNullOrEmpty(o.ProPainterExecutable))
+        {
+            return await InpaintAsync(o, builder, totalFrames, progress, o.OutputFileName, cancellationToken);
+        }
+
+        return await InpaintWithTemporaryOutputAsync(o, builder, totalFrames, progress, cancellationToken);
     }
 
     /// <summary>
@@ -428,28 +476,95 @@ public sealed class BurnedInSubtitleRemover
         return true;
     }
 
+    private async Task<bool> InpaintWithTemporaryOutputAsync(BurnedInRemovalOptions options, BurnedInMaskBuilder builder,
+        long totalFrames, IProgress<ProgressInfo> progress, CancellationToken cancellationToken)
+    {
+        var destination = Path.GetFullPath(options.OutputFileName);
+        var temporary = Path.Combine(Path.GetDirectoryName(destination)!,
+            ".propainter-" + Guid.NewGuid().ToString("N") + Path.GetExtension(destination));
+        try
+        {
+            if (!await InpaintAsync(options, builder, totalFrames, progress, temporary, cancellationToken))
+            {
+                return false;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporary, destination, overwrite: true);
+            return true;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (IOException exception)
+            {
+                AppendLog("Could not remove the temporary video: " + exception.Message);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                AppendLog("Could not remove the temporary video: " + exception.Message);
+            }
+        }
+    }
+
     private async Task<bool> InpaintAsync(BurnedInRemovalOptions o, BurnedInMaskBuilder builder, long totalFrames,
-        IProgress<ProgressInfo> progress, CancellationToken cancellationToken)
+        IProgress<ProgressInfo> progress, string outputFileName, CancellationToken cancellationToken)
     {
         int w = o.VideoWidth, h = o.VideoHeight;
         var matrix = ColorMatrix(h);
         var decoderArgs = $"-nostdin -v error -i \"{o.VideoFileName}\" -map 0:v:0 " +
                           $"-vf \"scale=in_color_matrix={matrix}:in_range=tv,format=rgb24\" -f rawvideo -pix_fmt rgb24 -";
-        var crispArgs = CrispEmbedEngine.GetInpaintArguments(o.ModelFileName) + $" --inpaint-stream {w}x{h}" + (o.Temporal ? " --inpaint-temporal 15" : string.Empty);
+        var useProPainter = !string.IsNullOrEmpty(o.ProPainterExecutable);
+        var engineFile = useProPainter ? o.ProPainterExecutable : o.CrispEmbedExecutable;
+        var engineArgs = useProPainter
+            ? $"--stream {w}x{h}"
+            : CrispEmbedEngine.GetInpaintArguments(o.ModelFileName) + $" --inpaint-stream {w}x{h}" +
+                (o.Temporal ? " --inpaint-temporal 15" : string.Empty);
         var rate = o.FrameRate.ToString("0.######", CultureInfo.InvariantCulture);
         var encoderArgs = $"-nostdin -v error -y -f rawvideo -pix_fmt rgb24 -s {w}x{h} -framerate {rate} -i - -i \"{o.VideoFileName}\" " +
                           "-map 0:v:0 -map 1:a? -c:a copy " +
                           $"-vf \"scale=out_color_matrix={matrix}:out_range=tv,format=yuv420p\" {ColorTags(matrix)} " +
-                          $"-c:v libx264 -crf {o.Crf} -preset medium \"{o.OutputFileName}\"";
+                          $"-c:v libx264 -crf {o.Crf} -preset medium \"{outputFileName}\"";
 
         AppendLog("ffmpeg " + decoderArgs);
-        AppendLog("crispembed " + crispArgs);
+        AppendLog(Path.GetFileName(engineFile) + " " + engineArgs);
         AppendLog("ffmpeg " + encoderArgs);
 
+        var stopwatch = Stopwatch.StartNew();
+        var progressGate = new object();
+        long framesOut = 0;
+
+        void ReportOutput(long frame, ProPainterStatus? phase = null)
+        {
+            var fps = frame / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
+            progress.Report(new ProgressInfo(15 + 85.0 * Math.Min(1.0, (double)frame / totalFrames),
+                2, frame, totalFrames, fps, phase));
+        }
+
+        void ReportProPainter(string line)
+        {
+            if (ParseProPainterStatus(line) is { } phase)
+            {
+                lock (progressGate)
+                {
+                    ReportOutput(framesOut, phase);
+                }
+            }
+        }
+
+        if (useProPainter)
+        {
+            ReportOutput(0, new ProPainterStatus(ProPainterPhase.Starting));
+        }
+
         using var decoder = StartProcess(FfmpegHelper.GetFfmpegLocation(), decoderArgs, redirectInput: false);
-        using var crisp = StartProcess(o.CrispEmbedExecutable, crispArgs, redirectInput: true, inpaint: true);
+        using var engine = StartProcess(engineFile, engineArgs, redirectInput: true, inpaint: !useProPainter,
+            onErrorLine: useProPainter ? ReportProPainter : null);
         using var encoder = StartProcess(FfmpegHelper.GetFfmpegLocation(), encoderArgs, redirectInput: true);
-        var all = new[] { decoder, crisp, encoder };
+        var all = new[] { decoder, engine, encoder };
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = linked.Token;
         using var registration = token.Register(() =>
@@ -499,15 +614,13 @@ public sealed class BurnedInSubtitleRemover
 
         var frameBytes = w * h * 3;
         var rectangles = GetRectangleBoxes(o);
-        long framesOut = 0;
-        var stopwatch = Stopwatch.StartNew();
 
-        // Decoder -> masks -> crispembed.
+        // Decoder -> masks -> inpainting engine.
         var feed = Task.Run(async () =>
         {
             var rgb = new byte[frameBytes];
             var mask = new byte[w * h];
-            var input = crisp.StandardInput.BaseStream;
+            var input = engine.StandardInput.BaseStream;
             long frame = 0;
             try
             {
@@ -536,21 +649,23 @@ public sealed class BurnedInSubtitleRemover
             return frame;
         }, token);
 
-        // crispembed -> encoder.
+        // Inpainting engine -> encoder.
         var drain = Task.Run(async () =>
         {
             var frame = new byte[frameBytes];
             var output = encoder.StandardInput.BaseStream;
             try
             {
-                while (await ReadExactlyAsync(crisp.StandardOutput.BaseStream, frame, token))
+                while (await ReadExactlyAsync(engine.StandardOutput.BaseStream, frame, token))
                 {
                     await output.WriteAsync(frame, token);
-                    var n = Interlocked.Increment(ref framesOut);
-                    if (n % 10 == 0)
+                    lock (progressGate)
                     {
-                        var fps = n / Math.Max(0.001, stopwatch.Elapsed.TotalSeconds);
-                        progress.Report(new ProgressInfo(15 + 85.0 * Math.Min(1.0, (double)n / totalFrames), 2, n, totalFrames, fps));
+                        var n = ++framesOut;
+                        if (n % 10 == 0)
+                        {
+                            ReportOutput(n);
+                        }
                     }
                 }
             }
@@ -595,17 +710,17 @@ public sealed class BurnedInSubtitleRemover
 
         cancellationToken.ThrowIfCancellationRequested();
         AppendLog($"Frames: {framesIn} decoded, {Interlocked.Read(ref framesOut)} encoded in {stopwatch.Elapsed.TotalSeconds:0.0} s");
-        var ok = Interlocked.CompareExchange(ref failed, 0, 0) == 0 && decoder.ExitCode == 0 && crisp.ExitCode == 0 && encoder.ExitCode == 0 &&
-                 framesIn > 0 && framesIn == Interlocked.Read(ref framesOut) && File.Exists(o.OutputFileName);
+        var ok = Interlocked.CompareExchange(ref failed, 0, 0) == 0 && decoder.ExitCode == 0 && engine.ExitCode == 0 && encoder.ExitCode == 0 &&
+                 framesIn > 0 && framesIn == Interlocked.Read(ref framesOut) && File.Exists(outputFileName);
         if (!ok)
         {
-            AppendLog($"Exit codes: decoder {decoder.ExitCode}, crispembed {crisp.ExitCode}, encoder {encoder.ExitCode}");
+            AppendLog($"Exit codes: decoder {decoder.ExitCode}, inpainting {engine.ExitCode}, encoder {encoder.ExitCode}");
         }
 
         return ok;
     }
 
-    private Process StartProcess(string fileName, string arguments, bool redirectInput, string? workingDirectory = null, bool inpaint = false)
+    private Process StartProcess(string fileName, string arguments, bool redirectInput, string? workingDirectory = null, bool inpaint = false, Action<string>? onErrorLine = null)
     {
         var process = new Process
         {
@@ -632,6 +747,7 @@ public sealed class BurnedInSubtitleRemover
             if (!string.IsNullOrWhiteSpace(e.Data))
             {
                 AppendLog($"[{name}] {e.Data}");
+                onErrorLine?.Invoke(e.Data);
             }
         };
         process.Start();

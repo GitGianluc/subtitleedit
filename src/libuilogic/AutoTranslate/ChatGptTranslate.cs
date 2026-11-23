@@ -5,6 +5,9 @@ using Nikse.SubtitleEdit.UiLogic.Translate;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Nikse.SubtitleEdit.UiLogic.Http;
 
 namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
@@ -34,6 +37,8 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
         // gpt-oss-120b is an open-weights model not hosted on api.openai.com at all.
         public static string[] Models => new[]
         {
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
             "gpt-6.1-sol",
             "gpt-6.1-terra",
             "gpt-6-astra",
@@ -43,8 +48,18 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
             "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano",
             "gpt-5.2",
             "gpt-5.1",
-            "gpt-5", "gpt-5-mini", "gpt-5-nano",
-            "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+            "gpt-4.1", "gpt-4.1-mini",
+        };
+
+        /// <summary>
+        /// Models OpenAI has shut down (see https://developers.openai.com/api/docs/deprecations).
+        /// A saved setting pointing at one of these is moved to <see cref="DefaultModel"/> on the official endpoint.
+        /// </summary>
+        public static readonly HashSet<string> RetiredModels = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "gpt-4.1-nano", "gpt-4.1-nano-2025-04-14",          // shut down 2026-10-23
+            "gpt-5-chat-latest", "gpt-5.1-chat-latest",         // shut down 2026-07-23
+            "gpt-5.2-chat-latest", "gpt-5.3-chat-latest",       // shut down 2026-08-10
         };
 
         public static string RemovePreamble(string original, string input)
@@ -117,7 +132,76 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
             return ListLanguages();
         }
 
+        internal sealed record Cue(
+            [property: JsonPropertyName("id")] int Id,
+            [property: JsonPropertyName("text")] string Text);
+
+        // The default encoder writes every non-ASCII character and <, >, &, ' as \uXXXX, which
+        // the prompt then carries as literal escapes: the model read "g\u00E5r" instead of "går",
+        // and the batch size check counted up to six bytes per character.
+        private static readonly JsonSerializerOptions CueJsonOptions = new()
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        };
+
+        internal static string SerializeCues(IReadOnlyList<Cue> cues) => JsonSerializer.Serialize(cues, CueJsonOptions);
+
+        internal static int GetSerializedCuesByteCount(IReadOnlyList<Cue> cues) =>
+            JsonSerializer.SerializeToUtf8Bytes(cues, CueJsonOptions).Length;
+
+        internal async Task<Dictionary<int, string>?> TranslateCues(
+            IReadOnlyList<Cue> cues, string sourceLanguageCode, string targetLanguageCode, CancellationToken cancellationToken)
+        {
+            const string batchInstructions = "Translate the following subtitle cues together for context. " +
+                "Return only a JSON array with one object per input cue, each with the same integer id and a text string. " +
+                "Translate only the dialogue belonging to each cue. Never move text between cues or combine cues.";
+            var reply = await RequestTranslation(SerializeCues(cues), sourceLanguageCode, targetLanguageCode,
+                cancellationToken, batchInstructions);
+            Cue[]? translated;
+            try
+            {
+                translated = JsonSerializer.Deserialize<Cue[]>(reply);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            if (translated == null || translated.Length != cues.Count)
+            {
+                return null;
+            }
+
+            var expected = cues.Select(cue => cue.Id).ToHashSet();
+            var results = new Dictionary<int, string>();
+            foreach (var cue in translated)
+            {
+                if (cue == null || string.IsNullOrWhiteSpace(cue.Text) ||
+                    !expected.Remove(cue.Id) || !results.TryAdd(cue.Id, FixNewLines(cue.Text.Trim())))
+                {
+                    return null;
+                }
+            }
+
+            return results;
+        }
+
         public async Task<string> Translate(string text, string sourceLanguageCode, string targetLanguageCode, CancellationToken cancellationToken)
+        {
+            var outputText = await RequestTranslation(text, sourceLanguageCode, targetLanguageCode, cancellationToken);
+            if (outputText.StartsWith('"') && outputText.EndsWith('"') && !text.StartsWith('"'))
+            {
+                outputText = outputText.Trim('"').Trim();
+            }
+
+            outputText = FixNewLines(outputText);
+            outputText = RemovePreamble(text, outputText);
+            outputText = DecodeUnicodeEscapes(outputText);
+            return outputText.Trim();
+        }
+
+        private async Task<string> RequestTranslation(string text, string sourceLanguageCode, string targetLanguageCode,
+            CancellationToken cancellationToken, string? batchInstructions = null)
         {
             var model = Configuration.Settings.Tools.ChatGptModel;
             if (string.IsNullOrEmpty(model))
@@ -131,6 +215,11 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
                 Configuration.Settings.Tools.ChatGptPrompt = new ToolsSettings().ChatGptPrompt;
             }
             var prompt = string.Format(Configuration.Settings.Tools.ChatGptPrompt, sourceLanguageCode, targetLanguageCode);
+            if (batchInstructions != null)
+            {
+                prompt += "\n\n" + batchInstructions;
+            }
+
             var input = "{\"model\": \"" + Json.EncodeJsonText(model) + "\",\"messages\": [{ \"role\": \"user\", \"content\": \"" + Json.EncodeJsonText(prompt) + "\\n\\n" + Json.EncodeJsonText(text.Trim()) + "\" }]}";
 
             int[] retryDelays = { 2555, 5007, 9013 };
@@ -160,6 +249,20 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
 
             result.EnsureSuccessStatusCode();
 
+            if (batchInstructions != null)
+            {
+                try
+                {
+                    using var response = JsonDocument.Parse(json);
+                    return response.RootElement.GetProperty("choices")[0].GetProperty("message")
+                        .GetProperty("content").GetString()?.Trim() ?? string.Empty;
+                }
+                catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
+                {
+                    return string.Empty;
+                }
+            }
+
             var parser = new SeJsonParser();
             var resultText = parser.GetFirstObject(json, "content");
             if (resultText == null)
@@ -167,16 +270,7 @@ namespace Nikse.SubtitleEdit.UiLogic.AutoTranslate
                 return string.Empty;
             }
 
-            var outputText = Json.DecodeJsonText(resultText).Trim();
-            if (outputText.StartsWith('"') && outputText.EndsWith('"') && !text.StartsWith('"'))
-            {
-                outputText = outputText.Trim('"').Trim();
-            }
-
-            outputText = FixNewLines(outputText);
-            outputText = RemovePreamble(text, outputText);
-            outputText = DecodeUnicodeEscapes(outputText);
-            return outputText.Trim();
+            return Json.DecodeJsonText(resultText).Trim();
         }
 
         public static List<TranslationPair> ListLanguages()

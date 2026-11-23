@@ -130,16 +130,17 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that Zonos TTS (CrispASR) runs on is installed.
-    /// The zonos-tts backend's GGUFs (transformer + DAC codec) are staged into SE's
-    /// CrispAsr/models folder by
+    /// The zonos3 backend (ZONOS3-Mini) ships in CrispASR v0.8.55 and newer; older builds abort
+    /// on the unknown --backend value, so an older install is offered the update. The model
+    /// files are staged by
     /// <see cref="Nikse.SubtitleEdit.Logic.Download.ZonosTtsCrispAsrDownloadService"/> with
     /// hash verification before first synth.
     /// </summary>
     public static Task<bool> EnsureCrispAsrForZonos(Window? window, IWindowService windowService, bool forceRedownload)
         => EnsureCrispAsrAsync(window, windowService, forceRedownload,
             engineDisplayName: "Zonos TTS (CrispASR)",
-            extraCapabilityCheck: null,
-            minVersionNote: null);
+            extraCapabilityCheck: ZonosTtsCrispAsr.IsCrispAsrZonos3Capable,
+            minVersionNote: "v0.8.55 or newer");
 
     /// <summary>
     /// Ensures the CrispASR runtime that CosyVoice3 (CrispASR) runs on is installed.
@@ -188,7 +189,7 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that MOSS-TTS (CrispASR) runs on is installed.
-    /// The moss-tts backend ships in CrispASR v0.8.13 and newer (SE pins v0.8.54).
+    /// The moss-tts backend ships in CrispASR v0.8.13 and newer (SE pins v0.8.55).
     /// </summary>
     public static Task<bool> EnsureCrispAsrForMossTts(Window? window, IWindowService windowService, bool forceRedownload)
         => EnsureCrispAsrAsync(window, windowService, forceRedownload,
@@ -198,7 +199,7 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that dots.tts (CrispASR) runs on is installed.
-    /// The dots-tts backend ships in CrispASR v0.8.25 and newer (SE pins v0.8.54); the version
+    /// The dots-tts backend ships in CrispASR v0.8.25 and newer (SE pins v0.8.55); the version
     /// note names that floor because older builds have no dots-tts backend at all and abort on
     /// the unknown --backend value.
     /// </summary>

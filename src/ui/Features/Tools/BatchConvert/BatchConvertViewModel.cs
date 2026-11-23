@@ -161,6 +161,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private bool _normalCasing;
     [ObservableProperty] private bool _normalCasingFixNames;
     [ObservableProperty] private bool _normalCasingOnlyUpper;
+    [ObservableProperty] private string _changeCasingOnlyActorsOrStyles;
     [ObservableProperty] private bool _fixNamesOnly;
     [ObservableProperty] private bool _allUppercase;
     [ObservableProperty] private bool _allLowercase;
@@ -456,6 +457,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         OutputEncodingLabel = string.Empty;
         StatusText = string.Empty;
         DeleteActorsOrStyles = string.Empty;
+        ChangeCasingOnlyActorsOrStyles = string.Empty;
         OffsetTimeCodesForward = true;
         FunctionContainer = new ScrollViewer();
         FromFrameRates = new ObservableCollection<double>
@@ -870,6 +872,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         Se.Settings.Tools.BatchConvert.NormalCasingFixNames = NormalCasingFixNames;
         Se.Settings.Tools.BatchConvert.NormalCasingOnlyUpper = NormalCasingOnlyUpper;
+        Se.Settings.Tools.BatchConvert.ChangeCasingOnlyActorsOrStyles = ChangeCasingOnlyActorsOrStyles ?? string.Empty;
 
         // Offset time codes
         Se.Settings.Tools.BatchConvert.OffsetTimeCodesMilliseconds = OffsetTimeCodesTime.TotalMilliseconds;
@@ -1143,6 +1146,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         NormalCasingFixNames = Se.Settings.Tools.BatchConvert.NormalCasingFixNames;
         NormalCasingOnlyUpper = Se.Settings.Tools.BatchConvert.NormalCasingOnlyUpper;
+        ChangeCasingOnlyActorsOrStyles = Se.Settings.Tools.BatchConvert.ChangeCasingOnlyActorsOrStyles ?? string.Empty;
 
         UpdateOutputProperties();
 
@@ -2985,12 +2989,6 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         }
     }
 
-    // Text/binary format detection runs IsMine/LoadSubtitle on the shared SubtitleFormat
-    // instances, which keep per-instance state (error counts, ...) - so only one file at a time
-    // may go through it. The container probes (Matroska, MP4, TS, ...) use their own instances
-    // and run in parallel.
-    private static readonly Lock FormatDetectionLock = new();
-
     // Parses a file and returns the resulting item(s) without touching any shared collection,
     // so it is safe to call from several background threads at once (see BatchConvertFileLoader).
     // Callers append the returned items to _allBatchItems and the visible BatchItems on the UI
@@ -3151,10 +3149,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (format == Se.Language.General.Unknown)
         {
-            lock (FormatDetectionLock)
-            {
-                (subtitle, format) = DetectTextOrBinaryFormat(fileName, fileInfo.Length);
-            }
+            (subtitle, format) = DetectTextOrBinaryFormat(fileName, fileInfo.Length);
         }
 
         var batchItem = new BatchConvertItem(fileName, fileInfo.Length, format, subtitle);
@@ -3162,13 +3157,18 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         return added;
     }
 
+    private static readonly Lock BinaryFormatDetectionLock = new();
+
     private static (Subtitle? Subtitle, string Format) DetectTextOrBinaryFormat(string fileName, long fileLength)
     {
         Subtitle? subtitle = null;
+        List<string>? lines = null;
         var format = Se.Language.General.Unknown;
         if (fileLength < 20_000_000)
         {
-            subtitle = Subtitle.Parse(fileName);
+            // Subtitle.Parse that is safe to run on several files at once (own format instances
+            // and frame rate per thread)
+            subtitle = ConcurrentSubtitleParser.Parse(fileName, out lines);
             if (subtitle != null)
             {
                 format = subtitle.OriginalFormat.Name;
@@ -3177,16 +3177,33 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
 
         if (format == Se.Language.General.Unknown)
         {
-            foreach (var f in SubtitleFormat.GetBinaryFormats(false))
+            // Only unrecognized files get here. The binary and load-only formats are fresh
+            // instances (frame rate kept local like above), but EBU STL still writes its teletext
+            // flags to the global settings - so one file at a time.
+            lock (BinaryFormatDetectionLock)
             {
-                if (f.IsMine(null, fileName))
-                {
-                    subtitle = new Subtitle();
-                    f.LoadSubtitle(subtitle, null, fileName);
-                    subtitle.OriginalFormat = f;
-                    format = f.Name;
-                    break; // format found, exit the loop
-                }
+                return DetectBinaryOrLoadOnlyFormat(fileName, fileLength, lines);
+            }
+        }
+
+        return (subtitle, format);
+    }
+
+    /// <param name="lines">The text lines the text parse already read (null if none) - reused for the load-only formats.</param>
+    private static (Subtitle? Subtitle, string Format) DetectBinaryOrLoadOnlyFormat(string fileName, long fileLength, List<string>? lines)
+    {
+        Subtitle? subtitle = null;
+        var format = Se.Language.General.Unknown;
+        foreach (var f in SubtitleFormat.GetBinaryFormats(false))
+        {
+            f.KeepDeclaredFrameRateLocal = true;
+            if (f.IsMine(null, fileName))
+            {
+                subtitle = new Subtitle();
+                f.LoadSubtitle(subtitle, null, fileName);
+                subtitle.OriginalFormat = f;
+                format = f.Name;
+                break; // format found, exit the loop
             }
         }
 
@@ -3194,7 +3211,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         // This replaces a second, identical Subtitle.Parse that could only fail again.
         if (format == Se.Language.General.Unknown && fileLength < 20_000_000)
         {
-            subtitle = LoadOnlyTextFormatLoader.TryLoad(fileName, LanguageAutoDetect.GetEncodingFromFile(fileName));
+            // Reuse the lines the text parse read (same encoding detection) instead of detecting
+            // the encoding and reading the file a second time.
+            subtitle = lines != null
+                ? LoadOnlyTextFormatLoader.TryLoad(lines, fileName)
+                : LoadOnlyTextFormatLoader.TryLoad(fileName, LanguageAutoDetect.GetEncodingFromFile(fileName));
             if (subtitle != null)
             {
                 format = subtitle.OriginalFormat.Name;
@@ -3784,6 +3805,7 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
                 FixNamesOnly = FixNamesOnly,
                 AllLowercase = AllLowercase,
                 AllUppercase = AllUppercase,
+                OnlyActorsOrStyles = ChangeCasingOnlyActorsOrStyles ?? string.Empty,
             },
 
             ChangeSpeed = new BatchConvertConfig.ChangeSpeedSettings

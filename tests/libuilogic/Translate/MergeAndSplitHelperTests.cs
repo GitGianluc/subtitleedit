@@ -27,6 +27,61 @@ public class MergeAndSplitHelperTests
         public Task<string> Translate(string text, string sourceLanguageCode, string targetLanguageCode, CancellationToken cancellationToken) => Task.FromResult(Result);
     }
 
+    private sealed class RecordingChatGptTranslator : ChatGptTranslate, IAutoTranslator
+    {
+        public string? Request { get; private set; }
+
+        Task<string> IAutoTranslator.Translate(string text, string sourceLanguageCode, string targetLanguageCode, CancellationToken cancellationToken)
+        {
+            Request = text;
+            return Task.FromResult("A gata da Sra. French sumiu.");
+        }
+    }
+
+    [Fact]
+    public async Task ChatGptSingleCueMode_TranslatesOneCuePerRequest()
+    {
+        var rows = MakeRows("Mrs. French's cat is missing.", "The signs are posted all over town.");
+        using var translator = new RecordingChatGptTranslator();
+
+        var count = await MergeAndSplitHelper.MergeAndTranslateIfPossible(
+            rows,
+            new TranslationPair("English", "en"),
+            new TranslationPair("Portuguese", "pt-BR"),
+            0,
+            translator,
+            forceSingleLineMode: true,
+            CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Equal("Mrs. French's cat is missing.", translator.Request);
+        Assert.Contains("French sumiu.", rows[0].TranslatedText);
+        Assert.True(string.IsNullOrEmpty(rows[1].TranslatedText));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChatGptSkipsBlankCueWithoutSendingIt(bool forceSingleLineMode)
+    {
+        var rows = MakeRows("", "The signs are posted all over town.");
+        using var translator = new RecordingChatGptTranslator();
+
+        var count = await MergeAndSplitHelper.MergeAndTranslateIfPossible(
+            rows,
+            new TranslationPair("English", "en"),
+            new TranslationPair("Portuguese", "pt-BR"),
+            0,
+            translator,
+            forceSingleLineMode,
+            CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Null(translator.Request);
+        Assert.Empty(rows[0].TranslatedText);
+        Assert.True(string.IsNullOrEmpty(rows[1].TranslatedText));
+    }
+
     private static ObservableCollection<TranslateRow> MakeRows(params string[] texts)
     {
         var rows = new ObservableCollection<TranslateRow>();
@@ -813,6 +868,24 @@ public class MergeAndSplitHelperTests
 
         Assert.Contains("for him in that little patch", sent);
         Assert.Equal(3, count);
+    }
+
+    // The batch prompt must carry the text itself, not \uXXXX escapes of it.
+    [Fact]
+    public void ChatGptCues_SerializeNonAsciiAndTagsUnescaped()
+    {
+        var text = "Hej, hvordan går det? <i>こんにちは</i> Привет & 'ok' \"quoted\"";
+        var cues = new[] { new ChatGptTranslate.Cue(7, text) };
+
+        var json = ChatGptTranslate.SerializeCues(cues);
+
+        Assert.DoesNotContain("\\u", json);
+        Assert.Contains("går", json);
+        Assert.Contains("<i>こんにちは</i>", json);
+        Assert.Contains("\\\"quoted\\\"", json);
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(json), ChatGptTranslate.GetSerializedCuesByteCount(cues));
+        var roundTrip = System.Text.Json.JsonSerializer.Deserialize<ChatGptTranslate.Cue[]>(json);
+        Assert.Equal(text, Assert.Single(roundTrip!).Text);
     }
 
     // Issue #15602: ChatGPT gets the rows of a sentence as lines too, so its words stay in the

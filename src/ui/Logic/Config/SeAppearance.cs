@@ -94,6 +94,7 @@ public class SeAppearance
     public bool ToolbarShowRemoveTextForHi { get; set; }
     public bool ToolbarShowVisualSync { get; set; }
     public bool ToolbarShowPointSync { get; set; }
+    public bool ToolbarShowAdjustAllTimes { get; set; }
     public bool ToolbarShowBeautifyTimeCodes { get; set; }
     public bool ToolbarShowBurnIn { get; set; }
     public bool ToolbarShowAutoTranslate { get; set; }
@@ -119,6 +120,7 @@ public class SeAppearance
     public bool ShowUpDownDuration { get; set; }
     public bool ShowUpDownLabels { get; set; }
     public bool ShowTimeCodeModeInStatusBar { get; set; }
+    public bool ShowVideoOffsetInStatusBar { get; set; }
 
     public LayoutPositions CurrentLayoutPositions { get; set; }
     public bool TextBoxShowButtonAutoBreak { get; set; }
@@ -175,6 +177,7 @@ public class SeAppearance
         ShowUpDownDuration = true;
         ShowUpDownLabels = true;
         ShowTimeCodeModeInStatusBar = false;
+        ShowVideoOffsetInStatusBar = false;
 
         ToolbarShowFileNew = true;
         ToolbarShowFileOpen = true;
@@ -189,6 +192,7 @@ public class SeAppearance
         ToolbarShowRemoveTextForHi = false;
         ToolbarShowVisualSync = false;
         ToolbarShowPointSync = false;
+        ToolbarShowAdjustAllTimes = false;
         ToolbarShowBeautifyTimeCodes = false;
         ToolbarShowBurnIn = false;
         ToolbarShowAutoTranslate = false;

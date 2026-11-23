@@ -48,7 +48,12 @@ public class RemoveBurnedInWindowTests : IDisposable
         Assert.Equal(200, vm.BrightnessMinimum);
         Assert.Equal(BurnedInMaskBuilder.DefaultGrow(1080), vm.Grow);
         Assert.EndsWith("movie.no-subs.mp4", vm.OutputFileName.Replace('\\', '/'));
-        Assert.Equal(4, vm.Methods.Count);
+        Assert.Equal(ProPainterPackage.IsSupported ? 5 : 4, vm.Methods.Count);
+        Assert.EndsWith("(MI-GAN)", vm.Methods[0]);
+        if (ProPainterPackage.IsSupported)
+        {
+            Assert.EndsWith("(ProPainter)", vm.Methods[1]);
+        }
         Assert.NotNull(vm.AudioVisualizer); // the timeline is built with the window
         Assert.Equal(1.5, vm.PositionSeconds, 3); // middle of the first (selected) line
 
@@ -112,6 +117,25 @@ public class RemoveBurnedInWindowTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(20), vm.SelectedLine!.Line.StartTime);
         Assert.Equal(TimeSpan.FromSeconds(23.5), vm.SelectedLine.Line.EndTime);
         Assert.Equal(2, vm.SelectedLine.Number);
+    }
+
+    [AvaloniaFact]
+    public void ProPainterUsesMaskPreviewOnlyWhenSupportedAndSelected()
+    {
+        var vm = new RemoveBurnedInViewModel(new WindowService(new NullServiceProvider()), new FileHelper(), new FolderHelper());
+        Assert.False(vm.IsUsingProPainter);
+        Assert.True(vm.CanShowResult);
+
+        vm.MethodIndex = RemoveBurnedInViewModel.GetMethodIndex(BurnedInMethod.Inpaint, useProPainter: true);
+        Assert.Equal(BurnedInMethod.Inpaint, vm.Method);
+        Assert.Equal(ProPainterPackage.IsSupported, vm.IsUsingProPainter);
+        Assert.Equal(!ProPainterPackage.IsSupported, vm.CanShowResult);
+        Assert.Equal(!ProPainterPackage.IsSupported, vm.UsesMiGan);
+
+        vm.MethodIndex = RemoveBurnedInViewModel.GetMethodIndex(BurnedInMethod.Blur);
+        Assert.Equal(BurnedInMethod.Blur, vm.Method);
+        Assert.False(vm.IsUsingProPainter);
+        Assert.True(vm.CanShowResult);
     }
 
     [AvaloniaFact]

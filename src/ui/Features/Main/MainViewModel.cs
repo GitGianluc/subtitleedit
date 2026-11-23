@@ -200,6 +200,7 @@ using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.Initializers;
 using Nikse.SubtitleEdit.Logic.Media;
 using Nikse.SubtitleEdit.Logic.Ocr;
+using Nikse.SubtitleEdit.Features.Shared.ShowImage;
 using Nikse.SubtitleEdit.Logic.Plugins;
 using Nikse.SubtitleEdit.Logic.UndoRedo;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
@@ -367,6 +368,8 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _showColumnPixelWidth;
     [ObservableProperty] private bool _showColumnLayer;
     [ObservableProperty] private bool _showColumnForced;
+    [ObservableProperty] private bool _showColumnOcrImage;
+    [ObservableProperty] private bool _hasOcrImageSource; // images from the last OCR session are kept (#17066)
     [ObservableProperty] private bool _showUpDownStartTime;
     [ObservableProperty] private bool _showUpDownEndTime;
     [ObservableProperty] private bool _showUpDownDuration;
@@ -459,6 +462,8 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _areAssaContentMenuItemsVisible;
     [ObservableProperty] private bool _areWebVttContentMenuItemsVisible;
     [ObservableProperty] private bool _isWebVttBrowserPreviewVisible;
+    [ObservableProperty] private bool _isShowOcrImageMenuItemVisible;
+    [ObservableProperty] private bool _isShowOcrImageColumnMenuItemVisible;
     [ObservableProperty] private bool _selectCurrentSubtitleWhilePlaying;
     [ObservableProperty] private bool _waveformCenter;
     [ObservableProperty] private bool _isRightToLeftEnabled;
@@ -495,6 +500,9 @@ public partial class MainViewModel :
     [ObservableProperty] private string _videoOffsetText;
     [ObservableProperty] private string _setVideoOffsetText;
     [ObservableProperty] private bool _isVideoOffsetVisible;
+    // The status bar offset button: shown while an offset is set, or always when opted in (#17080).
+    [ObservableProperty] private bool _isVideoOffsetButtonVisible;
+    [ObservableProperty] private string _videoOffsetButtonToolTip = Se.Language.General.SetVideoOffset;
     [ObservableProperty] private bool _isAudioTracksVisible;
     [ObservableProperty] private ObservableCollection<WaveformAudioTrackItem> _waveformAudioTracks;
     [ObservableProperty] private WaveformAudioTrackItem? _selectedWaveformAudioTrack;
@@ -1067,6 +1075,8 @@ public partial class MainViewModel :
         _undoRedoManager = undoRedoManager;
         _bluRayHelper = bluRayHelper;
         _ocrImageSourceHolder = ocrImageSourceHolder;
+        _ocrImageSourceHolder.Changed += (_, _) =>
+            Dispatcher.UIThread.Post(() => HasOcrImageSource = _ocrImageSourceHolder.Source is { Count: > 0 });
         _mpvReloader = mpvReloader;
         _vlcReloader = vlcReloader;
         _findService = findService;
@@ -1202,11 +1212,13 @@ public partial class MainViewModel :
         ShowColumnPixelWidth = Se.Settings.General.ShowColumnPixelWidth;
         ShowColumnLayer = Se.Settings.General.ShowColumnLayer;
         ShowColumnForced = Se.Settings.General.ShowColumnForced;
+        ShowColumnOcrImage = Se.Settings.General.ShowColumnOcrImage;
         ShowUpDownStartTime = Se.Settings.Appearance.ShowUpDownStartTime;
         ShowUpDownEndTime = Se.Settings.Appearance.ShowUpDownEndTime;
         ShowUpDownDuration = Se.Settings.Appearance.ShowUpDownDuration;
         ShowUpDownLabels = Se.Settings.Appearance.ShowUpDownLabels;
         ShowTimeCodeModeInStatusBar = Se.Settings.Appearance.ShowTimeCodeModeInStatusBar;
+        IsVideoOffsetButtonVisible = Se.Settings.Appearance.ShowVideoOffsetInStatusBar || Se.Settings.General.CurrentVideoOffsetInMs != 0;
         SelectCurrentSubtitleWhilePlaying = Se.Settings.General.SelectCurrentSubtitleWhilePlaying;
         WaveformCenter = Se.Settings.Waveform.CenterVideoPosition;
         EditTextBoxOriginal = new TextBoxWrapper(new TextBox());
@@ -2075,6 +2087,7 @@ public partial class MainViewModel :
     internal void CancelPausePlayheadFreeze()
     {
         CancelFrameStepPlayBlip(); // playback the user started must not be stopped by a stale blip
+        ClearSubtitleEndPreview();
 
         // Playback moves the player away from the last relative-seek target. A short play
         // (under the tracker's 0.5 s guard) left it armed, so the next 500 ms / custom step
@@ -3344,8 +3357,7 @@ public partial class MainViewModel :
     // and break the spell-check auto-attach for image-based formats (#11719).
     private void ClearOcrImageSource()
     {
-        _ocrImageSourceHolder.Source = null;
-        _ocrImageSourceHolder.FileName = null;
+        _ocrImageSourceHolder.Clear();
     }
 
     private void ResetSubtitle(SubtitleFormat? format = null)
@@ -4087,6 +4099,29 @@ public partial class MainViewModel :
         while (last + 1 < Subtitles.Count && Subtitles[last + 1].IsReferenceOnly)
         {
             last++;
+        }
+
+        // The single-row commands reach one working line past the selection (merge with the line
+        // before/after), and a merge then reads the row after the merged lines to cap the end time.
+        // Stopping at that neighbour left the reference run behind it in the grid, so "merge with
+        // line below" capped the merged end time at a reference row's start (#17121). Take one more
+        // working line on each side and the reference run beyond it.
+        if (first > 0)
+        {
+            first--;
+            while (first > 0 && Subtitles[first - 1].IsReferenceOnly)
+            {
+                first--;
+            }
+        }
+
+        if (last + 1 < Subtitles.Count)
+        {
+            last++;
+            while (last + 1 < Subtitles.Count && Subtitles[last + 1].IsReferenceOnly)
+            {
+                last++;
+            }
         }
 
         return (first, last);
@@ -6543,22 +6578,64 @@ public partial class MainViewModel :
             return;
         }
 
-        if (Subtitles.Count == 0)
-        {
-            await MessageBox.Show(Window, Se.Language.General.Error, Se.Language.General.NoVideoLoaded,
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-            _shortcutManager.ClearKeys();
-            return;
-        }
-
-        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, true, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             _shortcutManager.ClearKeys();
             return;
         }
 
-        var subtitle = Subtitle.Parse(fileName);
+        // mkv/mp4 track, Blu-ray sup, VobSub, binary formats etc. (#17089) - only the times are used, no OCR
+        Subtitle? subtitle;
+        try
+        {
+            var embedded = await new EmbeddedSubtitleLoader(_windowService, Window).TryLoad(fileName, includeBluRaySup: false);
+            if (embedded != null)
+            {
+                if (embedded.Cancelled)
+                {
+                    _shortcutManager.ClearKeys();
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(embedded.Error))
+                {
+                    await MessageBox.Show(Window, Se.Language.General.Error, embedded.Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _shortcutManager.ClearKeys();
+                    return;
+                }
+
+                subtitle = embedded.ToTimeCodeSubtitle();
+            }
+            else if (await Task.Run(() => TimeCodeImportLoader.TryLoadVobSub(fileName)) is { } vobSub)
+            {
+                var streamId = vobSub.LanguageStreamIds[0];
+                if (vobSub.LanguageStreamIds.Count > 1)
+                {
+                    var pickResult = await ShowDialogAsync<PickVobSubLanguageWindow, PickVobSubLanguageViewModel>(
+                        vm => vm.Initialize(vobSub.Streams, vobSub.Palette, vobSub.Languages, fileName));
+                    if (!pickResult.OkPressed)
+                    {
+                        _shortcutManager.ClearKeys();
+                        return;
+                    }
+
+                    streamId = pickResult.SelectedStreamId;
+                }
+
+                subtitle = TimeCodeImportLoader.MakeSubtitle(vobSub.Streams[streamId]);
+            }
+            else
+            {
+                subtitle = await Task.Run(() => TimeCodeImportLoader.TryLoad(fileName));
+            }
+        }
+        catch (Exception exception)
+        {
+            Se.LogError(exception, $"Import time codes from {fileName} failed");
+            subtitle = null;
+        }
+
         if (subtitle == null)
         {
             await MessageBox.Show(Window, Se.Language.General.Error, Se.Language.General.UnknownSubtitleFormat,
@@ -6569,14 +6646,9 @@ public partial class MainViewModel :
 
         if (subtitle.Paragraphs.Count != Subtitles.Count)
         {
-            var message = "The time code import subtitle does not have the same number of lines as the current subtitle." + Environment.NewLine
-                + "Imported lines: " + subtitle.Paragraphs.Count + Environment.NewLine
-                + "Current lines: " + Subtitles.Count + Environment.NewLine
-                + Environment.NewLine +
-                "Do you want to continue anyway?";
-
+            var message = string.Format(Se.Language.File.Import.TimeCodesDifferentNumberOfLinesXY, subtitle.Paragraphs.Count, Subtitles.Count);
             var answer = await MessageBox.Show(Window, Se.Language.General.Import, message, MessageBoxButtons.YesNoCancel,
-                MessageBoxIcon.Error);
+                MessageBoxIcon.Question);
 
             if (answer != MessageBoxResult.Yes)
             {
@@ -6585,13 +6657,16 @@ public partial class MainViewModel :
             }
         }
 
+        var count = 0;
         for (var i = 0; i < Subtitles.Count && i < subtitle.Paragraphs.Count; i++)
         {
             Subtitles[i].SetStartTimeOnly(subtitle.Paragraphs[i].StartTime.TimeSpan);
             Subtitles[i].EndTime = subtitle.Paragraphs[i].EndTime.TimeSpan;
+            count++;
         }
 
         _updateAudioVisualizer = true;
+        ShowStatus(string.Format(Se.Language.File.Import.TimeCodesImportedFromXY, Path.GetFileName(fileName), count));
         _shortcutManager.ClearKeys();
     }
 
@@ -11743,7 +11818,25 @@ public partial class MainViewModel :
 
     private void ResetPlaySelection()
     {
+        ClearSubtitleEndPreview();
         _playSelectionItem = null;
+    }
+
+    private void FinishPlaySelection(VideoPlayerControl vp, double startSeconds, double endSeconds)
+    {
+        PauseVideoAndFreezePlayhead(vp);
+        ClearSubtitleEndPreview();
+
+        // Park on the line's last visible frame. mpv hides the line at its end time (#13429).
+        var fps = Se.Settings.General.CurrentFrameRate;
+        var frameSeconds = fps >= 10 ? 1.0 / fps : 0.04;
+        var stopSeconds = Math.Max(startSeconds, endSeconds - frameSeconds);
+        SeekVideoPlayer(vp, stopSeconds);
+        PinPlayheadTo(stopSeconds);
+
+        // This is not a user scrub. Keep the played line selected at a shared boundary (#13331).
+        _pausedSelectLastSeconds = stopSeconds;
+        ResetPlaySelection();
     }
 
     [RelayCommand]
@@ -15579,6 +15672,7 @@ public partial class MainViewModel :
 
     private bool _oldGenerateSpectrogram;
     private string _oldSpectrogramStyle = string.Empty;
+    private bool _oldFfmpegUseCenterChannelOnly;
 
     // Set for the ApplySettings that follows a settings import or reset: the layout sizes and
     // the waveform zoom then come from the settings, not from what is on screen (#16213).
@@ -15589,6 +15683,7 @@ public partial class MainViewModel :
     {
         _oldGenerateSpectrogram = Se.Settings.Waveform.GenerateSpectrogram;
         _oldSpectrogramStyle = Se.Settings.Waveform.SpectrogramStyle;
+        _oldFfmpegUseCenterChannelOnly = Se.Settings.General.FfmpegUseCenterChannelOnly;
 
         var oldSettngsSerialized = SettingsChangeSnapshot.Take();
 
@@ -15883,6 +15978,18 @@ public partial class MainViewModel :
             InitializeFfmpeg();
             LoadShortcuts();
 
+            // The cached waveform/spectrogram file names only know the video and the audio track,
+            // so a waveform extracted with all channels kept being shown after turning on "Use only
+            // front center channel" (and the other way around) - issue #17090. Every cached file was
+            // extracted with the old channel setting, so drop them all; the current video is
+            // loaded again below, the others are extracted again when opened.
+            var centerChannelChanged = _oldFfmpegUseCenterChannelOnly != Se.Settings.General.FfmpegUseCenterChannelOnly;
+            _oldFfmpegUseCenterChannelOnly = Se.Settings.General.FfmpegUseCenterChannelOnly;
+            if (centerChannelChanged)
+            {
+                SettingsViewModel.DeleteWaveformAndSpectrogramFiles();
+            }
+
             if (!string.IsNullOrEmpty(_videoFileName))
             {
                 if (_oldGenerateSpectrogram == false && Se.Settings.Waveform.GenerateSpectrogram ||
@@ -15919,6 +16026,12 @@ public partial class MainViewModel :
                     Se.Settings.Waveform.LastDisplayMode = WaveformDisplayMode.OnlyWaveform.ToString();
                     AudioVisualizer?.SetSpectrogram(null);
                     AudioVisualizer?.SetDisplayMode(WaveformDisplayMode.OnlyWaveform);
+                }
+                else if (centerChannelChanged)
+                {
+                    // Like an audio track switch: extract again if auto-generate is on,
+                    // otherwise show the click-to-generate hint.
+                    ReloadWaveformForCurrentAudioTrack();
                 }
 
                 _oldGenerateSpectrogram = Se.Settings.Waveform.GenerateSpectrogram;
@@ -16065,6 +16178,7 @@ public partial class MainViewModel :
         ShowColumnPixelWidth = general.ShowColumnPixelWidth;
         ShowColumnLayer = general.ShowColumnLayer && IsFormatAssa; // the layer column is ASSA only
         ShowColumnForced = general.ShowColumnForced;
+        ShowColumnOcrImage = general.ShowColumnOcrImage;
         SubtitleGridColumnManager?.ApplyOrder(general.SubtitleGridColumnOrder);
     }
 
@@ -16878,6 +16992,75 @@ public partial class MainViewModel :
         AutoFitColumns();
     }
 
+    /// <summary>
+    /// Shows the original image of the selected line after OCR (#17066), like Ctrl+P in the OCR
+    /// window: left/right step through the lines and move the grid selection along.
+    /// </summary>
+    [RelayCommand]
+    private async Task ShowOcrImage()
+    {
+        var line = SelectedSubtitle;
+        if (Window == null || line == null || !HasOcrImageSource)
+        {
+            return;
+        }
+
+        var item = MakeOcrImageItem(line);
+        if (item == null)
+        {
+            ShowStatus(Se.Language.Main.NoOcrImageForLine);
+            return;
+        }
+
+        await ShowDialogAsync<ShowImageWindow, ShowImageViewModel>(vm =>
+        {
+            vm.Initialize(item.Title, item.Bitmap, item.Text);
+            vm.Navigate = direction =>
+            {
+                var index = Subtitles.IndexOf(line) + direction;
+                while (index >= 0 && index < Subtitles.Count)
+                {
+                    var next = Subtitles[index];
+                    var nextItem = next.IsHidden ? null : MakeOcrImageItem(next);
+                    if (nextItem != null)
+                    {
+                        line = next;
+                        SelectAndScrollToRow(index, next, restoreGridFocus: false);
+                        return nextItem;
+                    }
+
+                    index += direction;
+                }
+
+                return null;
+            };
+        });
+    }
+
+    private ShowImageItem? MakeOcrImageItem(SubtitleLineViewModel line)
+    {
+        var index = _ocrImageSourceHolder.GetSourceIndex(line.Id, line.StartTime, line.EndTime);
+        var bitmap = OcrSourceImage.GetCroppedBitmap(_ocrImageSourceHolder.Source, index);
+        return bitmap == null
+            ? null
+            : new ShowImageItem($"{Se.Language.Ocr.OcrImage} - #{line.Number}", bitmap, line.Text);
+    }
+
+    /// <summary>The OCR image column's cell image for a line (#17066), or null when it has none.</summary>
+    public Avalonia.Media.Imaging.Bitmap? GetOcrImage(SubtitleLineViewModel line)
+    {
+        var index = _ocrImageSourceHolder.GetSourceIndex(line.Id, line.StartTime, line.EndTime);
+        return OcrSourceImage.GetCroppedBitmap(_ocrImageSourceHolder.Source, index);
+    }
+
+    [RelayCommand]
+    private void ToggleShowColumnOcrImage()
+    {
+        Se.Settings.General.ShowColumnOcrImage = !Se.Settings.General.ShowColumnOcrImage;
+        ShowColumnOcrImage = Se.Settings.General.ShowColumnOcrImage;
+        AutoFitColumns();
+    }
+
     [RelayCommand]
     private void ToggleShowColumnLayer()
     {
@@ -16919,6 +17102,14 @@ public partial class MainViewModel :
             new(Se.Language.General.PixelWidth, true, ShowColumnPixelWidth, InitListViewAndEditBox.SubtitleGridColumnKeys.PixelWidth) { DefaultIsVisible = defaults.ShowColumnPixelWidth },
             new(Se.Language.General.Layer, true, ShowColumnLayer, InitListViewAndEditBox.SubtitleGridColumnKeys.Layer) { DefaultIsVisible = defaults.ShowColumnLayer },
         };
+
+        // The OCR image column only exists while images from the last OCR session are kept (#17066).
+        if (HasOcrImageSource)
+        {
+            var textIndex = entries.FindIndex(e => e.Keys[0] == InitListViewAndEditBox.SubtitleGridColumnKeys.Text);
+            entries.Insert(Math.Max(0, textIndex),
+                new(Se.Language.Ocr.OcrImage, true, ShowColumnOcrImage, InitListViewAndEditBox.SubtitleGridColumnKeys.OcrImage) { DefaultIsVisible = defaults.ShowColumnOcrImage });
+        }
 
         var result = await _windowService.ShowDialogAsync<GridColumnsWindow, GridColumnsViewModel>(Window, vm =>
         {
@@ -16978,6 +17169,10 @@ public partial class MainViewModel :
             case InitListViewAndEditBox.SubtitleGridColumnKeys.Forced:
                 Se.Settings.General.ShowColumnForced = isVisible;
                 ShowColumnForced = isVisible;
+                break;
+            case InitListViewAndEditBox.SubtitleGridColumnKeys.OcrImage:
+                Se.Settings.General.ShowColumnOcrImage = isVisible;
+                ShowColumnOcrImage = isVisible;
                 break;
             case InitListViewAndEditBox.SubtitleGridColumnKeys.Style:
                 Se.Settings.General.ShowColumnStyle = isVisible;
@@ -25718,6 +25913,7 @@ public partial class MainViewModel :
                     break;
                 case InitListViewAndEditBox.SubtitleGridColumnKeys.Text:
                 case InitListViewAndEditBox.SubtitleGridColumnKeys.OriginalText:
+                case InitListViewAndEditBox.SubtitleGridColumnKeys.OcrImage:
                     column.Width = new GridLength(1, GridUnitType.Star);
                     break;
             }
@@ -26694,8 +26890,7 @@ public partial class MainViewModel :
         // Drop any image source kept from a previous OCR session; the image-import branches
         // below re-populate it via the OCR window, while plain text subtitles leave it cleared
         // so spell check does not show unrelated images (#11719).
-        _ocrImageSourceHolder.Source = null;
-        _ocrImageSourceHolder.FileName = null;
+        _ocrImageSourceHolder.Clear();
 
         // Lower case: every check below compares with lower-case extensions, and DVD/Blu-ray rips
         // are often upper case (MOVIE.SUP, 00001.M2TS) - those fell through to the text formats.
@@ -27375,8 +27570,8 @@ public partial class MainViewModel :
             // Never save back over the audio file: ResetSubtitle() above cleared _converted, and
             // the loaded format (LRC) matches the selected one, so Ctrl+S (or auto-save) wrote the
             // LRC text over the .opus (#15213). Suggest a subtitle file next to it and route Save
-            // through "Save as".
-            if (isAudioFile)
+            // through "Save as". Same for a subtitle list read from a Word .doc/.docx.
+            if (isAudioFile || WordDocumentReader.IsWordDocument(fileName))
             {
                 _subtitleFileName = Path.ChangeExtension(fileName, SelectedSubtitleFormat.Extension);
                 _converted = true;
@@ -31065,6 +31260,7 @@ public partial class MainViewModel :
 
         _videoOpenTokenSource?.Cancel();
         _audioTrack = null;
+        ClearSubtitleEndPreview();
         await vp.Open(videoFileName, startPositionSeconds);
         _videoFileName = videoFileName;
         RefreshSubtitlePreview();
@@ -32352,6 +32548,7 @@ public partial class MainViewModel :
     private void VideoCloseFile()
     {
         _videoOpenTokenSource?.Cancel();
+        ClearSubtitleEndPreview();
         GetVideoPlayerControl()?.Close();
         _videoFileName = string.Empty;
         IsVideoLoaded = false;
@@ -33417,6 +33614,8 @@ public partial class MainViewModel :
         ShowAutoTranslateSelectedLines = selectedCount > 0;
         HasMultipleLinesSelected = selectedCount > 1;
         ShowColumnLayerFlyoutMenuItem = IsFormatAssa;
+        IsShowOcrImageMenuItemVisible = HasOcrImageSource && !IsSubtitleGridFlyoutHeaderVisible && selectedCount == 1;
+        IsShowOcrImageColumnMenuItemVisible = HasOcrImageSource && IsSubtitleGridFlyoutHeaderVisible;
 
         if (IsSubtitleGridFlyoutHeaderVisible)
         {
@@ -34984,6 +35183,16 @@ public partial class MainViewModel :
                         return;
                     }
 
+                    // Bare Delete/Backspace always edit text in a text input, like SE 4 - with
+                    // "allow single-letter shortcuts in text box" on, a General-scope binding such
+                    // as "Delete selection (everywhere)" on Delete removed the whole subtitle line
+                    // instead of one character (#17117). Modified chords (Shift+Delete cut, etc.)
+                    // still reach shortcuts.
+                    if (NonTypingEditKeys.Contains(key) && keyEventArgs.KeyModifiers == KeyModifiers.None)
+                    {
+                        return;
+                    }
+
                     if (!Se.Settings.Tools.AllowSingleLetterShortcutsInTextbox && !AlwaysAllowedSingleKeyShortcuts.Contains(key) && isBareKeyChord)
                     {
                         return; // allow single key shortcuts in text input if enabled in settings, or if it's not an allowed single key shortcut
@@ -36433,6 +36642,7 @@ public partial class MainViewModel :
     private void PinPlayheadTo(double targetSeconds)
     {
         CancelFrameStepPlayBlip(); // any other seek moves the cursor off the stepped-to frame
+        ClearSubtitleEndPreview(); // a seek ends the preview but, like any seek, keeps playing
         _playheadSeekTarget = targetSeconds;
         _playheadSeekTargetTs = Stopwatch.GetTimestamp();
         _playheadEstimateSeconds = targetSeconds;
@@ -36596,30 +36806,14 @@ public partial class MainViewModel :
 
                     _playStartGate.PlayingObserved();
 
-                    if (_playSelectionItem != null && mediaPlayerSeconds >= _playSelectionItem.EndSeconds)
+                    if (_subtitleEndPreview == null && _playSelectionItem != null &&
+                        mediaPlayerSeconds >= _playSelectionItem.EndSeconds)
                     {
                         var p = _playSelectionItem.GetNextSubtitle(mediaPlayerSeconds);
                         if (p == null)
                         {
-                            PauseVideoAndFreezePlayhead(vp);
-
-                            // Park on the line's last visible frame, not the exact end time: mpv renders
-                            // the sub track itself and hides the line at its end time, so an exact-end stop
-                            // shows a blank frame - or the *next* line on a shared boundary - instead of the
-                            // line that was just played (#13429).
-                            var fps = Se.Settings.General.CurrentFrameRate;
-                            var frameSeconds = fps >= 10 ? 1.0 / fps : 0.04;
-                            var stopSeconds = Math.Max(_playSelectionItem.GetCurrentStartSeconds(),
-                                _playSelectionItem.EndSeconds - frameSeconds);
-
-                            SeekVideoPlayer(vp, stopSeconds);
-                            PinPlayheadTo(stopSeconds);
-
-                            // Stopping here is not a user scrub: without this the "center also while paused"
-                            // branch below sees the play-head jump (its baseline is still where playback
-                            // started) and re-selects the line under the play-head (#13331).
-                            _pausedSelectLastSeconds = stopSeconds;
-                            ResetPlaySelection();
+                            FinishPlaySelection(vp, _playSelectionItem.GetCurrentStartSeconds(),
+                                _playSelectionItem.EndSeconds);
                         }
                         else
                         {
@@ -36666,7 +36860,7 @@ public partial class MainViewModel :
                     // the line instead of stopping there (#14167). It would also let the paused
                     // scrub-select below move the selection off the line about to be played,
                     // which resets the play selection a second way through SelectionChanged.
-                    if (!_playStartGate.IsPending(Stopwatch.GetTimestamp(), Stopwatch.Frequency))
+                    if (_subtitleEndPreview == null && !_playStartGate.IsPending(Stopwatch.GetTimestamp(), Stopwatch.Frequency))
                     {
                         ResetPlaySelection();
 
@@ -36753,6 +36947,7 @@ public partial class MainViewModel :
             // Checked here rather than from the 50 ms position timer so the blip is one frame long
             // instead of one-frame-plus-however-long-that-timer-took-to-notice.
             UpdateFrameStepPlayBlip(vp);
+            UpdateSubtitleEndPreview(vp);
 
             // Always advance the estimate: the 50 ms _positionTimer reads _playheadEstimateSeconds as
             // its source of truth (SelectCurrentSubtitleWhilePlaying, play-selection end detection, the
@@ -37776,6 +37971,7 @@ public partial class MainViewModel :
     /// </summary>
     internal void OnVideoPlayerPositionSet(double newPositionSeconds)
     {
+        ClearSubtitleEndPreview();
         if (_frameStepPlayBlipping)
         {
             // The blip started this playback and its end (which would have paused) will never
@@ -38551,6 +38747,8 @@ public partial class MainViewModel :
     private void UpdateVideoOffsetText()
     {
         IsVideoOffsetVisible = Se.Settings.General.CurrentVideoOffsetInMs != 0;
+        IsVideoOffsetButtonVisible = IsVideoOffsetVisible || Se.Settings.Appearance.ShowVideoOffsetInStatusBar;
+        VideoOffsetButtonToolTip = IsVideoOffsetVisible ? Se.Language.General.OffsetTimeCodes : Se.Language.General.SetVideoOffset;
         if (IsVideoOffsetVisible)
         {
             VideoOffsetText = TimeCodeShortDisplay.Format(Se.Settings.General.CurrentVideoOffsetInMs);

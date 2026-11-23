@@ -249,6 +249,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.DeleteSelectedLinesEverywhereCommand), Se.Language.Options.Shortcuts.DeleteSelectionEverywhere },
         { nameof(MainViewModel.RippleDeleteSelectedLinesCommand), Se.Language.Options.Shortcuts.RippleDeleteSelection },
         { nameof(MainViewModel.DuplicateSelectedLinesCommand), Se.Language.Options.Shortcuts.DuplicateSelectedLines},
+        { nameof(MainViewModel.ShowOcrImageCommand), Se.Language.Options.Shortcuts.ShowOcrImage },
         { nameof(MainViewModel.ShowAlignmentPickerCommand), Se.Language.General.Alignment},
         { nameof(MainViewModel.DoAlignmentAn1Command), string.Format(Se.Language.General.AlignmentX, "an1")},
         { nameof(MainViewModel.DoAlignmentAn2Command), string.Format(Se.Language.General.AlignmentX, "an2")},
@@ -706,6 +707,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.SpeechToTextSelectedLinesPromptForLangaugeAlwaysCommand), Se.Language.General.SpeechToTextSelectedLinesPromptAlways },
         { nameof(MainViewModel.SpeechToTextSelectedLinesPromptForLangaugeFirstTimeCommand), Se.Language.General.SpeechToTextSelectedLinesPromptFirstTime },
         { nameof(MainViewModel.PlaySelectedLinesWithoutLoopCommand), Se.Language.General.PlaySelectedLines },
+        { nameof(MainViewModel.PlaySubtitleEndCommand), string.Format(Se.Language.General.PlaySubtitleEndX, SeWaveform.NormalizeSubtitleEndPreviewMs(Se.Settings.Waveform.SubtitleEndPreviewMs)) },
         { nameof(MainViewModel.PlaySelectedLinesWithLoopCommand), Se.Language.General.PlaySelectedLinesWithLoop },
         { nameof(MainViewModel.PlaySelectedLinesAndFocusWaveformCommand), Se.Language.General.PlaySelectedLinesAndFocusWaveform },
         { nameof(MainViewModel.PlaySelectedLinesWithLoopAndFocusWaveformCommand), Se.Language.General.PlaySelectedLinesWithLoopAndFocusWaveform },
@@ -831,6 +833,9 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.DeleteSelectedLinesEverywhereCommand, nameof(vm.DeleteSelectedLinesEverywhereCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.RippleDeleteSelectedLinesCommand, nameof(vm.RippleDeleteSelectedLinesCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.DuplicateSelectedLinesCommand, nameof(vm.DuplicateSelectedLinesCommand), ShortcutCategory.SubtitleGrid);
+        // The original image of the line after OCR (#17066) - also from the text box, where the
+        // OCR'd text is being proofread.
+        AddShortcut(shortcuts, vm.ShowOcrImageCommand, nameof(vm.ShowOcrImageCommand), ShortcutCategory.SubtitleGridAndTextBox);
         // Alignment works on the selected lines regardless of where focus is, so these are active in
         // the text box too - not only in the subtitle grid (discussion #11744).
         AddShortcut(shortcuts, vm.ShowAlignmentPickerCommand, nameof(vm.ShowAlignmentPickerCommand), ShortcutCategory.SubtitleGridAndTextBox);
@@ -1282,6 +1287,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.SpeechToTextSelectedLinesPromptForLangaugeAlwaysCommand, nameof(vm.SpeechToTextSelectedLinesPromptForLangaugeAlwaysCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.SpeechToTextSelectedLinesPromptForLangaugeFirstTimeCommand, nameof(vm.SpeechToTextSelectedLinesPromptForLangaugeFirstTimeCommand), ShortcutCategory.General, ShortcutGroup.Ai);
         AddShortcut(shortcuts, vm.PlaySelectedLinesWithoutLoopCommand, nameof(vm.PlaySelectedLinesWithoutLoopCommand), ShortcutCategory.General, ShortcutGroup.Video);
+        AddShortcut(shortcuts, vm.PlaySubtitleEndCommand, nameof(vm.PlaySubtitleEndCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.PlaySelectedLinesWithLoopCommand, nameof(vm.PlaySelectedLinesWithLoopCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.PlaySelectedLinesAndFocusWaveformCommand, nameof(vm.PlaySelectedLinesAndFocusWaveformCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.PlaySelectedLinesWithLoopAndFocusWaveformCommand, nameof(vm.PlaySelectedLinesWithLoopAndFocusWaveformCommand), ShortcutCategory.General, ShortcutGroup.Video);
@@ -1528,6 +1534,7 @@ public static class ShortcutsMain
             new(nameof(vm.InverseSelectionCommand), [cmd, "Shift", "I"], ShortcutCategory.SubtitleGrid),
             new(nameof(vm.ToggleLinesItalicOrSelectedTextCommand), [cmd, "I"], ShortcutCategory.SubtitleGrid),
             new(nameof(vm.DeleteSelectedLinesCommand), ["Delete"], ShortcutCategory.SubtitleGrid),
+            new(nameof(vm.ShowOcrImageCommand), [cmd, nameof(Avalonia.Input.Key.P)], ShortcutCategory.SubtitleGridAndTextBox), // like the OCR window (#17066)
             new(nameof(vm.ShowFindCommand), [cmd, "F"], ShortcutCategory.General),
             new(nameof(vm.FindNextCommand), [nameof(Avalonia.Input.Key.F3)], ShortcutCategory.General),
             new(nameof(vm.FindPreviousCommand), ["Shift", nameof(Avalonia.Input.Key.F3)], ShortcutCategory.General),

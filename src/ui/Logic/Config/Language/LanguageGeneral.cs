@@ -473,6 +473,7 @@ public class LanguageGeneral
     public string PlayPreviousAndStop { get; set; }
     public string PlayPreviousAndLoop { get; set; }
     public string PlaySelectedLines { get; set; }
+    public string PlaySubtitleEndX { get; set; }
     public string PlaySelectedLinesWithLoop { get; set; }
     public string PlaySelectedLinesAndFocusWaveform { get; set; }
     public string PlaySelectedLinesWithLoopAndFocusWaveform { get; set; }
@@ -617,6 +618,7 @@ public class LanguageGeneral
     public string ShowTimeCodes { get; set; }
     public string ShowWpmColumn { get; set; }
     public string ShowPixelWidthColumn { get; set; }
+    public string ShowOcrImageColumn { get; set; }
     public string Shrink { get; set; }
     public string SingleMode { get; set; }
     public string TextTotalLength { get; set; }
@@ -1523,6 +1525,7 @@ public class LanguageGeneral
         PlayPreviousAndStop = "Play previous (and stop)";
         PlayPreviousAndLoop = "Play previous (and loop)";
         PlaySelectedLines = "Play selected lines";
+        PlaySubtitleEndX = "Play subtitle end ({0:#,###,##0} ms)";
         PlaySelectedLinesWithLoop = "Play selected lines with loop";
         PlaySelectedLinesAndFocusWaveform = "Play selected lines and focus waveform";
         PlaySelectedLinesWithLoopAndFocusWaveform = "Play selected lines with loop and focus waveform";
@@ -1667,6 +1670,7 @@ public class LanguageGeneral
         ShowTimeCodes = "Show time codes";
         ShowWpmColumn = "Show \"Words/min\" column";
         ShowPixelWidthColumn = "Show \"Pixel width\" column";
+        ShowOcrImageColumn = "Show \"OCR image\" column";
         Shrink = "Shrink";
         SingleMode = "Single mode";
         TextTotalLength = "Text - total length";
