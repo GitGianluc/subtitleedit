@@ -23,34 +23,10 @@ using System.Threading.Tasks;
 
 namespace Nikse.SubtitleEdit.Controls.AudioVisualizerControl;
 
-public class AudioVisualizer : Control
+public partial class AudioVisualizer : Control
 {
-    public static readonly StyledProperty<WavePeakData2?> WavePeaksProperty =
-        AvaloniaProperty.Register<AudioVisualizer, WavePeakData2?>(nameof(WavePeaks));
-
     public static readonly StyledProperty<double> StartPositionSecondsProperty =
         AvaloniaProperty.Register<AudioVisualizer, double>(nameof(StartPositionSeconds));
-
-    public static readonly StyledProperty<double> ZoomFactorProperty =
-        AvaloniaProperty.Register<AudioVisualizer, double>(nameof(ZoomFactor), 1.0);
-
-    public static readonly StyledProperty<double> VerticalZoomFactorProperty =
-        AvaloniaProperty.Register<AudioVisualizer, double>(nameof(VerticalZoomFactor), 1.0);
-
-    public static readonly StyledProperty<double> CurrentVideoPositionSecondsProperty =
-        AvaloniaProperty.Register<AudioVisualizer, double>(nameof(CurrentVideoPositionSeconds));
-
-    public static readonly StyledProperty<bool> DrawGridLinesProperty =
-        AvaloniaProperty.Register<AudioVisualizer, bool>(nameof(DrawGridLines));
-
-    public static readonly StyledProperty<bool> IsReadOnlyProperty =
-        AvaloniaProperty.Register<AudioVisualizer, bool>(nameof(IsReadOnly));
-
-    public static readonly StyledProperty<bool> InvertMouseWheelProperty =
-        AvaloniaProperty.Register<AudioVisualizer, bool>(nameof(InvertMouseWheel));
-
-    public static readonly StyledProperty<List<SubtitleLineViewModel>> AllSelectedParagraphsProperty =
-        AvaloniaProperty.Register<AudioVisualizer, List<SubtitleLineViewModel>>(nameof(AllSelectedParagraphs));
 
     public static readonly StyledProperty<Color> WaveformColorProperty =
         AvaloniaProperty.Register<AudioVisualizer, Color>(nameof(WaveformColor));
@@ -76,11 +52,8 @@ public class AudioVisualizer : Control
     public static readonly StyledProperty<Color> WaveformParagraphRightColorProperty =
         AvaloniaProperty.Register<AudioVisualizer, Color>(nameof(WaveformParagraphRightColor));
 
-    public WavePeakData2? WavePeaks
-    {
-        get => GetValue(WavePeaksProperty);
-        set => SetValue(WavePeaksProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial WavePeakData2? WavePeaks { get; set; }
 
     public double StartPositionSeconds
     {
@@ -88,47 +61,26 @@ public class AudioVisualizer : Control
         set => SetValue(StartPositionSecondsProperty, Math.Clamp(value, 0, MaxStartPositionSeconds));
     }
 
-    public double ZoomFactor
-    {
-        get => GetValue(ZoomFactorProperty);
-        set => SetValue(ZoomFactorProperty, value);
-    }
+    [GeneratedStyledProperty(DefaultValue = 1.0)]
+    public partial double ZoomFactor { get; set; }
 
-    public double VerticalZoomFactor
-    {
-        get => GetValue(VerticalZoomFactorProperty);
-        set => SetValue(VerticalZoomFactorProperty, value);
-    }
+    [GeneratedStyledProperty(DefaultValue = 1.0)]
+    public partial double VerticalZoomFactor { get; set; }
 
-    public double CurrentVideoPositionSeconds
-    {
-        get => GetValue(CurrentVideoPositionSecondsProperty);
-        set => SetValue(CurrentVideoPositionSecondsProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial double CurrentVideoPositionSeconds { get; set; }
 
-    public bool InvertMouseWheel
-    {
-        get => GetValue(InvertMouseWheelProperty);
-        set => SetValue(InvertMouseWheelProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool InvertMouseWheel { get; set; }
 
-    public bool DrawGridLines
-    {
-        get => GetValue(DrawGridLinesProperty);
-        set => SetValue(DrawGridLinesProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool DrawGridLines { get; set; }
 
-    public bool IsReadOnly
-    {
-        get => GetValue(IsReadOnlyProperty);
-        set => SetValue(IsReadOnlyProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial bool IsReadOnly { get; set; }
 
-    public List<SubtitleLineViewModel> AllSelectedParagraphs
-    {
-        get => GetValue(AllSelectedParagraphsProperty);
-        set => SetValue(AllSelectedParagraphsProperty, value);
-    }
+    [GeneratedStyledProperty]
+    public partial List<SubtitleLineViewModel> AllSelectedParagraphs { get; set; }
 
     public Color WaveformColor
     {
@@ -445,6 +397,16 @@ public class AudioVisualizer : Control
     // "center video position" mode can turn into a seek that keeps the play-head centered
     // (#12864). Hosts without a video player (or that never set this) keep plain scrolling.
     public Func<bool>? GetIsVideoPlaying { get; set; }
+
+    /// <summary>
+    /// Where the host's video's first frame sits on the timeline, for "Snap to frames" (#17149).
+    /// Per waveform: each editor window has its own video, and dialogs that never set this keep a
+    /// grid starting at 0.
+    /// </summary>
+    public Func<double>? GetFrameGridOffsetSeconds { get; set; }
+
+    private double FrameGridOffsetSeconds => FrameGrid.NormalizeOffset(GetFrameGridOffsetSeconds?.Invoke() ?? 0);
+
     private Color _waveformFancyHighColor = Colors.Orange;
 
     public Color WaveformFancyHighColor
@@ -681,6 +643,7 @@ public class AudioVisualizer : Control
     private Pen _paintLeft = new Pen(new SolidColorBrush(Color.FromArgb(60, 0, 255, 0)), 2);
     private Pen _paintRight = new Pen(new SolidColorBrush(Color.FromArgb(100, 255, 0, 0)), 2);
     private IBrush _paintText = new SolidColorBrush(WaveformColors.CurrentTextHex.FromHexToColor());
+    private IBrush _paintOriginalText = MakeOriginalTextBrush();
     private Typeface _typeface = new Typeface(UiUtil.GetDefaultFontName(), FontStyle.Normal, Se.Settings.Waveform.WaveformTextFontBold ? FontWeight.Bold : FontWeight.Normal);
     private readonly Pen _paintShotChangeParagraphStartPen = new Pen(new SolidColorBrush(Color.FromArgb(175, 0, 100, 0)), 2, dashStyle: DashStyle.Dash);
     private readonly Pen _paintShotChangeParagraphEndPen = new Pen(new SolidColorBrush(Color.FromArgb(175, 110, 10, 10)), 2, dashStyle: DashStyle.Dash);
@@ -713,7 +676,9 @@ public class AudioVisualizer : Control
     private long _lastMouseWheelScroll = -1;
     private readonly Lock _lock = new();
     public SubtitleLineViewModel? NewSelectionParagraph { get; set; }
+
     public double _newSelectionSeconds { get; set; }
+
     private SubtitleLineViewModel? _activeParagraph;
     private SubtitleLineViewModel? _activeParagraphPrevious;
     private SubtitleLineViewModel? _activeParagraphNext;
@@ -821,12 +786,14 @@ public class AudioVisualizer : Control
     public class PositionEventArgs : EventArgs
     {
         public double PositionInSeconds { get; set; }
+
         public bool IsCtrlShift { get; set; }
     }
 
     public class ContextEventArgs : EventArgs
     {
         public double PositionInSeconds { get; set; }
+
         public SubtitleLineViewModel? NewParagraph { get; set; }
     }
 
@@ -1097,6 +1064,12 @@ public class AudioVisualizer : Control
         }
 
         var point = e.GetPosition(this);
+        if (TryToggleSelection(e.KeyModifiers, point))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (!_isCtrlDown && !_isAltDown && !_isShiftDown && e.Pointer.IsPrimary)
         {
             var p = HitTestParagraph(point);
@@ -1167,6 +1140,56 @@ public class AudioVisualizer : Control
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// The modifier that adds a line to / removes it from the selection with a click on the line:
+    /// Ctrl on Windows and Linux, Cmd or Shift on macOS (#17119).
+    /// </summary>
+    internal static bool IsToggleSelectionModifier(KeyModifiers modifiers, bool isMac)
+    {
+        if (modifiers.HasFlag(KeyModifiers.Alt))
+        {
+            return false;
+        }
+
+        var shift = modifiers.HasFlag(KeyModifiers.Shift);
+        if (isMac)
+        {
+            return !modifiers.HasFlag(KeyModifiers.Control) && modifiers.HasFlag(KeyModifiers.Meta) != shift;
+        }
+
+        return modifiers.HasFlag(KeyModifiers.Control) && !shift;
+    }
+
+    /// <summary>
+    /// Whether a toggle-modifier click on <paramref name="hit"/> toggles its selection. A click on
+    /// the one selected line keeps the older meaning of these modifiers - set that line's start
+    /// (Shift) or end (Ctrl/Cmd) at the click - so it does not toggle.
+    /// </summary>
+    internal static bool ShouldToggleSelection(IReadOnlyList<SubtitleLineViewModel> selected, SubtitleLineViewModel? hit)
+    {
+        return hit != null && !(selected.Count == 1 && ReferenceEquals(selected[0], hit));
+    }
+
+    private bool TryToggleSelection(KeyModifiers modifiers, Point point)
+    {
+        if (OnToggleSelection == null || IsReadOnly || EditOriginalTimeCodes ||
+            !IsToggleSelectionModifier(modifiers, OperatingSystem.IsMacOS()))
+        {
+            return false;
+        }
+
+        var hit = HitTestParagraph(point);
+        if (!ShouldToggleSelection(AllSelectedParagraphs, hit))
+        {
+            return false;
+        }
+
+        _audioVisualizerLastScroll = 0;
+        OnToggleSelection.Invoke(this, new ParagraphEventArgs(RelativeXPositionToSeconds(point.X), hit!));
+        InvalidateVisual();
+        return true;
     }
 
     public const double MinZoomFactor = 0.1;
@@ -1477,19 +1500,9 @@ public class AudioVisualizer : Control
 
         if (isMove && isClick)
         {
-            if (_isCtrlDown && !OperatingSystem.IsMacOS() && _activeParagraph != null && OnToggleSelection != null)
-            {
-                var videoPosition = RelativeXPositionToSeconds(pos.X);
-                _audioVisualizerLastScroll = 0;
-                OnToggleSelection.Invoke(this, new ParagraphEventArgs(videoPosition, _activeParagraph));
-            }
-            else if (_isShiftDown && OperatingSystem.IsMacOS() && _activeParagraph != null && OnToggleSelection != null)
-            {
-                var videoPosition = RelativeXPositionToSeconds(pos.X);
-                _audioVisualizerLastScroll = 0;
-                OnToggleSelection.Invoke(this, new ParagraphEventArgs(videoPosition, _activeParagraph));
-            }
-            else if (OnVideoPositionChanged != null)
+            // A toggle-selection click is handled by the Tapped that follows (TryToggleSelection)
+            // and does not seek.
+            if (OnVideoPositionChanged != null && !IsToggleSelectionModifier(e.KeyModifiers, OperatingSystem.IsMacOS()))
             {
                 var videoPosition = RelativeXPositionToSeconds(e.GetPosition(this).X);
                 _audioVisualizerLastScroll = 0;
@@ -2367,14 +2380,14 @@ public class AudioVisualizer : Control
         InvalidateVisual();
     }
 
-    private static double SnapToFrame(double seconds)
+    private double SnapToFrame(double seconds)
     {
         if (!TryGetFrameDuration(out var frameDur))
         {
             return seconds;
         }
 
-        return Math.Round(seconds / frameDur, MidpointRounding.AwayFromZero) * frameDur;
+        return FrameGrid.Snap(seconds, frameDur, FrameGridOffsetSeconds);
     }
 
     /// <summary>
@@ -2388,57 +2401,59 @@ public class AudioVisualizer : Control
     /// frames' whole-ms times against the whole-ms bound keeps it on frame 101.
     /// </para>
     /// </summary>
-    private static double SnapToFrameCeil(double seconds)
+    private double SnapToFrameCeil(double seconds)
     {
         if (!TryGetFrameDuration(out var frameDur))
         {
             return seconds;
         }
 
+        var offset = FrameGridOffsetSeconds;
         var boundMs = Math.Round(seconds * TimeCode.BaseUnit, MidpointRounding.AwayFromZero);
-        var frame = Math.Ceiling(seconds / frameDur);
-        if (FrameToWholeMs(frame - 1, frameDur) >= boundMs)
+        var frame = Math.Max(0, Math.Ceiling((seconds - offset) / frameDur));
+        if (frame > 0 && FrameToWholeMs(frame - 1, frameDur, offset) >= boundMs)
         {
             frame--;
         }
-        else if (FrameToWholeMs(frame, frameDur) < boundMs)
+        else if (FrameToWholeMs(frame, frameDur, offset) < boundMs)
         {
             frame++;
         }
 
-        return frame * frameDur;
+        return frame * frameDur + offset;
     }
 
     /// <summary>
     /// Latest frame time at or before <paramref name="seconds"/>, compared in whole milliseconds -
     /// the mirror of <see cref="SnapToFrameCeil"/>.
     /// </summary>
-    private static double SnapToFrameFloor(double seconds)
+    private double SnapToFrameFloor(double seconds)
     {
         if (!TryGetFrameDuration(out var frameDur))
         {
             return seconds;
         }
 
+        var offset = FrameGridOffsetSeconds;
         var boundMs = Math.Round(seconds * TimeCode.BaseUnit, MidpointRounding.AwayFromZero);
-        var frame = Math.Floor(seconds / frameDur);
-        if (FrameToWholeMs(frame + 1, frameDur) <= boundMs)
+        var frame = Math.Floor((seconds - offset) / frameDur);
+        if (FrameToWholeMs(frame + 1, frameDur, offset) <= boundMs)
         {
             frame++;
         }
-        else if (FrameToWholeMs(frame, frameDur) > boundMs)
+        else if (FrameToWholeMs(frame, frameDur, offset) > boundMs)
         {
             frame--;
         }
 
-        return frame * frameDur;
+        return Math.Max(0, frame * frameDur + offset);
     }
 
     /// <summary>The whole-millisecond time a frame is stored at (the same rounding as
     /// <see cref="TimeSpanExtensions.FromSecondsWholeMilliseconds"/>).</summary>
-    private static double FrameToWholeMs(double frame, double frameDur)
+    private static double FrameToWholeMs(double frame, double frameDur, double offsetSeconds)
     {
-        return Math.Round(frame * frameDur * TimeCode.BaseUnit, MidpointRounding.AwayFromZero);
+        return Math.Round((frame * frameDur + offsetSeconds) * TimeCode.BaseUnit, MidpointRounding.AwayFromZero);
     }
 
     private static bool TryGetFrameDuration(out double frameDur)
@@ -4066,15 +4081,15 @@ public class AudioVisualizer : Control
     // short-lived garbage to trigger GC pauses, which show up as the cursor briefly freezing and
     // then jumping. Cache the prepared text and the shaped FormattedText; both are cleared in
     // ResetCache() when the waveform font/colors change.
-    private readonly Dictionary<(string Text, bool RightToLeft), FormattedText> _paragraphFormattedTextCache = new(512);
+    private readonly Dictionary<(string Text, bool RightToLeft, bool Original), FormattedText> _paragraphFormattedTextCache = new(512);
     private readonly Dictionary<string, (List<string> Lines, string Unwrapped, bool RightToLeft)> _paragraphTextCache = new(512);
 
     // The direction is part of the key: the same string shapes differently in the two directions
     // (see GetPreparedParagraphText), and the number/duration/CPS labels stay left to right even
     // under a right to left paragraph.
-    internal FormattedText GetCachedParagraphText(string text, bool rightToLeft = false)
+    internal FormattedText GetCachedParagraphText(string text, bool rightToLeft = false, bool original = false)
     {
-        var key = (text, rightToLeft);
+        var key = (text, rightToLeft, original);
         if (!_paragraphFormattedTextCache.TryGetValue(key, out var formatted))
         {
             if (_paragraphFormattedTextCache.Count > 8000)
@@ -4084,7 +4099,7 @@ public class AudioVisualizer : Control
 
             formatted = new FormattedText(text, CultureInfo.CurrentCulture,
                 rightToLeft ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
-                _typeface, _fontSize, _paintText);
+                _typeface, _fontSize, original ? _paintOriginalText : _paintText);
             _paragraphFormattedTextCache[key] = formatted;
         }
 
@@ -4383,26 +4398,29 @@ public class AudioVisualizer : Control
                 continue;
             }
 
-            // Draw original subtitle cues with the waveform theme at half opacity.
+            // Draw original subtitle cues with the waveform theme at half opacity. The text stays
+            // at full strength in its own color - at half it was hard to read on top of the
+            // waveform peaks (#17119); the dimmed background and edges mark it as the reference.
             using (context.PushOpacity(EditOriginalTimeCodes ? 1.0 : OriginalSubtitleOpacity))
             {
                 context.FillRectangle(_paintParagraphBackground, new Rect(left, top, right - left, height));
                 context.DrawLine(_paintLeft, new Point(left, top), new Point(left, top + height));
                 context.DrawLine(_paintRight, new Point(right - 1, top), new Point(right - 1, top + height));
-                using (context.PushClip(new Rect(left + 1, top, right - left - 3, height)))
-                {
-                    DrawParagraphText(context, cue.Text, left + 3, top);
-                }
+            }
+
+            using (context.PushClip(new Rect(left + 1, top, right - left - 3, height)))
+            {
+                DrawParagraphText(context, cue.Text, left + 3, top, original: true);
             }
         }
     }
 
-    private void DrawParagraphText(DrawingContext context, string text, double x, double y)
+    private void DrawParagraphText(DrawingContext context, string text, double x, double y, bool original = false)
     {
         var prepared = GetPreparedParagraphText(text);
         if (Se.Settings.Waveform.WaveformUnwrapText)
         {
-            var unwrapped = GetCachedParagraphText(prepared.Unwrapped, prepared.RightToLeft);
+            var unwrapped = GetCachedParagraphText(prepared.Unwrapped, prepared.RightToLeft, original);
             using (BlurText ? context.PushEffect(TextBlurEffect, new Rect(x, y, unwrapped.Width, unwrapped.Height)) : (IDisposable?)null)
             {
                 context.DrawText(unwrapped, new Point(x, y));
@@ -4417,7 +4435,7 @@ public class AudioVisualizer : Control
             double width = 0, height = 0;
             foreach (var line in prepared.Lines)
             {
-                var formattedText = GetCachedParagraphText(line, prepared.RightToLeft);
+                var formattedText = GetCachedParagraphText(line, prepared.RightToLeft, original);
                 width = Math.Max(width, formattedText.Width);
                 height += formattedText.Height;
             }
@@ -4429,7 +4447,7 @@ public class AudioVisualizer : Control
         {
             foreach (var line in prepared.Lines)
             {
-                var formattedText = GetCachedParagraphText(line, prepared.RightToLeft);
+                var formattedText = GetCachedParagraphText(line, prepared.RightToLeft, original);
                 context.DrawText(formattedText, new Point(x, y));
                 y += formattedText.Height;
             }
@@ -5766,6 +5784,13 @@ public class AudioVisualizer : Control
         return _displayMode;
     }
 
+    // Empty setting = follow the (theme's) waveform text color.
+    private static IBrush MakeOriginalTextBrush()
+    {
+        var hex = Se.Settings.Waveform.WaveformOriginalTextColor;
+        return new SolidColorBrush((string.IsNullOrEmpty(hex) ? WaveformColors.CurrentTextHex : hex).FromHexToColor());
+    }
+
     internal void ResetCache()
     {
         ResetFancyColorCaches();
@@ -5781,6 +5806,7 @@ public class AudioVisualizer : Control
         _timeLineCacheValid = false;
 
         _paintText = new SolidColorBrush(WaveformColors.CurrentTextHex.FromHexToColor());
+        _paintOriginalText = MakeOriginalTextBrush();
         _typeface = new Typeface(UiUtil.GetDefaultFontName(), FontStyle.Normal, Se.Settings.Waveform.WaveformTextFontBold ? FontWeight.Bold : FontWeight.Normal);
         _fontSize = Se.Settings.Waveform.WaveformTextFontSize;
     }

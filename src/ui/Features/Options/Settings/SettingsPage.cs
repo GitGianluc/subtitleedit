@@ -13,6 +13,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Controls;
+using Nikse.SubtitleEdit.Controls.AudioVisualizerControl;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Help.CheckForUpdates;
 using Nikse.SubtitleEdit.Features.Shared.PickLanguage;
@@ -726,6 +727,7 @@ public class SettingsPage : UserControl
             },
             MakeSeparator(),
             new SettingsItem(Se.Language.Options.Settings.ErrorBackgroundColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.ErrorColor))),
+            MakeCheckboxSetting(Se.Language.Options.Settings.ShowErrorDetailsOnHover, nameof(_vm.ShowErrorDetailsOnHover)),
         ]));
 
         sections.Add(new SettingsSection(Se.Language.General.VideoPlayer, IconNames.PlayBox, "#a78bfa",
@@ -857,6 +859,9 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Waveform.ShowOriginalSubtitle, nameof(_vm.WaveformShowOriginalSubtitle)),
             MakeCheckboxSetting(Se.Language.Waveform.ShowTimelineTracks, nameof(_vm.WaveformShowTimelineTracks)),
             MakeCheckboxSetting(Se.Language.Waveform.TimelineShowThumbnails, nameof(_vm.WaveformTimelineShowThumbnails)),
+            new SettingsItem(Se.Language.Options.Settings.TimelineTrackFontSize, () => UiUtil.MakeNumericUpDownInt(
+                TimelineTracks.MinFontSize, TimelineTracks.MaxFontSize, TimelineTracks.DefaultFontSize, 120, _vm, nameof(_vm.TimelineTrackFontSize))),
+            new SettingsItem(Se.Language.Options.Settings.TimelineTrackBarColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.TimelineTrackBarColor))),
 
             new SettingsItem(Se.Language.Options.Settings.WaveformSingleClickAction, () => new ComboBox
             {
@@ -939,6 +944,7 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformTextFontBold, nameof(_vm.WaveformTextFontBold)),
             new SettingsItem(string.Empty, () => UiUtil.MakeButton(Se.Language.Options.Settings.WaveformColorThemesDotDotDot, _vm.OpenWaveformThemesCommand)),
             new SettingsItem(Se.Language.Options.Settings.WaveformTextColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformTextColor))),
+            new SettingsItem(Se.Language.Options.Settings.WaveformOriginalTextColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformOriginalTextColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformParagraphBackgroundColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformParagraphBackgroundColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformBackgroundColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformBackgroundColor))),
@@ -1037,6 +1043,11 @@ public class SettingsPage : UserControl
             {
                 IsSwitch = true,
                 TrailingFactory = () => UiUtil.MakeButton(Se.Language.General.Edit, _vm.EditDoNotBreakAfterListCommand),
+            },
+            new SettingsItem(Se.Language.Options.Settings.UseTranslationPostProcessDictionary, () => EditorChrome.MakeSwitch(nameof(_vm.ShowPostProcessDictionary), null, _vm))
+            {
+                IsSwitch = true,
+                TrailingFactory = () => UiUtil.MakeButton(Se.Language.Translate.PostProcessEditDictionary, _vm.EditPostProcessDictionaryCommand),
             },
             new SettingsItem(Se.Language.Options.Settings.SplitOddLinesAction, () => new ComboBox
             {

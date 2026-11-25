@@ -19,6 +19,7 @@ using Nikse.SubtitleEdit.Features.Help.CheckForUpdates;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Options.CustomErrorRules;
 using Nikse.SubtitleEdit.Features.Options.DoNotBreakAfterList;
+using Nikse.SubtitleEdit.Features.Options.WordLists;
 using Nikse.SubtitleEdit.Features.Options.Settings.MinGapCalculate;
 using Nikse.SubtitleEdit.Features.Options.Settings.SyntaxColorTooWideSettings;
 using Nikse.SubtitleEdit.Features.Tools.BeautifyTimeCodes.Profile;
@@ -88,6 +89,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _autoBreakPreferBottomHeavy;
     [ObservableProperty] private int _autoBreakPreferBottomPercent;
     [ObservableProperty] private bool _useNoLineBreakAfter;
+    [ObservableProperty] private bool _showPostProcessDictionary;
 
     // "Color text if more than N lines" must track the live "Max number of lines"
     // value instead of a hardcoded "2" (#12028), including while typing (nullable/
@@ -287,6 +289,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _colorOverlap;
     [ObservableProperty] private bool _colorGapTooShort;
     [ObservableProperty] private bool _colorGapInRange;
+    [ObservableProperty] private bool _showErrorDetailsOnHover;
     [ObservableProperty] private int? _gapRangeMinMs;
     [ObservableProperty] private int? _gapRangeMaxMs;
     [ObservableProperty] private int? _gapRangeMinFrames;
@@ -354,9 +357,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private int _waveformTextFontSize;
     [ObservableProperty] private bool _waveformTextFontBold;
     [ObservableProperty] private Color _waveformTextColor;
+    [ObservableProperty] private Color _waveformOriginalTextColor;
     [ObservableProperty] private Color _waveformColor;
     [ObservableProperty] private Color _waveformBackgroundColor;
     [ObservableProperty] private Color _waveformParagraphBackgroundColor;
+    [ObservableProperty] private Color _timelineTrackBarColor;
+    [ObservableProperty] private int _timelineTrackFontSize;
     [ObservableProperty] private Color _waveformSelectedColor;
     [ObservableProperty] private Color _waveformParagraphSelectedBackgroundColor;
     [ObservableProperty] private Color _waveformCursorColor;
@@ -509,14 +515,16 @@ public partial class SettingsViewModel : ObservableObject
 
     /// <summary>
     /// True once an import has replaced (and saved) the settings. They are live from then on even
-    /// if the dialog is cancelled, so the main window still has to apply them (#15944).
+    /// if the dialog is cancelled, so the main window still has to apply them (#15944). Unlike
+    /// <see cref="SettingsReplaced"/> this stays true after an Apply: it only tells the main window
+    /// to compare the settings at close, and that comparison skips whatever Apply already applied.
     /// </summary>
     public bool SettingsImported { get; private set; }
 
     /// <summary>
-    /// True once an import or a reset has replaced the settings wholesale. The main window then
-    /// applies the layout sizes and the waveform zoom *from* the settings instead of carrying its
-    /// current on-screen state over them, which is what a plain OK does (#16213).
+    /// True while an import or reset has replaced settings that still need to be applied.
+    /// The main window then restores the saved layout and waveform zoom (#16213). Apply consumes
+    /// it, so a later Apply or OK keeps the on-screen panel sizes again.
     /// </summary>
     public bool SettingsReplaced { get; private set; }
 
@@ -882,6 +890,7 @@ public partial class SettingsViewModel : ObservableObject
         AutoBreakPreferBottomHeavy = Se.Settings.Tools.AutoBreakPreferBottomHeavy;
         AutoBreakPreferBottomPercent = (int)Math.Round(Se.Settings.Tools.AutoBreakPreferBottomPercent, MidpointRounding.AwayFromZero);
         UseNoLineBreakAfter = Se.Settings.Tools.UseNoLineBreakAfter;
+        ShowPostProcessDictionary = Se.Settings.AutoTranslate.ShowPostProcessDictionary;
         DialogStyle = DialogStyles.FirstOrDefault(p => p.Code == general.DialogStyle) ?? DialogStyles.First();
         ContinuationStyle = ContinuationStyles.FirstOrDefault(p => p.Code == general.ContinuationStyle) ?? ContinuationStyles.First();
         IsEditCustomContinuationStyleVisible = ContinuationStyle?.Code == nameof(Core.Enums.ContinuationStyle.Custom);
@@ -1146,9 +1155,16 @@ public partial class SettingsViewModel : ObservableObject
         WaveformTextFontSize = Se.Settings.Waveform.WaveformTextFontSize;
         WaveformTextFontBold = Se.Settings.Waveform.WaveformTextFontBold;
         WaveformTextColor = Se.Settings.Waveform.WaveformTextColor.FromHexToColor();
+        WaveformOriginalTextColor = string.IsNullOrEmpty(Se.Settings.Waveform.WaveformOriginalTextColor)
+            ? WaveformTextColor
+            : Se.Settings.Waveform.WaveformOriginalTextColor.FromHexToColor();
         WaveformColor = Se.Settings.Waveform.WaveformColor.FromHexToColor();
         WaveformBackgroundColor = Se.Settings.Waveform.WaveformBackgroundColor.FromHexToColor();
         WaveformParagraphBackgroundColor = Se.Settings.Waveform.ParagraphBackground.FromHexToColor();
+        TimelineTrackBarColor = string.IsNullOrEmpty(Se.Settings.Waveform.TimelineTrackBarColor)
+            ? WaveformParagraphBackgroundColor
+            : Se.Settings.Waveform.TimelineTrackBarColor.FromHexToColor();
+        TimelineTrackFontSize = Se.Settings.Waveform.TimelineTrackFontSize;
         WaveformSelectedColor = Se.Settings.Waveform.WaveformSelectedColor.FromHexToColor();
         WaveformParagraphSelectedBackgroundColor = Se.Settings.Waveform.ParagraphSelectedBackground.FromHexToColor();
         WaveformCursorColor = Se.Settings.Waveform.WaveformCursorColor.FromHexToColor();
@@ -1202,6 +1218,7 @@ public partial class SettingsViewModel : ObservableObject
         ColorOverlap = general.ColorTimeCodeOverlap;
         ColorGapTooShort = general.ColorGapTooShort;
         ColorGapInRange = general.ColorGapInRange;
+        ShowErrorDetailsOnHover = general.ShowErrorDetailsOnHover;
         GapRangeMinMs = general.GapRangeMin.Milliseconds;
         GapRangeMaxMs = general.GapRangeMax.Milliseconds;
         GapRangeMinFrames = general.GapRangeMin.Frames;
@@ -1833,6 +1850,7 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Tools.AutoBreakPreferBottomHeavy = AutoBreakPreferBottomHeavy;
         Se.Settings.Tools.AutoBreakPreferBottomPercent = AutoBreakPreferBottomPercent;
         Se.Settings.Tools.UseNoLineBreakAfter = UseNoLineBreakAfter;
+        Se.Settings.AutoTranslate.ShowPostProcessDictionary = ShowPostProcessDictionary;
         general.DialogStyle = DialogStyle.Code;
         general.ContinuationStyle = ContinuationStyle.Code;
         general.CpsLineLengthStrategy = CpsLineLengthStrategy.Code;
@@ -2061,9 +2079,18 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Waveform.WaveformTextFontSize = WaveformTextFontSize;
         Se.Settings.Waveform.WaveformTextFontBold = WaveformTextFontBold;
         Se.Settings.Waveform.WaveformTextColor = WaveformTextColor.FromColorToHex();
+        // Same as the text color = keep following it (and the UI theme's waveform text color).
+        Se.Settings.Waveform.WaveformOriginalTextColor = WaveformOriginalTextColor == WaveformTextColor
+            ? string.Empty
+            : WaveformOriginalTextColor.FromColorToHex();
         Se.Settings.Waveform.WaveformColor = WaveformColor.FromColorToHex();
         Se.Settings.Waveform.WaveformBackgroundColor = WaveformBackgroundColor.FromColorToHex();
         Se.Settings.Waveform.ParagraphBackground = WaveformParagraphBackgroundColor.FromColorToHex();
+        // Same as the paragraph color = keep following it (and the UI theme's palette).
+        Se.Settings.Waveform.TimelineTrackBarColor = TimelineTrackBarColor == WaveformParagraphBackgroundColor
+            ? string.Empty
+            : TimelineTrackBarColor.FromColorToHex();
+        Se.Settings.Waveform.TimelineTrackFontSize = TimelineTrackFontSize;
         Se.Settings.Waveform.ParagraphSelectedBackground = WaveformParagraphSelectedBackgroundColor.FromColorToHex();
         Se.Settings.Waveform.WaveformSelectedColor = WaveformSelectedColor.FromColorToHex();
         Se.Settings.Waveform.WaveformCursorColor = WaveformCursorColor.FromColorToHex();
@@ -2113,6 +2140,7 @@ public partial class SettingsViewModel : ObservableObject
         general.ColorTimeCodeOverlap = ColorOverlap;
         general.ColorGapTooShort = ColorGapTooShort;
         general.ColorGapInRange = ColorGapInRange;
+        general.ShowErrorDetailsOnHover = ShowErrorDetailsOnHover;
         general.GapRangeMin.Milliseconds = GapRangeMinMs ?? general.GapRangeMin.Milliseconds;
         general.GapRangeMax.Milliseconds = GapRangeMaxMs ?? general.GapRangeMax.Milliseconds;
         general.GapRangeMin.Frames = GapRangeMinFrames ?? general.GapRangeMin.Frames;
@@ -2561,6 +2589,26 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task EditPostProcessDictionary()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var target = Se.Settings.AutoTranslate.AutoTranslateLastTarget;
+        var source = Se.Settings.AutoTranslate.AutoTranslateLastSource;
+        await _windowService.ShowDialogAsync<TranslationDictionaryWindow, TranslationDictionaryViewModel>(Window,
+            vm => vm.Initialize(NormalizeLanguageCode(target), NormalizeLanguageCode(source)));
+    }
+
+    /// <summary>"pt-BR", "zh_CN", "en-US" to the dictionary's codes; null when unknown.</summary>
+    private static string? NormalizeLanguageCode(string? code) => string.IsNullOrWhiteSpace(code)
+        ? null
+        : Nikse.SubtitleEdit.UiLogic.Translate.TranslationPostProcessDictionary.GetLanguage(
+            new Nikse.SubtitleEdit.UiLogic.Translate.TranslationPair(code, code, code));
+
+    [RelayCommand]
     private async Task EditDoNotBreakAfterList()
     {
         if (Window == null)
@@ -2640,6 +2688,24 @@ public partial class SettingsViewModel : ObservableObject
         if (result.OkPressed)
         {
             _videoControlsItems = result.ResultItems;
+        }
+    }
+
+    partial void OnWaveformTextColorChanged(Color oldValue, Color newValue)
+    {
+        // An original text color that was following the text color keeps following it.
+        if (WaveformOriginalTextColor == oldValue)
+        {
+            WaveformOriginalTextColor = newValue;
+        }
+    }
+
+    partial void OnWaveformParagraphBackgroundColorChanged(Color oldValue, Color newValue)
+    {
+        // A bar color that was following the paragraph color keeps following it.
+        if (TimelineTrackBarColor == oldValue)
+        {
+            TimelineTrackBarColor = newValue;
         }
     }
 
@@ -3193,6 +3259,7 @@ public partial class SettingsViewModel : ObservableObject
                 Se.Settings.General.GapRangeMin = g.GapRangeMin;
                 Se.Settings.General.GapRangeMax = g.GapRangeMax;
                 Se.Settings.General.ErrorColor = g.ErrorColor;
+                Se.Settings.General.ShowErrorDetailsOnHover = g.ShowErrorDetailsOnHover;
                 Se.Settings.General.ColorCustomErrorRules = g.ColorCustomErrorRules; // the rules themselves are user data and stay
             }
         }
@@ -3253,7 +3320,8 @@ public partial class SettingsViewModel : ObservableObject
         }
 
         await FileTypeAssociationsManager.SaveFileTypeAssociationsAsync(FileTypeAssociations, Window);
-        _mainViewModel?.ApplySettings();
+        _mainViewModel?.ApplySettings(SettingsReplaced);
+        SettingsReplaced = false;
 
         // Everything up to here is now applied, so this is the baseline the OK press must be
         // compared against - without it OK re-applies every change this Apply already made and

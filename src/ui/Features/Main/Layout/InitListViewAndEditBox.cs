@@ -270,11 +270,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.StartTimeBackgroundBrush)),
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.StartTimeBackgroundBrush), SubtitleGridErrorCell.StartTime);
                 var textBlock = new TextBlock
                 {
                     VerticalAlignment = VerticalAlignment.Center,
@@ -301,11 +297,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.EndTimeBackgroundBrush)),
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.EndTimeBackgroundBrush), SubtitleGridErrorCell.EndTime);
                 var textBlock = new TextBlock
                 {
                     VerticalAlignment = VerticalAlignment.Center,
@@ -334,11 +326,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.DurationBackgroundBrush))
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.DurationBackgroundBrush), SubtitleGridErrorCell.Duration);
 
                 var textBlock = new TextBlock
                 {
@@ -482,11 +470,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.TextBackgroundBrush))
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.TextBackgroundBrush), SubtitleGridErrorCell.Text);
 
                 var textBlock = new TextBlock
                 {
@@ -618,11 +602,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.GapBackgroundBrush)),
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.GapBackgroundBrush), SubtitleGridErrorCell.Gap);
 
                 var textBlock = new TextBlock
                 {
@@ -701,11 +681,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.CpsBackgroundBrush))
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.CpsBackgroundBrush), SubtitleGridErrorCell.Cps);
 
                 var textBlock = new TextBlock
                 {
@@ -734,11 +710,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(nameof(SubtitleLineViewModel.WpmBackgroundBrush))
-                };
+                var border = MakeErrorCell(nameof(SubtitleLineViewModel.WpmBackgroundBrush), SubtitleGridErrorCell.Wpm);
 
                 var textBlock = new TextBlock
                 {
@@ -2031,6 +2003,11 @@ public static partial class InitListViewAndEditBox
         pasteMenuItem.Command = vm.TextBoxPasteCommand;
         flyoutTextBox.Items.Add(pasteMenuItem);
 
+        // Paste text copied from a PDF without its line breaks, then auto-break (#17137).
+        var pasteAndAutoBreakMenuItem = new MenuItem { Header = Se.Language.General.PasteAndAutoBreak };
+        pasteAndAutoBreakMenuItem.Command = vm.TextBoxPasteAndAutoBreakCommand;
+        flyoutTextBox.Items.Add(pasteAndAutoBreakMenuItem);
+
         flyoutTextBox.Items.Add(new Separator());
 
         // Keep the SE4 order here: "at cursor/video position" first, then "at cursor position".
@@ -2316,7 +2293,7 @@ public static partial class InitListViewAndEditBox
 
         if (Se.Settings.Appearance.TextBoxShowButtonColor)
         {
-            var colorButton = UiUtil.MakeButton(vm.ShowColorPickerCommand, IconNames.Palette, Se.Language.Main.ColorHint);
+            var colorButton = UiUtil.MakeButton(vm.ShowColorPickerOrSelectedTextCommand, IconNames.Palette, Se.Language.Main.ColorHint);
             buttonPanel.Children.Add(colorButton);
         }
 
@@ -2412,6 +2389,39 @@ public static partial class InitListViewAndEditBox
     // Background for a grid cell tinted with the error color. The row's IsSelected goes along
     // so a selected row can show a stronger red - the faint default tint turns gray on top of
     // the selection color, hiding the error on the very line being fixed.
+    /// <summary>
+    /// A cell border tinted by <paramref name="brushProperty"/> that, on hover, explains why it is
+    /// tinted (#17188). The text is built only when the tooltip is about to open - never per row
+    /// bind - and the tooltip is cancelled for clean cells or when the setting is off.
+    /// </summary>
+    internal static Border MakeErrorCell(string brushProperty, SubtitleGridErrorCell cell)
+    {
+        var border = new Border
+        {
+            Padding = new Thickness(4, 2),
+            [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(brushProperty),
+        };
+
+        // A non-null placeholder, or the tooltip service never raises the opening event.
+        ToolTip.SetTip(border, string.Empty);
+        ToolTip.AddToolTipOpeningHandler(border, (_, e) =>
+        {
+            var details = Se.Settings.General.ShowErrorDetailsOnHover && border.DataContext is SubtitleLineViewModel line
+                ? line.GetCellErrorDetails(cell)
+                : string.Empty;
+
+            if (details.Length == 0)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            ToolTip.SetTip(border, details);
+        });
+
+        return border;
+    }
+
     private static MultiBinding MakeErrorCellBackgroundBinding(string brushProperty)
     {
         return new MultiBinding
@@ -2448,11 +2458,7 @@ public static partial class InitListViewAndEditBox
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
             CellTemplate = new FuncDataTemplate<SubtitleLineViewModel>((value, nameScope) =>
             {
-                var border = new Border
-                {
-                    Padding = new Thickness(4, 2),
-                    [!Border.BackgroundProperty] = MakeErrorCellBackgroundBinding(brushProperty),
-                };
+                var border = MakeErrorCell(brushProperty, brushProperty == nameof(SubtitleLineViewModel.ShotInBackgroundBrush) ? SubtitleGridErrorCell.ShotIn : SubtitleGridErrorCell.ShotOut);
 
                 border.Child = new TextBlock
                 {
@@ -2563,7 +2569,7 @@ public static partial class InitListViewAndEditBox
     {
         vm.EditTextBox.ContentControl.RemoveControlFromParent();
 
-        var textBox = MakeSubtitleTextBox();
+        var textBox = MakeSubtitleTextBox(vm);
         textBox[!TextBox.TextProperty] = new Binding(nameof(vm.SelectedSubtitle) + "." + nameof(SubtitleLineViewModel.Text))
         {
             Mode = BindingMode.TwoWay
@@ -2990,7 +2996,7 @@ public static partial class InitListViewAndEditBox
         return bottom + timeControlsPanel.Margin.Top + timeControlsPanel.Margin.Bottom + EditGridMargin * 2;
     }
 
-    private static TextBox MakeSubtitleTextBox()
+    private static TextBox MakeSubtitleTextBox(MainViewModel vm)
     {
         var appearance = Se.Settings.Appearance;
 
@@ -3014,8 +3020,9 @@ public static partial class InitListViewAndEditBox
         ScrollViewer.SetAllowAutoHide(textBox, false);
 
         // Pasted text goes straight into the paragraph via the two-way binding, so its line
-        // breaks must be SE's own - see TextBoxPasteNormalizer (#13591).
-        TextBoxPasteNormalizer.NormalizeLineBreaksOnPaste(textBox);
+        // breaks must be SE's own - see TextBoxPasteNormalizer (#13591). Text wrapped by its
+        // source (a PDF) is joined and auto-broken again (#17137).
+        TextBoxPasteNormalizer.NormalizeLineBreaksOnPaste(textBox, vm.GetDetectedLanguageCode);
 
         // Drag a selection out of one edit box and drop it into the other, or move it within
         // the same box - as SE4's edit boxes allowed (#14534).
@@ -3040,7 +3047,7 @@ public static partial class InitListViewAndEditBox
 
     private static Avalonia.Controls.Control MakeTextBoxOriginal(MainViewModel vm)
     {
-        var textBox = MakeSubtitleTextBox();
+        var textBox = MakeSubtitleTextBox(vm);
         textBox[!TextBox.TextProperty] = new Binding(nameof(vm.SelectedSubtitle) + "." + nameof(SubtitleLineViewModel.OriginalText))
         {
             Mode = BindingMode.TwoWay

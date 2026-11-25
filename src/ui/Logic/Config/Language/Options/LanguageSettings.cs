@@ -97,6 +97,7 @@ public class LanguageSettings
     public string AutoBreakPreferBottomHeavy { get; set; }
     public string AutoBreakPreferBottomPercent { get; set; }
     public string UseDoNotBreakAfterList { get; set; }
+    public string UseTranslationPostProcessDictionary { get; set; }
     public string DoNotBreakAfterListRegionHint { get; set; }
     public string NewEmptyDefaultMs { get; set; }
     public string TimeCodeUpDownStepMs { get; set; }
@@ -133,6 +134,7 @@ public class LanguageSettings
     public string ColorOverlap { get; set; }
     public string ColorGapTooShort { get; set; }
     public string ColorGapInRange { get; set; }
+    public string ShowErrorDetailsOnHover { get; set; }
     public string GapRangeMs { get; set; }
     public string GapRangeFrames { get; set; }
     public string ErrorBackgroundColor { get; set; }
@@ -176,6 +178,9 @@ public class LanguageSettings
     public string WaveformTextFontSize { get; set; }
     public string WaveformTextFontBold { get; set; }
     public string WaveformTextColor { get; set; }
+    public string WaveformOriginalTextColor { get; set; }
+    public string TimelineTrackFontSize { get; set; }
+    public string TimelineTrackBarColor { get; set; }
     public string WaveformColor { get; set; }
     public string WaveformBackgroundColor { get; set; }
     public string WaveformSelectedColor { get; set; }
@@ -500,6 +505,7 @@ public class LanguageSettings
         AutoBreakPreferBottomHeavy = "Auto-break prefer bottom heavy";
         AutoBreakPreferBottomPercent = "Auto-break bottom heavy percentage";
         UseDoNotBreakAfterList = "Use do-not-break-after list";
+        UseTranslationPostProcessDictionary = "Auto-translate: show post-processing dictionary";
         DoNotBreakAfterListRegionHint = "Each list is used for all regions of its language, for example the Portuguese list for both Portugal (pt-PT) and Brazil (pt-BR).";
         NewEmptyDefaultMs = "Default new subtitle duration (ms)";
         TimeCodeUpDownStepMs = "Time up/down increment (ms)";
@@ -536,6 +542,7 @@ public class LanguageSettings
         ColorOverlap = "Color time code overlap";
         ColorGapTooShort = "Color if gap is too short";
         ColorGapInRange = "Color if gap is in range";
+        ShowErrorDetailsOnHover = "Show error details on mouse hover";
         GapRangeMs = "Gap range (ms)";
         GapRangeFrames = "Gap range (frames)";
         ErrorBackgroundColor = "Error background color";
@@ -580,6 +587,9 @@ public class LanguageSettings
         WaveformTextFontSize = "Waveform text font size";
         WaveformTextFontBold = "Waveform text font bold";
         WaveformTextColor = "Waveform text color";
+        WaveformOriginalTextColor = "Waveform original text color";
+        TimelineTrackFontSize = "Timeline track font size";
+        TimelineTrackBarColor = "Timeline track bar color";
         WaveformColor = "Waveform color";
         WaveformBackgroundColor = "Waveform background color";
         WaveformSelectedColor = "Waveform selected color";
